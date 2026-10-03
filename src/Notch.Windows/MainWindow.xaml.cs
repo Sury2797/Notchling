@@ -1,0 +1,197 @@
+using Microsoft.UI.Composition;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Notch.Core;
+using Notch.Windows.Interop;
+using Notch.Windows.ViewModels;
+using Notch.Windows.Views;
+using System.ComponentModel;
+using System.Numerics;
+using Windows.System;
+using Windows.UI.ViewManagement;
+
+namespace Notch.Windows;
+
+public sealed partial class MainWindow : Window
+{
+    private readonly MainViewModel _vm;
+    private readonly OverlayHost _host;
+    private readonly TrayService _tray;
+    private FeaturedToolsView? _featured;
+    private UtilityToolsView? _utilities;
+    private readonly Dictionary<ModuleId, Button> _buttons = [];
+    private readonly DispatcherTimer _openDelay = new() { Interval = TimeSpan.FromMilliseconds(180) };
+    private readonly DispatcherTimer _closeDelay = new() { Interval = TimeSpan.FromMilliseconds(700) };
+    private readonly DispatcherTimer _switchDelay = new() { Interval = TimeSpan.FromMilliseconds(100) };
+    private readonly UISettings _systemUi = new();
+    private ModuleId? _pendingModule;
+    private bool _quitting;
+    private bool _started;
+    private bool _active;
+    public MainWindow()
+    {
+        InitializeComponent();
+        _host = new(this);
+        _vm = new(DispatcherQueue) { WindowHandle = _host.Handle };
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "Notch.ico"));
+        _tray = new(_host.Handle, Toggle, OpenSettings, () => _ = QuitAsync());
+        _host.ToggleRequested += (_, _) => Toggle();
+        _host.ShowRequested += (_, _) => Open();
+        _host.DisplayChanged += (_, _) => RenderShell(false);
+        _vm.Overlay.Changed += (_, _) => RenderShell(true);
+        _vm.PropertyChanged += OnViewModelChanged;
+        AppWindow.Closing += (_, args) => { if (!_quitting && _tray.IsAvailable) { args.Cancel = true; _host.Hide(); } };
+        Activated += (_, args) =>
+        {
+            _active = args.WindowActivationState != WindowActivationState.Deactivated;
+            if (!_active) { _closeDelay.Stop(); _closeDelay.Start(); }
+        };
+        Closed += async (_, _) => { if (!_quitting) await QuitAsync(); };
+        _openDelay.Tick += (_, _) => { _openDelay.Stop(); Open(); };
+        _closeDelay.Tick += (_, _) => { _closeDelay.Stop(); if (!_vm.Preferences.Pinned && !EditorHasFocus()) _vm.Overlay.Collapse(); };
+        _switchDelay.Tick += (_, _) =>
+        {
+            _switchDelay.Stop();
+            if (_pendingModule is { } module && _vm.Preferences.HoverNavigation && !EditorHasFocus()) _vm.SelectModule(module);
+        };
+        BuildToolbar(); RenderShell(false);
+        RootGrid.ContextFlyout = MakeContextMenu();
+    }
+    public async void Start()
+    {
+        if (_started) return; _started = true;
+        await _vm.InitializeAsync(); RenderShell(false);
+        if (!_host.HotkeyRegistered) _vm.ShowError("Ctrl+Shift+Space is already registered by another app. Open Notch from the tray.");
+        if (!_tray.IsAvailable) { _vm.ShowError("The tray icon is unavailable. Right-click the notch for settings or Quit."); _vm.Overlay.Expand(ModuleId.Home); }
+    }
+    private MenuFlyout MakeContextMenu()
+    {
+        var menu = new MenuFlyout();
+        void Item(string name, Action action) { var item = new MenuFlyoutItem { Text = name }; item.Click += (_, _) => action(); menu.Items.Add(item); }
+        Item("Open notch", Open); Item("Settings", OpenSettings); Item("Hide notch", _host.Hide); menu.Items.Add(new MenuFlyoutSeparator()); Item("Quit Notch", () => _ = QuitAsync()); return menu;
+    }
+    private void BuildToolbar()
+    {
+        foreach (var module in ModuleCatalog.Toolbar)
+        {
+            var definition = ModuleCatalog.Get(module);
+            NavigationButtons.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+            var button = new Button
+            {
+                Content = new FontIcon { Glyph = definition.Glyph, FontSize = 16 },
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new(0), CornerRadius = new(20),
+                Padding = new(0), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
+                UseSystemFocusVisuals = true,
+            };
+            AutomationProperties.SetName(button, definition.Title); ToolTipService.SetToolTip(button, definition.Title);
+            button.Click += (_, _) => { _vm.SelectModule(module); Activate(); };
+            button.PointerEntered += (_, _) => { _pendingModule = module; _switchDelay.Stop(); _switchDelay.Start(); };
+            button.PointerExited += (_, _) => { if (_pendingModule == module) { _pendingModule = null; _switchDelay.Stop(); } };
+            Grid.SetColumn(button, _buttons.Count); _buttons.Add(module, button); NavigationButtons.Children.Add(button);
+        }
+    }
+    private void OnViewModelChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        if (_quitting) return;
+        if (args.PropertyName is nameof(MainViewModel.Preferences) or nameof(MainViewModel.IsDemo) or nameof(MainViewModel.IsReady)) RenderShell(false);
+        else if (args.PropertyName is nameof(MainViewModel.Media) or nameof(MainViewModel.FocusTime)) CompactTitle.Text = _vm.Media?.Title ?? (_vm.FocusRunning ? "Focus · " + _vm.FocusTime : "Notch");
+        else if (args.PropertyName == nameof(MainViewModel.Error)) { ErrorBar.Message = _vm.Error; ErrorBar.IsOpen = !string.IsNullOrWhiteSpace(_vm.Error); }
+        else if (args.PropertyName == nameof(MainViewModel.Status)) StatusText.Text = _vm.Status;
+    }
+    private void RenderShell(bool animate)
+    {
+        if (_quitting) return;
+        var mode = _vm.Overlay.Mode;
+        var expanded = mode == OverlayMode.Expanded;
+        var activity = mode == OverlayMode.Activity;
+        var definition = ModuleCatalog.Get(_vm.SelectedModule);
+        var requestedWidth = activity ? 460 : definition.Width;
+        var requestedHeight = activity ? 144 : definition.Height + 22;
+        _host.ResizeAndPlace(requestedWidth, requestedHeight, expanded || activity, _vm.Preferences.Pinned, _vm.Preferences.ActiveMonitor, showToolbar: expanded);
+        BodyRow.Height = new(_host.LogicalPanelHeight);
+        GapRow.Height = new(expanded ? 10 : 0); ToolbarRow.Height = new(expanded ? 48 : 0); TailRow.Height = new(expanded ? 12 : 0);
+        PanelSurface.Width = _host.LogicalWidth;
+        CompactButton.Visibility = !expanded && !activity ? Visibility.Visible : Visibility.Collapsed;
+        ExpandedContent.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        ActivityContent.Visibility = activity ? Visibility.Visible : Visibility.Collapsed;
+        ToolbarGrid.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        var toolbarWidth = Math.Min(720, _host.LogicalWidth);
+        ToolbarGrid.Width = toolbarWidth; NavigationColumn.Width = new(Math.Max(0, toolbarWidth - 112));
+        ToolContent.Content = !expanded ? null : _vm.SelectedModule is ModuleId.Home or ModuleId.Media or ModuleId.Revenue or ModuleId.Analytics or ModuleId.Coding or ModuleId.Calendar or ModuleId.Weather or ModuleId.Focus
+            ? _featured ??= new(_vm) : _utilities ??= new(_vm);
+        ToolContent.IsEnabled = _vm.IsReady;
+        PinButton.IsEnabled = _vm.IsReady;
+        foreach (var (id, button) in _buttons) button.Background = new SolidColorBrush(id == _vm.SelectedModule ? Microsoft.UI.ColorHelper.FromArgb(255, 82, 82, 82) : Microsoft.UI.Colors.Transparent);
+        PinButton.Background = new SolidColorBrush(_vm.Preferences.Pinned ? Microsoft.UI.ColorHelper.FromArgb(255, 82, 82, 82) : Microsoft.UI.Colors.Transparent);
+        StatusText.Text = _vm.IsDemo ? "DEMO — sample data. Controls do not represent connected accounts." : _vm.Status;
+        ErrorBar.Message = _vm.Error; ErrorBar.IsOpen = !string.IsNullOrWhiteSpace(_vm.Error);
+        CompactTitle.Text = _vm.Media?.Title ?? (_vm.FocusRunning ? "Focus · " + _vm.FocusTime : "Notch");
+        if (activity && _vm.Overlay.Activity is { } notification)
+        {
+            ActivitySource.Text = notification.Source.ToUpperInvariant(); ActivityTitle.Text = notification.Title; ActivityDetail.Text = notification.Detail ?? "";
+            ActivityGlyph.Glyph = notification.Kind switch { ActivityKind.Focus => "\uE916", ActivityKind.Meeting => "\uE787", ActivityKind.Sale => "\uE8C7", _ => "\uE8EA" };
+        }
+        if (animate && expanded && !_vm.Preferences.ReducedMotion && _systemUi.AnimationsEnabled) AnimateContent();
+        _host.Show();
+    }
+    private void AnimateContent()
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(ToolContent);
+        var compositor = visual.Compositor;
+        var easing = compositor.CreateCubicBezierEasingFunction(new(.2f, .7f), new(.2f, 1));
+        var opacity = compositor.CreateScalarKeyFrameAnimation(); opacity.InsertKeyFrame(0, .35f); opacity.InsertKeyFrame(1, 1, easing); opacity.Duration = TimeSpan.FromMilliseconds(160);
+        var scale = compositor.CreateVector3KeyFrameAnimation(); scale.InsertKeyFrame(0, new(.985f, .985f, 1)); scale.InsertKeyFrame(1, Vector3.One, easing); scale.Duration = TimeSpan.FromMilliseconds(180);
+        visual.CenterPoint = new((float)ToolContent.ActualWidth / 2, 0, 0);
+        visual.StartAnimation("Opacity", opacity); visual.StartAnimation("Scale", scale);
+    }
+    private void Open() { _vm.Overlay.Expand(_vm.SelectedModule); _host.Show(); }
+    private void OpenSettings() { _vm.SelectModule(ModuleId.Settings); _host.Show(); Activate(); }
+    private void Toggle()
+    {
+        if (HasOpenDialog) return;
+        if (_vm.Overlay.Mode == OverlayMode.Collapsed) { Open(); Activate(); }
+        else _vm.Overlay.Collapse(force: true);
+    }
+    private bool HasOpenDialog => _featured?.HasOpenDialog == true || _utilities?.HasOpenDialog == true;
+    private bool EditorHasFocus() => HasOpenDialog || (_active && RootGrid.XamlRoot is not null && FocusManager.GetFocusedElement(RootGrid.XamlRoot) is TextBox or PasswordBox or NumberBox);
+    private void OnPointerEntered(object sender, PointerRoutedEventArgs args)
+    {
+        _closeDelay.Stop();
+        if (_vm.Overlay.Mode == OverlayMode.Collapsed) { _openDelay.Stop(); _openDelay.Start(); }
+    }
+    private void OnPointerExited(object sender, PointerRoutedEventArgs args)
+    {
+        var point = args.GetCurrentPoint(RootGrid).Position;
+        if (point.X >= 0 && point.X < RootGrid.ActualWidth && point.Y >= 0 && point.Y < RootGrid.ActualHeight) return;
+        _openDelay.Stop(); _closeDelay.Stop(); _closeDelay.Start();
+    }
+    private void OnKeyDown(object sender, KeyRoutedEventArgs args)
+    {
+        if (args.Key == VirtualKey.Escape && !HasOpenDialog) { _vm.Overlay.Collapse(force: true); args.Handled = true; }
+        if (args.Key == VirtualKey.F2) { OpenSettings(); args.Handled = true; }
+    }
+    private void OnOpenClick(object sender, RoutedEventArgs args) { Open(); Activate(); }
+    private void OnSettingsClick(object sender, RoutedEventArgs args) => OpenSettings();
+    private async void OnPinClick(object sender, RoutedEventArgs args) => await _vm.ExecuteAsync(() => _vm.SetPreferencesAsync(_vm.Preferences with { Pinned = !_vm.Preferences.Pinned }));
+    private void OnDismissActivity(object sender, RoutedEventArgs args) => _vm.Overlay.DismissActivity();
+    private void OnOpenActivity(object sender, RoutedEventArgs args)
+    {
+        var module = _vm.Overlay.Activity?.Kind is ActivityKind.Focus or ActivityKind.Information ? ModuleId.Focus : ModuleId.Calendar;
+        _vm.SelectModule(module); Activate();
+    }
+    private void OnErrorClosed(InfoBar sender, object args) => _vm.ShowError("");
+    private async Task QuitAsync()
+    {
+        if (_quitting) return;
+        try { _utilities?.FlushDrafts(); }
+        catch (Exception error) { _vm.ShowError("Save or discard the note draft before quitting: " + error.Message); Open(); return; }
+        _quitting = true;
+        _openDelay.Stop(); _closeDelay.Stop(); _switchDelay.Stop();
+        _vm.PropertyChanged -= OnViewModelChanged; _utilities?.Dispose();
+        await _vm.DisposeAsync(); _tray.Dispose(); _host.Dispose(); Close(); Application.Current.Exit();
+    }
+}

@@ -1,0 +1,12 @@
+using Notch.Core.Tests;
+
+var suite = new TestSuite();
+PreferenceCases.Register(suite);
+TimerCases.Register(suite);
+OverlayCases.Register(suite);
+StoreCases.Register(suite);
+ConverterCases.Register(suite);
+ProviderCases.Register(suite);
+CalendarCases.Register(suite);
+CodingCases.Register(suite);
+return await suite.RunAsync();

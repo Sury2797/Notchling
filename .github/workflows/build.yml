@@ -1,0 +1,54 @@
+name: Native build and core checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: Core checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build portable core
+        run: dotnet build src/Notch.Core/Notch.Core.csproj --configuration Release
+      - name: Execute package-free functional tests
+        run: dotnet run --project tests/Notch.Core.Tests/Notch.Core.Tests.csproj --configuration Release
+
+  windows:
+    name: Windows x64 unpackaged build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build native WinUI application
+        run: dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=x64
+      - name: Prepare self-contained unpackaged application
+        run: >-
+          dotnet publish src/Notch.Windows/Notch.Windows.csproj
+          --configuration Release --runtime win-x64 --self-contained true
+          -p:Platform=x64 -p:WindowsPackageType=None
+          -p:WindowsAppSDKSelfContained=true -p:PublishSingleFile=false
+          --output artifacts/notch-windows-x64
+      - name: Archive application
+        shell: pwsh
+        run: Compress-Archive -Path artifacts/notch-windows-x64/* -DestinationPath artifacts/notch-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: notch-windows-x64-unpackaged
+          path: artifacts/notch-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Deterministic>true</Deterministic>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+</Project>
