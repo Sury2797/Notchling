@@ -5,12 +5,13 @@ Recorded for the initial native implementation and efficiency follow-up on 3 Oct
 ## Completed locally
 
 - Official .NET SDK 10.0.100 was downloaded over verified HTTPS and matched the SHA-512 hash in Microsoft's release metadata before extraction into `/workspace/.cache/dotnet`.
-- The portable core and package-free test executable compiled and ran with that SDK. **57 tests executed; 57 passed; 0 failed.**
+- The portable core and package-free test executable compiled and ran with that SDK. **58 tests executed; 58 passed; 0 failed.**
 - Cases cover preference normalization, countdown expiry after missed UI ticks, pause/resume, stopwatch laps, bounded/deduplicated live activities, pin behavior, concurrent atomic JSON writes, cancellation, Unicode storage, traversal rejection and conversions.
 - In-memory provider fixtures verify Stripe net captured charges/refunds/pagination/currency precision/errors, weather time zones/caching/schema checks, HTTPS analytics contracts, Claude repeated messages and Codex cumulative counters.
 - Calendar fixtures verify folding/escaping, excluded/cancelled events, weekly recurrence, named Windows/IANA zones, DST gaps and repeated times, nominal-day versus elapsed-hour durations, old recurrence queries and unsupported input.
 - Native App, MainWindow, Views, ViewModels, Services and Interop C# files compiled against actual Windows SDK projections and the pinned Windows App SDK in temporary Linux cross-target harnesses with zero errors. XAML element property setters, event signatures, resource references and XML syntax were also checked. The UI harness uses generated field/initialization stubs and excludes Windows-only XAML build tasks. An unused-field warning belongs to those temporary stubs. These checks did not execute Windows services or render the interface.
 - Seven added regression cases verify that inactive activity dismissal cannot undo navigation, queued activities cannot revive after forced collapse, oversize and escaped-Unicode saves preserve the previous readable file, and a failed serializer leaves later writes usable.
+- A queued-read cancellation regression verifies that canceling a reader waiting behind a writer preserves saved data and allows subsequent reads and writes. Reads and writes now share the asynchronous gate to prevent the Windows overwrite/delete-pending race seen in CI.
 - **31 temporary linked-source view-model scenarios passed** with simulated dispatchers, timers and Windows services. They exercise corrupt-data preservation, optional startup failure, clipboard notifications, delayed reminders, demo isolation, stale refreshes, startup input guards, accepted settings persistence, port-scan view gating and unchanged lists, stale scan results/errors, worker-thread enumeration, stopwatch notifications and shutdown ordering. These harness files are outside the checkout at `/workspace/.cache/viewmodel-check`; they are not Windows runtime checks.
 - The CI workflow parses as YAML; the optional SDK bootstrap parses as Python; the Bash core-check wrapper passes shell syntax checking.
 
@@ -22,7 +23,7 @@ The initial pushed commit, `19a24dbc17a94c04b4f42ed913fdcda9b56855ca`, triggered
 
 - **Windows x64 native build and self-contained publish succeeded**, producing the `notch-windows-x64-unpackaged` artifact (98.6 MB).
 - **Linux core checks succeeded**.
-- **Windows core checks failed** during test execution. The assertion is being investigated; no test has been skipped or weakened.
+- **Windows core checks failed** during test execution. The follow-up run, [37098205530](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37098205530), identified `UnauthorizedAccessException` in concurrent reads and file replacement. The storage fix makes reads and writes share the same asynchronous gate; its acceptance check remains the original concurrent storage case, with no skipped or weakened assertion.
 
 GitHub API requests return `Forbidden`, while public GitHub Actions HTML pages are accessible. Detailed logs require sign-in. The test runner now emits escaped GitHub error annotations so failures can be diagnosed from the public run summary. A successful native build does not establish a successful overall workflow or interactive Windows behavior.
 
@@ -30,7 +31,7 @@ GitHub API requests return `Forbidden`, while public GitHub Actions HTML pages a
 
 A complete `dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=x64` was attempted on Linux. Restore succeeded and the core compiled, but the Windows-only `XamlCompiler.exe` failed with `Exec format error`; its expected `output.json` was not produced. This remains a local host-platform blocker; full builds run in Windows CI.
 
-- Resolve the Windows core-test failure and obtain a green overall workflow for the final revision.
+- Verify a green overall workflow for the revision being reviewed. The README badge links to current CI status; the historical results above are for the named commits.
 - Native application launch, complete module interactions, DPI/monitor behavior, keyboard/accessibility checks, tray lifetime and sleep/resume behavior on Windows.
 - Measured rendered responsiveness, idle CPU, memory use and long-running resource behavior.
 - Reference-style outer-shell morph animations. Current content transitions animate, but native window resizing is immediate.

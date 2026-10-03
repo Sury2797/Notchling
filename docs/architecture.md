@@ -26,6 +26,8 @@ TCP listener enumeration runs on a worker thread only while Home or Servers is v
 
 Notes, scratchpad, reminders, links and shelf references are local plaintext workspace data. Writes replace an existing file atomically only after successful bounded serialization. The same 10 MB serialized-size limit applies to writes and reads. A corrupt notebook is retained and its autosave is disabled until recovery, rather than being replaced with an empty workspace. Provider credentials are kept separately in Windows Credential Locker. Clipboard capture is off by default and memory-only when enabled.
 
+One asynchronous storage gate coordinates readers and writers within the app. A reader closes its handle before the next atomic replacement; this avoids Windows file-replacement access failures. File streams use asynchronous I/O, and the storage layer does not capture the UI synchronization context.
+
 The design deliberately avoids a web runtime, a second application process, a background HTTP server, a custom plugin execution host, and a billing service in the base app. Those mechanisms are unnecessary for the local interaction model. A future Linux interface can reuse the core and adapter contracts, while replacing the presentation and native service implementations.
 
 Content animation runs through the compositor. Native outer-window resize is currently immediate, so shell morphing and measured smoothness are remaining Windows work. CPU, memory, startup time, input latency and long-running resource use must be measured on real Windows hardware using the release matrix. Framework choice alone is not a performance result.

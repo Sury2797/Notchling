@@ -10,6 +10,19 @@ internal static class StoreCases
         public CyclicValue Self => this;
     }
 
+    private sealed class BlockingValue(TaskCompletionSource entered, ManualResetEventSlim release)
+    {
+        public string Text
+        {
+            get
+            {
+                entered.TrySetResult();
+                if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("The fixture writer was not released.");
+                return "Complete";
+            }
+        }
+    }
+
     private static async Task InStore(Func<LocalStore, string, Task> run)
     {
         var directory = Path.Combine(Path.GetTempPath(), "notch-core-tests-" + Guid.NewGuid().ToString("N"));
@@ -54,6 +67,29 @@ internal static class StoreCases
             }
             await writes;
             Check.True((await store.ReadAsync<string>("value"))!.Length >= 1000);
+            Check.Equal(1, Directory.GetFiles(directory).Length);
+        }));
+        suite.AddAsync("Canceling a queued read preserves an active write and permits later storage operations", () => InStore(async (store, directory) =>
+        {
+            await store.WriteAsync("value", "Prior");
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var release = new ManualResetEventSlim();
+            using var canceled = new CancellationTokenSource();
+            var write = Task.Run(() => store.WriteAsync("value", new BlockingValue(entered, release)));
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                var read = store.ReadAsync<string>("value", canceled.Token);
+                Check.False(read.IsCompleted);
+                canceled.Cancel();
+                await Check.ThrowsAsync<OperationCanceledException>(() => read);
+                Check.False(write.IsCompleted);
+            }
+            finally { release.Set(); await write; }
+
+            Check.Equal("Complete", (await store.ReadAsync<Dictionary<string, string>>("value"))!["Text"]);
+            await store.WriteAsync("value", "Later");
+            Check.Equal("Later", await store.ReadAsync<string>("value"));
             Check.Equal(1, Directory.GetFiles(directory).Length);
         }));
         suite.AddAsync("Local storage rejects path traversal and absolute paths", () => InStore(async (store, _) =>

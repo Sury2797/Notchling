@@ -1,5 +1,7 @@
 # Notch for Windows
 
+[![Native build and core checks](https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml/badge.svg)](https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml)
+
 A Windows-first desktop notch, built with C#, WinUI 3 and Windows App SDK. A compact strip opens into focused panels for music, work, local utilities and live activities. The visual direction follows the supplied NotchPop reference: a dark top-center surface, a separate icon dock, restrained typography, and panels sized to their content.
 
 The Windows application uses native controls and Windows services. The portable .NET core runs on Windows and Linux; a Linux desktop interface is planned for a later phase. This is an implementation under development, with Windows build and interactive release checks still required. It is not a finished commercial release.
@@ -59,7 +61,7 @@ The current Open-Meteo weather endpoint is for noncommercial development. A paid
 - [Architecture](docs/architecture.md) explains the portable core, native services, storage and refresh boundaries.
 - [Module and connection guide](docs/modules-and-connections.md) describes local tools and optional external data.
 - [Windows release readiness](docs/release-readiness.md) contains the remaining DPI, monitor, keyboard, accessibility, performance and real-service checks.
-- [Validation evidence](docs/validation-notes.md) records 57 passing local core/fixture checks and the limits of the Linux static validation.
+- [Validation evidence](docs/validation-notes.md) records 58 passing local core/fixture checks, hosted Windows build evidence and the limits of the Linux static validation.
 - [Product and platform roadmap](docs/product-roadmap.md) records Free/Pro and the later Linux phase.
 
 CI is in [.github/workflows/build.yml](.github/workflows/build.yml). Successful portable core tests do not establish a successful Windows XAML build or a fluid desktop experience; those require the Windows job and the manual QA matrix.

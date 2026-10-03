@@ -17,8 +17,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
       - name: Build portable core
@@ -30,8 +30,8 @@ jobs:
     name: Windows x64 unpackaged build
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
       - name: Build native WinUI application
@@ -46,7 +46,7 @@ jobs:
       - name: Archive application
         shell: pwsh
         run: Compress-Archive -Path artifacts/notch-windows-x64/* -DestinationPath artifacts/notch-windows-x64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: notch-windows-x64-unpackaged
           path: artifacts/notch-windows-x64.zip
