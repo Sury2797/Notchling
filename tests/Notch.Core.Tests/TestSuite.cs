@@ -31,11 +31,19 @@ internal sealed class TestSuite
             {
                 failed++;
                 Console.Error.WriteLine($"FAIL {test.Name}: {error.GetType().Name}: {error.Message}");
+                if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
+                {
+                    // Surface the actual assertion in the run summary, including when detailed logs require sign-in.
+                    var message = $"{test.Name}: {error.GetType().Name}: {error.Message}";
+                    Console.Error.WriteLine($"::error title=Core check failed::{EscapeAnnotation(message)}");
+                }
             }
         }
         Console.WriteLine($"{_cases.Count} tests executed, {_cases.Count - failed} passed, {failed} failed.");
         return failed == 0 ? 0 : 1;
     }
+
+    private static string EscapeAnnotation(string value) => value.Replace("%", "%25").Replace("\r", "%0D").Replace("\n", "%0A");
 }
 
 internal static class Check

@@ -32,6 +32,7 @@ public sealed partial class FeaturedToolsView : UserControl
     private CancellationTokenSource? _volumeDelay;
     private string? _artworkPath;
     private int _artworkRequest;
+    private double? _renderedFocusProgress;
 
     public FeaturedToolsView(MainViewModel viewModel)
     {
@@ -97,9 +98,11 @@ public sealed partial class FeaturedToolsView : UserControl
     private void RefreshProperty(string? property)
     {
         // Timer ticks do not reconstruct charts, calendar cells, or payment rows.
-        if (property is "FocusTime" or "CountdownTime" or "StopwatchTime" or "HydrationTime" or "FocusProgress" or "FocusRunning" or "StopwatchRunning" or "StopwatchLaps")
+        if (property is nameof(MainViewModel.FocusTime) or nameof(MainViewModel.CountdownTime) or nameof(MainViewModel.StopwatchTime)
+            or nameof(MainViewModel.HydrationTime) or nameof(MainViewModel.FocusProgress) or nameof(MainViewModel.FocusRunning)
+            or nameof(MainViewModel.StopwatchRunning) or nameof(MainViewModel.StopwatchLaps))
         {
-            if (_viewModel.SelectedModule == ModuleId.Focus) RenderFocus();
+            if (_viewModel.SelectedModule == ModuleId.Focus) RefreshFocusProperty(property);
             return;
         }
         if (property is "Status" or "Error")
@@ -459,17 +462,56 @@ public sealed partial class FeaturedToolsView : UserControl
     private void RenderFocus()
     {
         FocusTimeText.Text = _viewModel.FocusTime;
-        FocusToggleButton.Content = _viewModel.FocusRunning ? "Pause" : "Start";
-        FocusStatusText.Text = _viewModel.FocusRunning ? "Pomodoro running" : "Make a little room to focus";
-        FocusArc.Data = ArcGeometry(40.5, 38.5, Math.Clamp(_viewModel.FocusProgress, 0, 1));
+        RenderFocusState();
+        RenderFocusProgress();
         CountdownTimeText.Text = _viewModel.CountdownTime;
         StopwatchTimeText.Text = _viewModel.StopwatchTime;
-        StopwatchToggleButton.Content = _viewModel.StopwatchRunning ? "Pause" : "Start";
-        StopwatchLapButton.IsEnabled = _viewModel.StopwatchRunning;
-        StopwatchLapButton.Content = _viewModel.StopwatchLaps.Count == 0 ? "Record lap" : $"Lap {_viewModel.StopwatchLaps.Count + 1}";
-        ToolTipService.SetToolTip(StopwatchLapButton, _viewModel.StopwatchLaps.Count == 0 ? "No laps recorded" : string.Join("\n", _viewModel.StopwatchLaps.TakeLast(8).Select((lap, index) => $"Lap {Math.Max(1, _viewModel.StopwatchLaps.Count - 7) + index}: {lap:mm\\:ss\\.ff}")));
+        RenderStopwatchState();
+        RenderStopwatchLaps();
         HydrationTimeText.Text = _viewModel.HydrationTime;
         HydrationIntervalText.Text = $"Nudges every {_viewModel.Preferences.HydrationMinutes}m";
+    }
+
+    private void RefreshFocusProperty(string property)
+    {
+        switch (property)
+        {
+            case nameof(MainViewModel.FocusTime): FocusTimeText.Text = _viewModel.FocusTime; break;
+            case nameof(MainViewModel.CountdownTime): CountdownTimeText.Text = _viewModel.CountdownTime; break;
+            case nameof(MainViewModel.StopwatchTime): StopwatchTimeText.Text = _viewModel.StopwatchTime; break;
+            case nameof(MainViewModel.HydrationTime): HydrationTimeText.Text = _viewModel.HydrationTime; break;
+            case nameof(MainViewModel.FocusProgress): RenderFocusProgress(); break;
+            case nameof(MainViewModel.FocusRunning): RenderFocusState(); break;
+            case nameof(MainViewModel.StopwatchRunning): RenderStopwatchState(); break;
+            case nameof(MainViewModel.StopwatchLaps): RenderStopwatchLaps(); break;
+        }
+    }
+
+    private void RenderFocusState()
+    {
+        FocusToggleButton.Content = _viewModel.FocusRunning ? "Pause" : "Start";
+        FocusStatusText.Text = _viewModel.FocusRunning ? "Pomodoro running" : "Make a little room to focus";
+    }
+
+    private void RenderFocusProgress()
+    {
+        var progress = Math.Clamp(_viewModel.FocusProgress, 0, 1);
+        if (_renderedFocusProgress == progress) return;
+        FocusArc.Data = ArcGeometry(40.5, 38.5, progress);
+        _renderedFocusProgress = progress;
+    }
+
+    private void RenderStopwatchState()
+    {
+        StopwatchToggleButton.Content = _viewModel.StopwatchRunning ? "Pause" : "Start";
+        StopwatchLapButton.IsEnabled = _viewModel.StopwatchRunning;
+    }
+
+    private void RenderStopwatchLaps()
+    {
+        var laps = _viewModel.StopwatchLaps;
+        StopwatchLapButton.Content = laps.Count == 0 ? "Record lap" : $"Lap {laps.Count + 1}";
+        ToolTipService.SetToolTip(StopwatchLapButton, laps.Count == 0 ? "No laps recorded" : string.Join("\n", laps.TakeLast(8).Select((lap, index) => $"Lap {Math.Max(1, laps.Count - 7) + index}: {lap:mm\\:ss\\.ff}")));
     }
 
     private static void RenderBars(Grid chart, IReadOnlyList<double> values, string accessibilityLabel, string color = "#737373")
@@ -581,13 +623,13 @@ public sealed partial class FeaturedToolsView : UserControl
     }
     private void PreviousMonth_Click(object sender, RoutedEventArgs e) { _calendarMonth = _calendarMonth.AddMonths(-1); RenderCalendar(); }
     private void NextMonth_Click(object sender, RoutedEventArgs e) { _calendarMonth = _calendarMonth.AddMonths(1); RenderCalendar(); }
-    private void FocusToggle_Click(object sender, RoutedEventArgs e) { _viewModel.ToggleFocus(); RenderFocus(); }
-    private void FocusReset_Click(object sender, RoutedEventArgs e) { _viewModel.ResetFocus(); RenderFocus(); }
-    private void Countdown_Click(object sender, RoutedEventArgs e) { if (sender is Button button && int.TryParse(button.Tag?.ToString(), out var minutes)) { _viewModel.StartCountdown(minutes); RenderFocus(); } }
-    private void StopwatchToggle_Click(object sender, RoutedEventArgs e) { _viewModel.ToggleStopwatch(); RenderFocus(); }
-    private void StopwatchReset_Click(object sender, RoutedEventArgs e) { _viewModel.ResetStopwatch(); RenderFocus(); }
-    private void StopwatchLap_Click(object sender, RoutedEventArgs e) { _viewModel.LapStopwatch(); RenderFocus(); }
-    private void DrankWater_Click(object sender, RoutedEventArgs e) { _viewModel.DrankWater(); RenderFocus(); }
+    private void FocusToggle_Click(object sender, RoutedEventArgs e) => _viewModel.ToggleFocus();
+    private void FocusReset_Click(object sender, RoutedEventArgs e) => _viewModel.ResetFocus();
+    private void Countdown_Click(object sender, RoutedEventArgs e) { if (sender is Button button && int.TryParse(button.Tag?.ToString(), out var minutes)) _viewModel.StartCountdown(minutes); }
+    private void StopwatchToggle_Click(object sender, RoutedEventArgs e) => _viewModel.ToggleStopwatch();
+    private void StopwatchReset_Click(object sender, RoutedEventArgs e) => _viewModel.ResetStopwatch();
+    private void StopwatchLap_Click(object sender, RoutedEventArgs e) => _viewModel.LapStopwatch();
+    private void DrankWater_Click(object sender, RoutedEventArgs e) => _viewModel.DrankWater();
 
     private async void ImportCoding_Click(object sender, RoutedEventArgs e)
     {

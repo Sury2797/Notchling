@@ -42,6 +42,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool _realAwake;
     private bool _preferencesChanged;
     private int _dataGeneration;
+    private int _viewGeneration;
     private int _preferencesGeneration;
     private AppPreferences _preferences = new();
     private MediaSnapshot? _media;
@@ -70,7 +71,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public string Status { get => _status; private set => Set(ref _status, value); }
     public string Error { get => _error; private set => Set(ref _error, value); }
     public string Scratchpad { get => _scratchpad; set { if (!ReadyForInput()) return; value ??= ""; if (Set(ref _scratchpad, value.Length > 500000 ? value[..500000] : value)) ScheduleSave(); } }
-    public IReadOnlyList<int> ListeningPorts { get => _ports; private set => Set(ref _ports, value); }
+    public IReadOnlyList<int> ListeningPorts { get => _ports; private set { if (!_ports.SequenceEqual(value)) Set(ref _ports, value); } }
     public IReadOnlyList<CalendarEvent> CalendarEvents { get => _calendarEvents; private set => Set(ref _calendarEvents, value); }
     public ObservableCollection<SavedNote> Notes { get; } = [];
     public ObservableCollection<ReminderItem> Reminders { get; } = [];
@@ -101,9 +102,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ClipboardService = new(dispatcher);
         ClipboardService.Changed += OnClipboardChanged;
         _mediaService.Changed += OnMediaChanged;
-        Overlay.Changed += (_, _) => { if (_disposed) return; Notify(nameof(SelectedModule)); _ = RefreshForViewAsync(); UpdateStopwatchTick(); };
+        Overlay.Changed += (_, _) => { if (_disposed) return; _viewGeneration++; Notify(nameof(SelectedModule)); _ = RefreshForViewAsync(); UpdateStopwatchTick(); };
         _tick.Tick += OnTick;
-        _stopwatchTick.Tick += (_, _) => { if (_disposed) return; Notify(nameof(StopwatchTime)); Notify(nameof(StopwatchLaps)); };
+        _stopwatchTick.Tick += (_, _) => { if (!_disposed) Notify(nameof(StopwatchTime)); };
         foreach (var collection in new INotifyCollectionChanged[] { Notes, Shelf, Links })
             collection.CollectionChanged += (_, _) => ScheduleSave();
         Reminders.CollectionChanged += OnRemindersChanged;
@@ -203,22 +204,40 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public async Task RefreshAsync()
     {
         int generation;
+        int viewGeneration;
+        bool scanPorts;
         lock (_shutdownGate)
         {
             if (_disposed || !_loaded || IsDemo || !_refreshLock.Wait(0)) return;
             generation = _dataGeneration;
+            viewGeneration = _viewGeneration;
+            scanPorts = Overlay.Mode == OverlayMode.Expanded && SelectedModule is ModuleId.Home or ModuleId.Servers;
         }
         try
         {
             var snapshot = await _systemService.ReadAsync(_lifetimeToken);
             if (!CanPublish(generation)) return;
             System = snapshot;
-            ListeningPorts = _systemService.ListeningPorts();
+            if (scanPorts && CanPublishPorts(generation, viewGeneration))
+            {
+                // TCP enumeration is synchronous native work; never run it on the UI continuation.
+                // Retain the refresh gate until it finishes so shutdown cannot dispose its service.
+                try
+                {
+                    var ports = await Task.Run(_systemService.ListeningPorts, _lifetimeToken);
+                    if (CanPublishPorts(generation, viewGeneration)) ListeningPorts = ports;
+                }
+                catch (Exception error) when (Recoverable(error) && !CanPublishPorts(generation, viewGeneration)) { }
+            }
+            if (!CanPublish(generation)) return;
             Media = _mediaService.Current;
         }
         catch (Exception error) when (Recoverable(error) && !CanPublish(generation)) { }
         finally { _refreshLock.Release(); }
     }
+    private bool CanPublishPorts(int generation, int viewGeneration) => CanPublish(generation)
+        && _viewGeneration == viewGeneration && Overlay.Mode == OverlayMode.Expanded
+        && SelectedModule is ModuleId.Home or ModuleId.Servers;
     private Task RefreshForViewAsync() => ExecuteAsync(async () =>
     {
         if (_disposed || Overlay.Mode != OverlayMode.Expanded) return;
@@ -307,8 +326,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public void ResetFocus() { if (!ReadyForInput()) return; _focus.Pomodoro.Reset(TimeSpan.FromMinutes(Preferences.FocusMinutes)); NotifyTimers(); }
     public void StartCountdown(int minutes) { if (!ReadyForInput()) return; _focus.Countdown.Reset(TimeSpan.FromMinutes(Math.Clamp(minutes, 1, 180))); _focus.Countdown.Start(); NotifyTimers(); }
     public void ToggleStopwatch() { if (!ReadyForInput()) return; if (StopwatchRunning) _focus.Stopwatch.Pause(); else _focus.Stopwatch.Start(); UpdateStopwatchTick(); NotifyTimers(); }
-    public void ResetStopwatch() { if (!ReadyForInput()) return; _focus.Stopwatch.Reset(); UpdateStopwatchTick(); NotifyTimers(); }
-    public void LapStopwatch() { if (!ReadyForInput()) return; _focus.Stopwatch.Lap(); Notify(nameof(StopwatchLaps)); Status = $"Lap {_focus.Stopwatch.Laps.Count}: {StopwatchTime}"; }
+    public void ResetStopwatch() { if (!ReadyForInput()) return; var hadLaps = _focus.Stopwatch.Laps.Count > 0; _focus.Stopwatch.Reset(); UpdateStopwatchTick(); NotifyTimers(); if (hadLaps) Notify(nameof(StopwatchLaps)); }
+    public void LapStopwatch() { if (!ReadyForInput() || !StopwatchRunning) return; _focus.Stopwatch.Lap(); Notify(nameof(StopwatchLaps)); Status = $"Lap {_focus.Stopwatch.Laps.Count}: {StopwatchTime}"; }
     public void DrankWater() { if (!ReadyForInput()) return; _focus.Hydration.Reset(TimeSpan.FromMinutes(Preferences.HydrationMinutes)); _focus.Hydration.Start(); NotifyTimers(); Status = "Hydration reminder reset."; }
     private void UpdateStopwatchTick()
     {

@@ -1,6 +1,6 @@
 # Validation evidence
 
-Recorded for the initial native implementation on 3 October 2026. The test host is Linux x86-64. Re-run these checks for later changes; this document does not establish the status of a future commit.
+Recorded for the initial native implementation and efficiency follow-up on 3 October 2026. Local checks use Linux x86-64; hosted Windows results are recorded separately. Re-run these checks for later changes; this document does not establish the status of a future commit.
 
 ## Completed locally
 
@@ -11,18 +11,26 @@ Recorded for the initial native implementation on 3 October 2026. The test host 
 - Calendar fixtures verify folding/escaping, excluded/cancelled events, weekly recurrence, named Windows/IANA zones, DST gaps and repeated times, nominal-day versus elapsed-hour durations, old recurrence queries and unsupported input.
 - Native App, MainWindow, Views, ViewModels, Services and Interop C# files compiled against actual Windows SDK projections and the pinned Windows App SDK in temporary Linux cross-target harnesses with zero errors. XAML element property setters, event signatures, resource references and XML syntax were also checked. The UI harness uses generated field/initialization stubs and excludes Windows-only XAML build tasks. An unused-field warning belongs to those temporary stubs. These checks did not execute Windows services or render the interface.
 - Seven added regression cases verify that inactive activity dismissal cannot undo navigation, queued activities cannot revive after forced collapse, oversize and escaped-Unicode saves preserve the previous readable file, and a failed serializer leaves later writes usable.
-- **23 temporary linked-source view-model scenarios passed** with simulated dispatchers, timers and Windows services. They exercise corrupt-data preservation, optional startup failure, clipboard notifications, delayed reminders, demo isolation, stale refreshes, startup input guards, accepted settings persistence and shutdown ordering. These harness files are outside the checkout at `/workspace/.cache/viewmodel-check`; they are not Windows runtime checks.
+- **31 temporary linked-source view-model scenarios passed** with simulated dispatchers, timers and Windows services. They exercise corrupt-data preservation, optional startup failure, clipboard notifications, delayed reminders, demo isolation, stale refreshes, startup input guards, accepted settings persistence, port-scan view gating and unchanged lists, stale scan results/errors, worker-thread enumeration, stopwatch notifications and shutdown ordering. These harness files are outside the checkout at `/workspace/.cache/viewmodel-check`; they are not Windows runtime checks.
 - The CI workflow parses as YAML; the optional SDK bootstrap parses as Python; the Bash core-check wrapper passes shell syntax checking.
 
 Tests use synthetic inputs and mocked HTTP. They do not require production credentials or assert that live provider accounts are connected.
 
+## Hosted Windows build
+
+The initial pushed commit, `19a24dbc17a94c04b4f42ed913fdcda9b56855ca`, triggered [workflow run 37097521066](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37097521066). Its public job pages confirm:
+
+- **Windows x64 native build and self-contained publish succeeded**, producing the `notch-windows-x64-unpackaged` artifact (98.6 MB).
+- **Linux core checks succeeded**.
+- **Windows core checks failed** during test execution. The assertion is being investigated; no test has been skipped or weakened.
+
+GitHub API requests return `Forbidden`, while public GitHub Actions HTML pages are accessible. Detailed logs require sign-in. The test runner now emits escaped GitHub error annotations so failures can be diagnosed from the public run summary. A successful native build does not establish a successful overall workflow or interactive Windows behavior.
+
 ## Still required
 
-A complete `dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=x64` was attempted on Linux. Restore succeeded and the core compiled, but the Windows-only `XamlCompiler.exe` failed with `Exec format error`; its expected `output.json` was not produced. This is a host-platform blocker, not a successful native application build. The prepared Windows CI job is the supported route for the full build and has not been run here.
+A complete `dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=x64` was attempted on Linux. Restore succeeded and the core compiled, but the Windows-only `XamlCompiler.exe` failed with `Exec format error`; its expected `output.json` was not produced. This remains a local host-platform blocker; full builds run in Windows CI.
 
-A read-only GitHub API check for this repository returned `Forbidden` from this environment. A hosted Windows run was therefore not started or claimed as passing.
-
-- Windows XAML compilation, application packaging and a green Windows CI job.
+- Resolve the Windows core-test failure and obtain a green overall workflow for the final revision.
 - Native application launch, complete module interactions, DPI/monitor behavior, keyboard/accessibility checks, tray lifetime and sleep/resume behavior on Windows.
 - Measured rendered responsiveness, idle CPU, memory use and long-running resource behavior.
 - Reference-style outer-shell morph animations. Current content transitions animate, but native window resizing is immediate.
