@@ -31,7 +31,7 @@ public sealed partial class UtilityToolsView : UserControl
     private string? _scratchpadDraft;
     private bool _invalidDrafts;
     public bool HasInvalidDrafts => _invalidDrafts;
-    public bool IsManipulating => _systemVolume?.PointerCaptures.Count > 0;
+    public bool IsManipulating => _systemVolume?.PointerCaptures?.Count > 0;
 
     public UtilityToolsView(MainViewModel viewModel)
     {
@@ -271,7 +271,7 @@ public sealed partial class UtilityToolsView : UserControl
         if (_memoryText is not null) _memoryText.Text = system is null ? "—" : $"{system.MemoryPercent:0}%";
         if (_batteryText is not null) _batteryText.Text = system?.BatteryPercent is { } battery ? $"{battery}%" : "No battery";
         if (_outputText is not null) _outputText.Text = system?.OutputDevice ?? "Audio output unavailable";
-        if (_systemVolume is not null && _systemVolume.FocusState == FocusState.Unfocused && _systemVolume.PointerCaptures.Count == 0)
+        if (_systemVolume is not null && _systemVolume.FocusState == FocusState.Unfocused && (_systemVolume.PointerCaptures?.Count ?? 0) == 0)
         {
             _updatingSystemVolume = true;
             try { _systemVolume.Value = system?.Volume ?? 0; _systemVolume.IsEnabled = system is not null && system.OutputDevice != "Audio output unavailable"; }

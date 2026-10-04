@@ -42,7 +42,8 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     private MediaSnapshot? _projectionSnapshot;
     private TimeSpan _projectionPosition;
     private int _freshnessTicks;
-    public bool IsManipulating => MediaSeekSlider.PointerCaptures.Count > 0 || VolumeSlider.PointerCaptures.Count > 0;
+    // WinUI returns no capture collection when a control has not captured a pointer.
+    public bool IsManipulating => MediaSeekSlider?.PointerCaptures?.Count > 0 || VolumeSlider?.PointerCaptures?.Count > 0;
 
 
     public FeaturedToolsView(MainViewModel viewModel)
@@ -235,7 +236,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         RenderMediaPosition();
         MediaDurationText.Text = media is null ? "0:00" : Clock(media.Duration);
         VolumeSlider.IsEnabled = _viewModel.System is { OutputDevice: not "Unavailable" and not "No output device" };
-        if (_volumeDelay is null && VolumeSlider.PointerCaptures.Count == 0 && VolumeSlider.FocusState == FocusState.Unfocused)
+        if (_volumeDelay is null && (VolumeSlider.PointerCaptures?.Count ?? 0) == 0 && VolumeSlider.FocusState == FocusState.Unfocused)
             VolumeSlider.Value = Math.Clamp(_viewModel.System?.Volume ?? 0, 0, 1);
         OutputDeviceText.Text = _viewModel.System?.OutputDevice ?? "No output device";
         if (_artworkPath != media?.ArtworkPath)
@@ -252,7 +253,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         if (media?.IsPlaying == true && _projectionSnapshot == media)
             position += System.Diagnostics.Stopwatch.GetElapsedTime(_mediaProjectionStart) * media.PlaybackRate;
         if (media is not null) position = TimeSpan.FromTicks(Math.Clamp(position.Ticks, 0, Math.Max(0, media.Duration.Ticks)));
-        if (_seekDelay is null && MediaSeekSlider.PointerCaptures.Count == 0 && MediaSeekSlider.FocusState == FocusState.Unfocused)
+        if (_seekDelay is null && (MediaSeekSlider.PointerCaptures?.Count ?? 0) == 0 && MediaSeekSlider.FocusState == FocusState.Unfocused)
             MediaSeekSlider.Value = media is not null && media.Duration > TimeSpan.Zero ? Math.Clamp(position.TotalSeconds / media.Duration.TotalSeconds, 0, 1) : 0;
         MediaPositionText.Text = Clock(position);
     }
