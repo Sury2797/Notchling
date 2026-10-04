@@ -29,7 +29,15 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install installer compiler
-        run: choco install innosetup --version=6.4.3 --yes --no-progress
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+          }
+          if (-not (Test-Path $iscc)) { throw 'The Inno Setup 6 compiler is missing.' }
+          Write-Output "Installer compiler: $((Get-Item $iscc).VersionInfo.FileVersion)"
       - name: Require publisher signing credentials
         shell: pwsh
         env:
