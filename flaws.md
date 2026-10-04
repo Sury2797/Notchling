@@ -59,7 +59,7 @@ The smaller defects are also repaired: redirected Downloads uses Known Folders; 
 | Linked native orchestration | 10 cases passed using explicit Windows API doubles; these do not execute the native desktop. |
 | View-model | 36 Debug behavioral scenarios passed, plus one Release Free-enforcement fixture, including hydration-setting enforcement and corrupt-file recovery. |
 | Notice generation | Five fixtures passed, including missing-license/dependency refusal and actual installer-engine terms. |
-| Native source | WinUI/Windows SDK linked-source and XAML-member compilation passed; real Windows XAML build/publish is recorded separately by CI. |
+| Native source / Windows CI | Linked-source compilation passed; [run 37180992149](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37180992149) also passed the real WinUI XAML build, self-contained publish, notice bundle and artifact upload for source commit `7e88a82`. Both platform regression jobs passed. |
 | Production configuration | Missing defaults refuse live billing/weather. No production credentials or signing certificate supplied. |
 
 See [validation notes](docs/validation-notes.md), [Windows support](docs/windows-support.md), [native qualification](docs/native-qualification.md), [billing setup](docs/billing.md), and [release delivery](docs/release-delivery.md). Every unchecked native scenario below remains a release requirement.

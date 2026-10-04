@@ -26,7 +26,7 @@ Windows 10 and Windows 11 are equal release targets. The app uses native control
 
 ## Project status
 
-**Notch is in active development.** The historical baseline builds and publishes in Windows CI. This revision adds reliability repairs, Free/Premium enforcement, a configurable billing service, reproducible regression checks and signed-release tooling. Native Windows qualification, live commercial configuration and signing credentials are still required before public paid distribution.
+**Notch is in active development.** The remediation source [builds and publishes in Windows CI](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37180992149). This revision adds reliability repairs, Free/Premium enforcement, a configurable billing service, reproducible regression checks and signed-release tooling. Native Windows qualification, live commercial configuration and signing credentials are still required before public paid distribution.
 
 | Area | Current state |
 | --- | --- |

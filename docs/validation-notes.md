@@ -91,6 +91,8 @@ The custom runner exits with failure when a case fails, times out or no cases ar
 | Release Free-plan fixture | One executed, one passed; unconfigured Release remained Free and direct paid commands were gated |
 | XAML source generator | Five source XAML documents parsed and regenerated; full linked native C#/WinUI member projections compiled with zero C# errors. Windows UI was not executed. |
 | Publisher notice/SBOM fixtures | Five passed: exact text/hash preservation, build-only scope, missing dependency/runtime-notice refusal, and installer-engine license/provenance inclusion |
+| Hosted Windows WinUI build/publish | Passed for [`7e88a82`](https://github.com/SuryaK999/Notch-win-linux/commit/7e88a82139d560d453ec1db999f3f5015c4c4f40) in [run 37180992149](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37180992149); real XAML build, self-contained publish, release-script syntax, notice bundle and evaluation ZIP upload succeeded |
+| Hosted Windows/Linux regression jobs | Both passed for the same source commit, including billing, core, Debug/Release view-model, linked native services, source projections and notice fixtures |
 | Actual Windows release / installer / update | Not executed; publisher signing credentials and native Windows machines unavailable |
 
 Run these checks from a clean checkout:
@@ -104,4 +106,4 @@ python3 scripts/check-native-source.py
 python3 -m unittest discover -s tests/release -v
 ```
 
-The linked native-service tests use platform doubles and the source projection check does not run `InitializeComponent`. Windows CI performs the real XAML build; each consumer OS still needs [native qualification](native-qualification.md). No current CI result for the uncommitted remediation is implied by the historical green run.
+The linked native-service tests use platform doubles and the source projection check does not run `InitializeComponent`. Windows CI performs the real XAML build; each consumer OS still needs [native qualification](native-qualification.md). The remediation CI run above verifies the named source commit; the historical green run remains separate. Documentation-only follow-up commits do not change those tested sources.
