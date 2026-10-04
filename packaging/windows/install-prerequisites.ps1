@@ -215,8 +215,9 @@ try {
     if (-not $appRuntimeReady) {
         Write-SetupLog 'Downloading Windows App Runtime 1.8 from Microsoft.'
         $appRuntimeInstaller = Join-Path $workDirectory 'windowsappruntimeinstall-x64.exe'
-        Save-MicrosoftDownload ([Uri]'https://aka.ms/windowsappsdk/1.8/latest/windowsappruntimeinstall-x64.exe') $appRuntimeInstaller 536870912 300
+        Save-MicrosoftDownload ([Uri]'https://aka.ms/windowsappsdk/1.8/1.8.260921001/windowsappruntimeinstall-x64.exe') $appRuntimeInstaller 536870912 300
         Assert-MicrosoftSignature $appRuntimeInstaller
+        Write-SetupLog "Verified Windows App Runtime installer version: $((Get-Item -LiteralPath $appRuntimeInstaller).VersionInfo.ProductVersion)."
         # Do not force elevation: registration must target the installing user.
         Invoke-RuntimeInstaller $appRuntimeInstaller @('--quiet')
         $appRuntimeReady = Test-WindowsAppRuntime
