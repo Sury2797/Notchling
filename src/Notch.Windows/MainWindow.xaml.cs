@@ -221,7 +221,14 @@ public sealed partial class MainWindow : Window
     }
     private void OnOpenClick(object sender, RoutedEventArgs args) { Open(); Activate(); }
     private void OnSettingsClick(object sender, RoutedEventArgs args) => OpenSettings();
-    private async void OnPinClick(object sender, RoutedEventArgs args) => await _vm.ExecuteAsync(() => _vm.SetPreferencesAsync(_vm.Preferences with { Pinned = !_vm.Preferences.Pinned }));
+    private async void OnPinToggled(object sender, RoutedEventArgs args)
+    {
+        // Toggle state changes also come from accessibility clients, without a Click event.
+        if (_quitting || _closingAttempt || _vm is null || !_vm.IsReady ||
+            sender is not Microsoft.UI.Xaml.Controls.Primitives.ToggleButton button ||
+            button.IsChecked is not bool pinned || pinned == _vm.Preferences.Pinned) return;
+        await _vm.ExecuteAsync(() => _vm.SetPreferencesAsync(_vm.Preferences with { Pinned = pinned }));
+    }
     private void OnDismissActivity(object sender, RoutedEventArgs args) => _vm.Overlay.DismissActivity();
     private void OnOpenActivity(object sender, RoutedEventArgs args)
     {

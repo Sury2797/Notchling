@@ -51,7 +51,7 @@
       <Border Grid.Column="1" CornerRadius="24" Background="{ThemeResource NotchDockBrush}" Padding="5,4">
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4">
           <Button Style="{StaticResource NotchIconButtonStyle}" Background="Transparent" Click="OnSettingsClick" ToolTipService.ToolTip="Settings" AutomationProperties.Name="Settings"><FontIcon Glyph="&#xE713;" FontSize="16" /></Button>
-          <ToggleButton x:Name="PinButton" IsEnabled="False" IsThreeState="False" Style="{StaticResource NotchPinToggleStyle}" Click="OnPinClick" ToolTipService.ToolTip="Keep expanded" AutomationProperties.Name="Keep Notchling expanded"><FontIcon Glyph="&#xE718;" FontSize="16" /></ToggleButton>
+          <ToggleButton x:Name="PinButton" IsEnabled="False" IsThreeState="False" Style="{StaticResource NotchPinToggleStyle}" Checked="OnPinToggled" Unchecked="OnPinToggled" ToolTipService.ToolTip="Keep expanded" AutomationProperties.Name="Keep Notchling expanded"><FontIcon Glyph="&#xE718;" FontSize="16" /></ToggleButton>
         </StackPanel>
       </Border>
     </Grid>

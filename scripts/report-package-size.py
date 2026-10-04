@@ -16,6 +16,7 @@ FORBIDDEN_RUNTIME_FILES = {
 REQUIRED_FILES = {
     "Notchling.Windows.exe", "Notchling.Windows.dll", "Notch.Core.dll",
     "Microsoft.WindowsAppRuntime.Bootstrap.dll", "Microsoft.WindowsAppRuntime.Bootstrap.Net.dll",
+    "resources.pri",
 }
 
 
@@ -35,6 +36,8 @@ def measure(publish: Path, require_app_only: bool, installer: Path | None = None
         missing = sorted(name for name in REQUIRED_FILES if not (publish / name).is_file())
         if missing:
             raise ValueError("Required application/bootstrap files are missing: " + ", ".join(missing))
+        if (publish / "resources.pri").stat().st_size == 0:
+            raise ValueError("The compiled WinUI resources.pri is empty.")
     sizes = sorted(((path.relative_to(publish).as_posix(), path.stat().st_size) for path in files), key=lambda item: item[1], reverse=True)
     return {
         "schemaVersion": 1,

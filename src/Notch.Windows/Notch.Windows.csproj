@@ -13,6 +13,9 @@
     <UseWinUI>true</UseWinUI>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <WindowsPackageType>None</WindowsPackageType>
+    <!-- The current SDK PRI pipeline publishes embedded binary XAML for unpackaged apps. -->
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <ProjectPriFileName>resources.pri</ProjectPriFileName>
     <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
     <SelfContained>false</SelfContained>
     <PublishReadyToRun>false</PublishReadyToRun>

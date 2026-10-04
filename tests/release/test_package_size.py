@@ -45,6 +45,15 @@ class AppOnlyPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "bootstrap files are missing"):
             package_size.measure(self.publish, True)
 
+    def test_missing_or_empty_compiled_window_resources_are_refused(self):
+        resources = self.publish / "resources.pri"
+        resources.unlink()
+        with self.assertRaisesRegex(ValueError, "resources.pri"):
+            package_size.measure(self.publish, True)
+        resources.write_bytes(b"")
+        with self.assertRaisesRegex(ValueError, "resources.pri is empty"):
+            package_size.measure(self.publish, True)
+
     def test_self_contained_runtime_config_is_refused(self):
         self.config.write_text(json.dumps({"runtimeOptions": {"includedFrameworks": [{"name": "Microsoft.NETCore.App", "version": "10.0.0"}]}}))
         with self.assertRaisesRegex(ValueError, "bundled runtimes"):

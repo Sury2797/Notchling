@@ -32,11 +32,55 @@ $report = [ordered]@{
     AveragePrivateMiB = $null
     PeakPrivateMiB = $null
     LastHandleCount = $null
+    UIInteractions = [ordered]@{ Succeeded = $false; Status = "Not run"; Error = $null }
     Teardown = "No app process created."
     StartupLog = $null
     CrashEvents = @()
     DiagnosticsError = $null
     Error = $null
+}
+
+function Invoke-FreeTierUiSmoke([int]$AppProcessId, [IntPtr]$AppWindowHandle) {
+    $helperScript = Join-Path $PSScriptRoot "smoke-windows-ui.ps1"
+    $helperReportPath = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ReportPath))) "windows-ui-smoke.json"
+    $windowsPowerShell = Join-Path ([Environment]::GetFolderPath("System")) "WindowsPowerShell/v1.0/powershell.exe"
+    if (-not (Test-Path -LiteralPath $helperScript -PathType Leaf)) { throw "The UI interaction helper is missing." }
+    if (Test-Path -LiteralPath $helperReportPath) { Remove-Item -LiteralPath $helperReportPath }
+    $helperInfo = [Diagnostics.ProcessStartInfo]::new($windowsPowerShell)
+    $helperInfo.UseShellExecute = $false
+    $helperInfo.CreateNoWindow = $true
+    $helperInfo.RedirectStandardOutput = $true
+    $helperInfo.RedirectStandardError = $true
+    foreach ($argument in @("-NoLogo", "-NoProfile", "-NonInteractive", "-Mta", "-ExecutionPolicy", "Bypass", "-File", $helperScript,
+        "-AppProcessId", [string]$AppProcessId, "-WindowHandle", [string]$AppWindowHandle.ToInt64(), "-ReportPath", $helperReportPath)) {
+        $helperInfo.ArgumentList.Add($argument)
+    }
+    $helper = [Diagnostics.Process]::Start($helperInfo)
+    if (-not $helper) { throw "Windows did not create the UI interaction helper." }
+    try {
+        $standardOutput = $helper.StandardOutput.ReadToEndAsync()
+        $standardError = $helper.StandardError.ReadToEndAsync()
+        if (-not $helper.WaitForExit(45000)) {
+            $helper.Kill()
+            $helper.WaitForExit(5000) | Out-Null
+            $report.UIInteractions = [ordered]@{ Succeeded = $false; Status = "Timed out"; Error = "Owned UI Automation helper exceeded its 45-second watchdog." }
+            throw $report.UIInteractions.Error
+        }
+        if (Test-Path -LiteralPath $helperReportPath -PathType Leaf) {
+            $report.UIInteractions = Get-Content -LiteralPath $helperReportPath -Raw | ConvertFrom-Json
+        }
+        if ($helper.ExitCode -ne 0 -or -not $report.UIInteractions.Succeeded) {
+            $details = if ($report.UIInteractions.Error) { [string]$report.UIInteractions.Error } else { $standardError.GetAwaiter().GetResult() }
+            if ($details.Length -gt 3000) { $details = $details.Substring(0, 3000) }
+            throw "Free-tier UI interaction failed (helper exit code $($helper.ExitCode)): $details"
+        }
+    } finally {
+        if (-not $helper.HasExited) {
+            $helper.Kill()
+            $helper.WaitForExit(5000) | Out-Null
+        }
+        $helper.Dispose()
+    }
 }
 
 function Read-StartupDiagnostics {
@@ -264,6 +308,7 @@ namespace NotchlingSmoke {
     $report.AveragePrivateMiB = [Math]::Round(($privateBytes | Measure-Object -Average).Average, 2)
     $report.PeakPrivateMiB = [Math]::Round(($privateBytes | Measure-Object -Maximum).Maximum, 2)
     $report.LastHandleCount = $child.HandleCount
+    Invoke-FreeTierUiSmoke $child.Id $window
     $report.Succeeded = $true
 } catch {
     $failure = $_
@@ -298,7 +343,7 @@ namespace NotchlingSmoke {
     $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $reportFullPath -Encoding utf8
     [pscustomobject]$report | Format-List
     if ($env:GITHUB_ACTIONS -eq 'true') {
-        Write-Output "::notice title=Installed Windows smoke result::Succeeded=$($report.Succeeded); StartupMs=$($report.FirstVisibleWindowMilliseconds); ResponsiveSamples=$($report.ResponsiveSamples); WorkingSetMiB=$($report.AverageWorkingSetMiB); PrivateMiB=$($report.AveragePrivateMiB); CpuAllCoresPercent=$($report.CpuPercentAllCores); SamplingSeconds=$($report.MeasurementSeconds)"
+        Write-Output "::notice title=Installed Windows smoke result::Succeeded=$($report.Succeeded); StartupMs=$($report.FirstVisibleWindowMilliseconds); ResponsiveSamples=$($report.ResponsiveSamples); FreeUiInteractions=$($report.UIInteractions.Succeeded); WorkingSetMiB=$($report.AverageWorkingSetMiB); PrivateMiB=$($report.AveragePrivateMiB); CpuAllCoresPercent=$($report.CpuPercentAllCores); SamplingSeconds=$($report.MeasurementSeconds)"
         if ($failure) {
             $message = $report.Error.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
             Write-Output "::error title=Installed Windows launch failure::$message"
@@ -314,6 +359,7 @@ namespace NotchlingSmoke {
 | Visible native window / icon | $($report.VisibleWindow) / $($report.WindowIconPresent) |
 | First visible window | $($report.FirstVisibleWindowMilliseconds) ms |
 | Responsive samples | $($report.ResponsiveSamples) |
+| Free media, Pomodoro, and scratchpad UI interaction | $($report.UIInteractions.Succeeded) |
 | Average working set | $($report.AverageWorkingSetMiB) MiB |
 | Average private memory | $($report.AveragePrivateMiB) MiB |
 | CPU, normalized across all cores | $($report.CpuPercentAllCores)% |
