@@ -9,7 +9,7 @@ Windows 10 and Windows 11 are **equal release targets**. The supported desktop a
 | Windows N | Same builds, with or without Media Feature Pack | Optional media/sound can report unavailable; local tools must remain usable |
 | ARM64 / x86 | No native release currently configured | Do not advertise native support or treat emulation as qualification |
 
-The Windows API target and `TargetPlatformMinVersion` remain `10.0.19041` so code compiles against the common Windows 10-era API surface. The supported product baseline is recorded separately as `MinimumSupportedWindowsBuild=19045`, and the installer refuses older builds. An API floor or successful build is not proof of interactive compatibility. A Windows Server GitHub runner is a build host, not a consumer Windows 10/11 test machine.
+The Windows API target and `TargetPlatformMinVersion` remain `10.0.19041` so code compiles against the common Windows 10-era API surface. The supported product baseline is recorded separately as `MinimumSupportedWindowsBuild=19045`, and the installer refuses older builds. An API floor or successful build is not proof of interactive compatibility. A Windows Server GitHub runner can exercise installed-app startup and controls, but it is not a consumer Windows 10/11 test machine.
 
 ## Runtime prerequisites
 
@@ -24,13 +24,32 @@ The application pins Windows App SDK package `1.8.260921001`, requiring runtime 
 
 First-install prerequisite downloads are additional to the app installer size. Record download, cancellation, offline failure, and successful launch separately on Windows 10 and Windows 11. An advanced app-only folder artifact bypasses Setup and requires the shared runtimes already installed; keep that folder's DLLs, assets, and launcher together.
 
+For first-install planning, Microsoft's .NET 10.0.12 Windows x64 Runtime installer reported **30,663,104 bytes (29.24 MiB)** in its official HTTP `Content-Length` on 4 October 2026 UTC. The .NET release metadata is approximately another 1 MiB. This is an external-download estimate, not an observed missing-.NET installation in cloud CI; runtime updates can change the amount.
+
+[CI run 37191033515](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515) passed for source revision [`7584703`](https://github.com/SuryaK999/Notch-win-linux/commit/7584703b1ca6c634a1d3273bc48f3c85954b74ac) on 4 October 2026 UTC. It recorded **8,875,059 bytes (8.46 MiB)** for the setup EXE and **40,648,773 bytes (38.77 MiB)** for extracted application files. Setup downloaded **106,879,800 bytes (101.93 MiB)** for the missing Windows App Runtime; it reused the runner's installed .NET 10.0.11 runtime. Installed-app launch, Free UI interactions, and uninstall passed on that Windows Server runner.
+
+The small app installer is therefore not the entire first-install transfer on a machine missing both shared runtimes. Allow roughly **147 MB** including that installer, the measured Windows App Runtime download, the estimated .NET download, and its release metadata. Compatible preinstalled runtimes avoid those additional downloads. Neither shared-runtime download is part of Notchling's application payload.
+
 The overlay, shortcuts, media controls, fonts, accessibility, installation and resource behavior must pass independently on both systems for the **same signed artifact**. Windows 11-only cosmetic APIs must have harmless Windows 10 fallbacks. Use Segoe UI and a guaranteed monospace font rather than relying on developer-installed fonts. No platform may lose basic controls because a cosmetic feature is unavailable.
 
 ## Qualification record
 
 Copy [the native qualification template](native-qualification.md) for each candidate. Record the app version, source commit, installer SHA-256, OS edition/build, GPU/driver, DPI, monitors, text scaling and result. Test Windows 10 separately from Windows 11; do not combine their results into a single passing row.
 
-The cloud execution host is Linux and cannot launch WinUI. Automated source checks and simulated view-model cases are useful evidence with defined limits; neither certifies native launch, accessibility or performance. No native qualification result is currently recorded in this repository.
+The interactive cloud workspace is Linux and cannot launch WinUI. The [Windows CI job](../.github/workflows/build.yml) uses a separate hosted Windows Server desktop to install the actual evaluation setup and launch the installed Release app. It checks a visible native window, its icon, bounded message responsiveness, and Free-tier controls through UI Automation:
+
+- Open and pin the notch; confirm the Free edition.
+- Show the genuine no-player media state and require disabled transport controls.
+- Start, pause, and reset the Pomodoro timer using its visible clock.
+- Edit and save scratchpad text, navigate away and back, and verify clearing the saved text.
+
+The workflow verifies registered Windows App Runtime packages after Setup, records first-window timing and a short CPU/memory sample, then cleans up the owned app process and runs the installed uninstaller. The published payload guard requires the nonempty `resources.pri` produced by the current SDK's compiled-XAML resource pipeline, as well as the app and bootstrapper files; build success alone cannot replace a launch check.
+
+The passing run showed the native window and icon, responded to all five message samples, and passed every listed Free UI interaction. First visible window appeared after **696.9 ms**. The **5.02-second startup sample** averaged **107.27 MiB working set**, **30.51 MiB private memory**, and **0.778% CPU normalized across all logical processors**. Those are hosted-runner startup observations, not settled idle or animation benchmarks.
+
+The cloud .NET runtime was already available through `setup-dotnet`; missing-.NET download/install and its UAC path were not exercised. The missing Windows App Runtime download/install path passed as part of Setup's cloud smoke. Recorded results, source revisions, and limitations are detailed in [validation notes](validation-notes.md).
+
+This smoke does not qualify Windows 10/11 hardware, Narrator, display scaling, sustained idle usage, animation frame pacing, a real media player, signed upgrades, or graceful save/shutdown. Its bounded cleanup may terminate the owned test process after a normal close request. The separate native qualification matrix remains required for a consumer release.
 
 ## Installation and recovery
 
@@ -40,4 +59,4 @@ Workspace data stays in `%LOCALAPPDATA%\Notch`; credentials stay in Windows Cred
 
 Notchling's executable is `Notchling.Windows.exe`. The legacy installation/data directory names, vault identities and installer AppId remain compatible; they do not indicate a second product or require manual migration.
 
-A failed/cancelled app setup uses Inno Setup's install rollback. Shared prerequisites installed beforehand are independently managed Microsoft runtimes and are not removed when Notchling is cancelled or uninstalled. Clean installation, interruption, rollback, repeat upgrade and uninstall are **required tests**, not verified outcomes yet. Evaluation Setup is explicitly unsigned. Production installers and updates must be signed; the release script refuses unsigned production output.
+A failed/cancelled app setup uses Inno Setup's install rollback. Shared prerequisites installed beforehand are independently managed Microsoft runtimes and are not removed when Notchling is cancelled or uninstalled. The cloud workflow exercises evaluation setup and uninstall on its Windows Server runner. Consumer Windows 10/11 clean installation, interruption, rollback, repeat upgrade, and retained-data acceptance remain **required native tests**. Evaluation Setup is explicitly unsigned. Production installers and updates must be signed; the release script refuses unsigned production output.

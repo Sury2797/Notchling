@@ -64,6 +64,21 @@ The smaller defects are also repaired: redirected Downloads uses Known Folders; 
 
 See [validation notes](docs/validation-notes.md), [Windows support](docs/windows-support.md), [native qualification](docs/native-qualification.md), [billing setup](docs/billing.md), and [release delivery](docs/release-delivery.md). Every unchecked native scenario below remains a release requirement.
 
+## Installed-app findings and repairs — 4 October 2026 UTC
+
+Actual installation and UI Automation uncovered failures beyond the original source audit. These repairs passed on [`7584703`](https://github.com/SuryaK999/Notch-win-linux/commit/7584703b1ca6c634a1d3273bc48f3c85954b74ac) in [Windows cloud run 37191033515](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515):
+
+| Observed defect | Repair and evidence |
+| --- | --- |
+| Installed app could not locate its main-window XAML | Enabled the SDK resource-publishing pipeline; require a nonempty `resources.pri`; installed native window now opens |
+| Unavailable `HighContrastChanged` notification aborted startup | Guard each optional notification independently and retain contrast/text-size queries through Windows fallbacks; normal startup succeeds |
+| Opening a panel crashed when pointer capture was absent | Treat missing pointer-capture collections as empty in media/volume interaction checks; Free panel interactions now pass |
+| Accessibility toggling could change the pin appearance without changing its behavior | Bind pin updates to checked/unchecked state; UI Automation verifies the saved pin preference |
+
+The setup EXE is **8,875,059 bytes** and its application payload is **40,648,773 bytes**, without bundled .NET or Windows App Runtime files. Setup's missing Windows App Runtime transfer was **106,879,800 bytes**; .NET was already present. Both missing runtimes require roughly **147 MB total** first-install downloads at current versions, including the app and estimated .NET transfer. A small app installer does not eliminate those shared dependencies.
+
+Installed launch, native icon/message response, Free media empty state, Pomodoro start/pause/reset, scratchpad durable save/navigation/clear, and uninstall passed on the hosted Windows desktop. Full Windows 10/11 hardware qualification, real media/providers, signed releases, and production billing remain open. Exact measurements and limits are in [validation notes](docs/validation-notes.md).
+
 ## Original audit findings
 
 The remainder preserves the original problem descriptions and acceptance intent for traceability, including the former **Notch** product name. Statements about absent functionality describe the pre-repair snapshot; use the implementation table above for current status.

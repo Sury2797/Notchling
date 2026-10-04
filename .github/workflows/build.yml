@@ -193,3 +193,50 @@ jobs:
             artifacts/setup-prerequisites.log
           if-no-files-found: warn
           retention-days: 14
+
+  evaluation:
+    name: Publish tested evaluation EXE
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/notchling-evaluation-')
+    needs: [core, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          name: notchling-windows-x64-installer
+          path: artifacts/installer
+      - name: Publish one setup EXE after all checks pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NOTCH_EVALUATION_TAG: ${{ github.ref_name }}
+          NOTCH_EVALUATION_RUN: ${{ github.run_id }}
+          NOTCH_EVALUATION_REVISION: ${{ github.sha }}
+        run: |
+          [[ "$NOTCH_EVALUATION_TAG" =~ ^notchling-evaluation-[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          NOTCH_EVALUATION_VERSION="${NOTCH_EVALUATION_TAG#notchling-evaluation-}"
+          NOTCH_PROJECT_VERSION="$(python3 -c 'import xml.etree.ElementTree as e; print(e.parse("src/Notch.Windows/Notch.Windows.csproj").findtext("PropertyGroup/Version"))')"
+          [[ "$NOTCH_EVALUATION_VERSION" == "$NOTCH_PROJECT_VERSION" ]] || exit 1
+          NOTCH_SETUP_NAME="Notchling-${NOTCH_EVALUATION_VERSION}-windows-x64-evaluation-setup.exe"
+          NOTCH_SETUP_PATH="artifacts/installer/$NOTCH_SETUP_NAME"
+          [[ -f "$NOTCH_SETUP_PATH" ]] || exit 1
+          NOTCH_SETUP_HASH="$(sha256sum "$NOTCH_SETUP_PATH" | cut -d ' ' -f 1)"
+          NOTCH_SETUP_BYTES="$(stat -c %s "$NOTCH_SETUP_PATH")"
+          NOTCH_SETUP_MEGABYTES="$(python3 -c 'import sys; print(f"{int(sys.argv[1]) / 1000000:.2f}")' "$NOTCH_SETUP_BYTES")"
+          cat > evaluation-notes.md <<EOF
+          Download **$NOTCH_SETUP_NAME** below and run Setup. No developer SDK or manual dependency setup is required.
+
+          This unsigned Windows x64 evaluation passed native installation, launch, Free media empty-state controls, Pomodoro start/pause/reset, scratchpad persistence, and uninstall in [cloud CI](https://github.com/$GH_REPO/actions/runs/$NOTCH_EVALUATION_RUN). Source: $NOTCH_EVALUATION_REVISION.
+
+          Setup installs missing shared .NET and Windows App Runtime components automatically. This app installer is **$NOTCH_SETUP_MEGABYTES MB**. Missing components require additional one-time downloads; [runtime estimates and cloud measurements](https://github.com/$GH_REPO/blob/$NOTCH_EVALUATION_REVISION/docs/release-delivery.md) explain the first-install cost. Existing compatible components are reused.
+
+          Windows 10 22H2 and Windows 11 are release targets; full consumer hardware/accessibility qualification remains pending. Premium billing is not live. Publisher signing and production release approval remain required.
+
+          Installer bytes: $NOTCH_SETUP_BYTES
+
+          Installer SHA-256: $NOTCH_SETUP_HASH
+          EOF
+          gh release create "$NOTCH_EVALUATION_TAG" "$NOTCH_SETUP_PATH" --verify-tag --prerelease --latest=false --title "Notchling $NOTCH_EVALUATION_VERSION — Windows evaluation" --notes-file evaluation-notes.md
+          echo "::notice title=Direct Windows evaluation download::https://github.com/$GH_REPO/releases/download/$NOTCH_EVALUATION_TAG/$NOTCH_SETUP_NAME"

@@ -1,6 +1,6 @@
 # Notchling signed Windows delivery
 
-The release path targets **Windows 10 22H2/build 19045 x64 and supported Windows 11 x64 releases equally**. Ordinary build CI produces one unsigned evaluation setup EXE as the normal user download, plus an optional app-only folder artifact for advanced evaluation. GitHub Actions wraps each artifact in a download ZIP; extract the installer artifact once and run Setup. The manual [release workflow](../.github/workflows/release.yml) prepares a signed installer, publisher notice bundle, SPDX inventory, checksums and a GitHub **draft** release. No signing credentials, commercial domain or native QA results are supplied by this repository.
+The release path targets **Windows 10 22H2/build 19045 x64 and supported Windows 11 x64 releases equally**. Ordinary build CI produces one unsigned evaluation setup EXE as the normal user download, plus an optional app-only folder artifact for advanced evaluation. GitHub Actions wraps each artifact in a download ZIP; extract the installer artifact once and run Setup. The manual [release workflow](../.github/workflows/release.yml) prepares a signed installer, publisher notice bundle, SPDX inventory, checksums and a GitHub **draft** release. Production signing credentials, a commercial domain, and consumer Windows 10/11 qualification remain external release requirements.
 
 ## Shared runtime requirements
 
@@ -10,7 +10,37 @@ The setup EXE contains the application payload without bundling .NET or Windows 
 
 The optional app-only folder contains the launcher, app assemblies, assets, and dependency notices. Keep them together. This advanced path requires the shared runtimes to be installed already; it does not perform Setup’s prerequisite installation.
 
-CI must record setup EXE/download and extracted application sizes, prove bundled runtime files are absent, and verify the app against the matching installed shared runtimes. Missing-runtime download/install, cancellation, offline errors, and clean-machine launch still require [native qualification](native-qualification.md). The evaluation setup is explicitly unsigned; production signing remains mandatory for public release and updates.
+CI records setup EXE and extracted application sizes, rejects bundled runtime files, and verifies the app against installed shared runtimes. It exercises Setup's missing Windows App Runtime path on a hosted Windows Server desktop. The runner already has .NET 10 through `setup-dotnet`, so missing-.NET installation, denied UAC, cancellation, offline errors, and consumer Windows 10/11 clean-machine acceptance still require [native qualification](native-qualification.md). The evaluation setup is explicitly unsigned; production signing remains mandatory for public release and updates.
+
+Package/prerequisite measurements from passing [CI run 37191033515](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515), source revision [`7584703`](https://github.com/SuryaK999/Notch-win-linux/commit/7584703b1ca6c634a1d3273bc48f3c85954b74ac), on 4 October 2026 UTC:
+
+| Component | Actual or estimated bytes | Scope |
+| --- | ---: | --- |
+| Evaluation setup EXE | 8,875,059 | Measured application installer; 8.46 MiB |
+| Extracted application files | 40,648,773 | Measured installed payload; 38.77 MiB |
+| Missing Windows App Runtime download | 106,879,800 | Measured Setup prerequisite transfer; 101.93 MiB |
+| Missing .NET 10.0.12 x64 Runtime download | 30,663,104 | Official HTTP `Content-Length` estimate; 29.24 MiB |
+| .NET release metadata | Approximately 1 MiB | Additional estimate when .NET is missing |
+
+That cloud setup reused .NET 10.0.11 already installed through the SDK; it did not exercise the missing-.NET path. Actual evaluation setup, missing Windows App Runtime installation, installed-app launch and Free UI interaction, and uninstall passed on the hosted Windows Server runner.
+
+A machine missing both shared runtimes therefore needs roughly **147 MB** of first-install downloads, including the app installer and estimated .NET metadata. The app installer alone is about **8.9 MB**; compatible preinstalled runtimes avoid the additional transfers. Patches and later prerequisite releases can change these amounts. Shared runtime disk usage is separate from the extracted application size.
+
+## Installed Windows cloud smoke
+
+The Windows build job compiles the evaluation setup, installs it into a disposable directory, and launches the **installed** `Notchling.Windows.exe`. Setup's prerequisite log shows runtime reuse or downloads and verifies the x64 framework, Main, Singleton, and DDLM packages for Windows App Runtime 1.8. Reports and logs are uploaded in `notchling-windows-cloud-test-results`, including package sizes, setup/prerequisite logs, and native/UI smoke JSON. Results are tied to their source revisions in [validation notes](validation-notes.md).
+
+The [tested evaluation installer](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515/artifacts/11298892753) is available as a GitHub Actions artifact subject to sign-in and the workflow's 14-day retention. Extract its download ZIP once and run `Notchling-0.2.0-windows-x64-evaluation-setup.exe`.
+
+For users, [the evaluation release download](https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe) provides the setup EXE directly, without sign-in, ZIP extraction, or artifact expiry. Pushing a `notchling-evaluation-<version>` tag runs the full build/installed-app checks first; only after all jobs pass does CI publish that one setup EXE as an explicitly unsigned GitHub prerelease. The tag must match the project's version. This channel does not publish a stable update manifest or replace signed production releases.
+
+Before installation, `report-package-size.py --require-app-only` requires the app assemblies, bootstrapper files, and nonempty `resources.pri`, and refuses bundled CoreCLR, Windows App Runtime, ONNX, or DirectML payload. The project enables the current SDK PRI pipeline so compiled XAML is published correctly; hand-copying resources from an older SDK layout is not the publishing contract.
+
+The installed app exposed a visible native window with an icon and responded to all five bounded `WM_NULL` samples in the passing run. UI Automation opened and pinned the Free notch, verified disabled no-player media controls, ran Pomodoro start/pause/reset, and verified scratchpad durable save, navigation round trip, and clearing. The test cleaned up its owned process and the installed uninstaller returned success.
+
+First visible window appeared after **696.9 ms**. A **5.02-second startup sample** averaged **107.27 MiB working set**, **30.51 MiB private memory**, and **0.778% CPU normalized across all logical processors**. These hosted-runner observations are not sustained idle measurements or rendered-animation results.
+
+This is a Windows Server cloud smoke, not consumer Windows 10/11 hardware qualification or an animation benchmark. It does not test a real media player, signed upgrade/update trust, missing-.NET UAC, or graceful save/shutdown; bounded process cleanup can terminate the test process. Those limits remain separate acceptance work.
 
 ## Configure signing and prepare a candidate
 
@@ -31,7 +61,7 @@ The compatible installation folder and AppId are deliberately retained under the
 
 Workspace JSON under `%LOCALAPPDATA%\Notch` and Windows Credential Locker entries are retained on upgrade/uninstall. Uninstall does not cancel billing. An intentional data reset requires an export and explicit user action; the installer has no workspace-deletion directive.
 
-Preserve exports before downgrade. Only revert to a prior signed version with a compatible data schema, as documented in its release notes. Interruption, stale/duplicate version installation, rollback and uninstall are native qualification cases with **no recorded execution result yet**.
+Preserve exports before downgrade. Only revert to a prior signed version with a compatible data schema, as documented in its release notes. Cloud CI includes evaluation setup/uninstall; interruption, stale/duplicate versions, rollback, retained-data behavior, and consumer Windows 10/11 install/uninstall remain separate native qualification cases.
 
 ## Verified updates
 

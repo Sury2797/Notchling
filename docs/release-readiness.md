@@ -1,19 +1,20 @@
 # Notchling Windows release readiness
 
-This checklist defines acceptance for a public Windows release and the planned US$2/month Premium subscription. Windows and Linux core checks, the Windows x64 build and self-contained publish passed for commit [`131b597`](https://github.com/SuryaK999/Notch-win-linux/commit/131b597f6e2e8cdb084d633db8cd7836ad698a68) in [CI run 37098620398](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37098620398). That historical result covers the previous bundled-runtime distribution. The default now uses a framework-dependent app-only payload; its build, size, and prerequisite acceptance require new evidence. Interactive Windows validation and commercial-release work remain open.
+This checklist defines acceptance for a public Windows release and the planned US$2/month Premium subscription. The current framework-dependent evaluation installer passed build, package auditing, actual installation, native launch, Free controls, and uninstall for [`7584703`](https://github.com/SuryaK999/Notch-win-linux/commit/7584703b1ca6c634a1d3273bc48f3c85954b74ac) in [CI run 37191033515](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515). Consumer Windows 10/11 native qualification and commercial-release work remain open. Earlier bundled-runtime results remain historical evidence in [validation notes](validation-notes.md).
 
 Record the revision, build URL, OS build, GPU, monitor configuration and observed result for each subsequent validation. A Linux host can test portable logic and inspect source; full WinUI builds and native interaction require Windows.
 
 ## Build and deployment
 
 - [x] Windows x64 Release build and self-contained unpackaged publish succeeded for the baseline commit linked above.
-- [ ] Release-candidate CI succeeds for the exact revision selected for distribution.
-- [ ] One evaluation setup EXE is the normal download; it builds for the candidate and the advanced app-only folder remains secondary.
-- [ ] Record setup EXE/download and extracted application sizes, plus any first-install prerequisite downloads, without assuming a target size was achieved.
-- [ ] Runtime payload is absent; the published runtime configuration uses installed .NET 10 and Windows App SDK 1.8 packages.
+- [x] Evaluation CI succeeds for exact source revision `7584703`; a signed production candidate remains a separate gate.
+- [x] One evaluation setup EXE builds and is the normal download; the advanced app-only folder remains secondary.
+- [x] Setup EXE, extracted application, and actual Windows App Runtime transfer sizes recorded; missing-.NET transfer is explicitly an estimate.
+- [x] Runtime payload is absent; the published runtime configuration uses installed .NET 10 and Windows App SDK 1.8 packages.
 - [ ] Clean Windows 10 22H2 x64 and Windows 11 x64 machines launch with the documented shared x64 runtimes installed, without a developer SDK.
 - [ ] Setup detects existing shared runtimes and downloads/installs missing official prerequisites on both OS targets; test Internet failure, cancellation, denied UAC, and rerunning Setup.
-- [ ] All app-specific published dependencies travel with the folder; startup uses the documented shared runtimes rather than the build machine's package cache.
+- [x] Installed app includes required assemblies, bootstrapper, and nonempty compiled-XAML PRI; it launches using the shared runtimes prepared by Setup.
+- [x] Hosted Windows desktop: actual evaluation setup, visible window/icon, bounded responsiveness, Free pin/media/Pomodoro/scratchpad UI interaction, and silent uninstall pass.
 - [ ] Single-instance/startup behavior, tray menu, close-to-tray and explicit Quit behave consistently.
 - [ ] App/taskbar/tray icons, installer, Start menu shortcuts, window titles and Settings use Notchling and the Pixel Dragon assets; small/high-DPI icons remain readable.
 - [ ] A signed installer, updates, rollback, upgrade and uninstallation are validated before public distribution. Build CI produces an explicitly unsigned evaluation setup; the manual signed-candidate workflow requires publisher credentials.
@@ -90,9 +91,9 @@ Use `./scripts/measure-windows.ps1 -ProcessName Notchling.Windows -Seconds 60` f
 | --- | --- |
 | Linux portable core | 58 historical baseline cases; new revision requires fresh results |
 | Windows portable core | Baseline CI green |
-| Windows WinUI build and publish | Historical baseline CI green for bundled runtimes; app-only candidate acceptance pending |
-| Single installer and shared prerequisites | Record fresh Windows CI sizes/runtime audit; clean Windows 10/11 automatic prerequisite installation and launch acceptance pending |
-| Native Windows launch and interaction | Manual matrix above required |
+| Windows WinUI build and publish | Current framework-dependent build and compiled-XAML publication passed on `7584703` |
+| Single installer and shared prerequisites | Windows cloud setup passed; missing Windows App Runtime downloaded and installed, .NET reused; sizes recorded. Bare Windows 10/11, missing-.NET, UAC, and offline cases remain open |
+| Native Windows launch and interaction | Hosted window and Free UI checks passed; full consumer-OS matrix above remains required |
 | Real provider accounts | Opt-in connection validation required |
 | Linux native UI | Planned later; unavailable in this implementation |
 | Billing and subscriptions | Release gates and configurable billing service implemented; production activation/live sandbox validation pending |

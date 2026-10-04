@@ -26,12 +26,14 @@ The **Pixel Dragon** is Notchling’s app icon. The Windows application uses **C
 
 ## Current status
 
-**Active development · evaluation builds available · paid launch pending.** The Notchling branding revision [builds and publishes in Windows CI](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37185720671). Regression checks and Windows compilation are recorded in the [validation notes](docs/validation-notes.md). Native desktop qualification, publisher signing, and production commercial configuration remain launch requirements.
+**Active development · Windows installer tested · paid launch pending.** The actual setup, installed app launch, and Free media, Pomodoro, and scratchpad interactions [passed in Windows cloud CI](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515). The tested setup EXE is **8.9 MB**. [Download Notchling for Windows](https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe), then follow the steps below.
+
+The [validation notes](docs/validation-notes.md) record the exact revision, measurements, and test limits. Consumer Windows 10/11 qualification, publisher signing, and production commercial configuration remain launch requirements.
 
 | Area | Available now | Before public release |
 | --- | --- | --- |
 | Desktop | Native Windows app, local tools, optional connections, adaptive panels, reduced motion | Independent Windows 10/11 interaction, accessibility, and hardware profiling |
-| Distribution | Single evaluation setup EXE; shared runtimes installed when missing; signed release and verified-update tooling | Installer acceptance, publisher certificate, and clean install/upgrade/update qualification |
+| Distribution | Single evaluation setup EXE; installed launch and Free controls tested in Windows CI; automatic shared prerequisites | Publisher certificate and consumer Windows 10/11 clean install/upgrade/update qualification |
 | Subscription | Release Free/Premium enforcement and configurable billing service | Production domain, Stripe, email delivery, customer policies, and sandbox acceptance |
 | Linux | Portable core and automated checks | Native interface and Linux operating-system adapters |
 
@@ -128,13 +130,17 @@ Workspace limits include a 10 MB serialized file ceiling, bounded text, and up t
 
 ### Evaluation builds
 
-1. Open [GitHub Actions](https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml) and choose a successful run.
-2. Download **`notchling-windows-x64-installer`**. GitHub may require sign-in; extract its download ZIP once.
-3. Run **`Notchling-0.2.0-windows-x64-evaluation-setup.exe`**, then open **Notchling** from the Start menu.
+1. [Download Notchling Setup for Windows](https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe). This direct `.exe` download requires no GitHub sign-in or ZIP extraction.
+2. Run **`Notchling-0.2.0-windows-x64-evaluation-setup.exe`**.
+3. Open **Notchling** from the Start menu.
+
+Evaluation releases appear in [Releases](https://github.com/SuryaK999/Notch-win-linux/releases). Development snapshots also appear as **`notchling-windows-x64-installer`** in successful [GitHub Actions runs](https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml); those artifacts require sign-in, arrive inside a ZIP, and expire after 14 days.
 
 **One installer is the normal download.** Setup installs the app and checks for the shared .NET and Windows App SDK runtimes. If either is missing, Setup downloads its official installer and installs it; an Internet connection is required, and the .NET installer may request administrator approval. Existing compatible runtimes are reused. No SDK, developer tools, or manual DLL copying is required.
 
-The app installer contains application files, assets, and notices rather than repeated copies of those shared runtimes. First-time prerequisite downloads are additional to its size; later app updates reuse the installed runtimes. The new installer’s size and setup behavior require fresh acceptance evidence—earlier CI links describe the previous self-contained builds. This evaluation installer is unsigned and intended for review and development under the source license.
+The tested setup EXE is **8,875,059 bytes (8.46 MiB)**; its extracted app files total **40,648,773 bytes (38.77 MiB)**. In the cloud test, Setup downloaded **106.9 MB** for the missing Windows App Runtime and reused installed .NET 10. A machine missing both runtimes needs roughly **147 MB total** for first-install downloads at current versions, including the estimated .NET download. Later installs reuse compatible shared runtimes. See [delivery measurements and limits](docs/release-delivery.md).
+
+This evaluation installer is unsigned and intended for review and development under the source license. Cloud checks cover installation, launch, pinning, no-player media state, Pomodoro, scratchpad persistence, and uninstall; full Windows 10/11 hardware and accessibility qualification remains open.
 
 An optional **`notchling-windows-x64-app-only`** artifact provides the extracted application folder for advanced evaluation. It requires the shared runtimes to be installed already; keep its files together and run `Notchling.Windows.exe`. See [Windows support](docs/windows-support.md) for exact prerequisites.
 

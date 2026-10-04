@@ -125,3 +125,26 @@ The approved public name is **Notchling**, with **A — Pixel Dragon** as its se
 | Hosted cross-platform workflow | Passed on the named branding revision, including Linux and Windows regression jobs |
 
 These hosted results are recorded for source commit [`e203c2e`](https://github.com/SuryaK999/Notch-win-linux/commit/e203c2e99baaeca97ace2bf8482df49a8a02534b) in [GitHub Actions run 37185720671](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37185720671). The unsigned evaluation artifact is **`notchling-windows-x64-unpackaged`**. Native launch, perceived icon appearance, mixed-monitor interaction, and Windows 10/11 hardware qualification remain unrecorded.
+
+## Installed Windows app verification — 4 October 2026 UTC
+
+Source [`7584703`](https://github.com/SuryaK999/Notch-win-linux/commit/7584703b1ca6c634a1d3273bc48f3c85954b74ac) passed every job in [CI run 37191033515](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515). The Windows job tested the actual evaluation setup and the executable installed by it, rather than launching from the build directory. [Download the tested installer artifact](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515/artifacts/11298892753); it contains `Notchling-0.2.0-windows-x64-evaluation-setup.exe` and expires after 14 days.
+
+| Check | Actual result / scope |
+| --- | --- |
+| Windows and Linux regression jobs | Passed; 207 cases per host: 92 core, 58 commerce, 36 Debug view-model, one Release Free fixture, 10 native service doubles, and 10 Python release fixtures. Native source projections also compiled. |
+| Native Release build and publish | Real WinUI/XAML build and framework-dependent publish passed; required nonempty `resources.pri` present; no bundled shared runtime files found |
+| Setup EXE size | **8,875,059 bytes**, 8.46 MiB / 8.88 MB |
+| Published application payload | **40,648,773 bytes**, 38.77 MiB; separate from shared-runtime disk usage and installer bookkeeping |
+| Missing Windows App Runtime | Setup downloaded **106,879,800 bytes**, verified Microsoft's installer signature, installed it, and verified all four required x64 runtime registrations |
+| .NET prerequisite | Existing .NET **10.0.11** reused; the cloud run did not test missing-.NET installation |
+| Native launch | Visible window with expected title and nonzero native icon; first window in **696.9 ms**; five bounded message-responsiveness samples passed |
+| Free UI interaction | Opened notch; toggled pin and verified saved preference; genuine no-player media controls disabled; Pomodoro started, paused, and reset; scratchpad edited, durably saved, recovered after navigation, and cleared |
+| Short resource sample | **5.02 seconds** immediately after launch: working set **107.27 MiB**, private memory **30.51 MiB**, CPU **0.778%** normalized across logical processors |
+| Cleanup and uninstall | Bounded cleanup of the owned test process and actual silent uninstaller completed; graceful save-on-Quit and upgrade/rollback were not tested |
+
+The diagnostics artifact, `notchling-windows-cloud-test-results`, contains `package-size.json`, `windows-smoke.json`, `windows-ui-smoke.json`, `installer-smoke.log`, and `setup-prerequisites.log`. The native report records OS/version, window bounds, runtime identities, process measurements, and interaction results. The artifact digest identifies GitHub's downloaded archive; it must not be represented as the enclosed setup EXE's SHA-256.
+
+Real installed-app execution exposed and fixed three failures that successful compilation had not caught: compiled XAML was omitted from publish, an unavailable accessibility notification aborted startup, and a null pointer-capture collection crashed interaction. The package now uses the SDK's PRI publish hook, theme notifications have native accessibility fallbacks, and uncaptured pointers are treated as an empty collection. Pin state also follows toggle changes from accessibility clients instead of relying only on Click.
+
+This hosted Windows desktop result does **not** qualify consumer Windows 10/11 hardware, Narrator, high contrast, mixed DPI, real playback/audio, animation frame pacing, sustained idle performance, production billing, signed updates, or missing-.NET/UAC/offline setup. The five-second sample is a startup observation, not the 60-second settled-idle target. With both shared runtimes absent, first-install transfer is roughly **147 MB** at current versions; the .NET portion is an official download-size estimate, not a measured installation. See [delivery](release-delivery.md) and [native qualification](native-qualification.md) for the remaining gates.
