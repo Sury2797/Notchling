@@ -1,7 +1,11 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Security;
+using Microsoft.Win32;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
+using Notch.Windows.Services;
 using Windows.UI;
 using Windows.UI.ViewManagement;
 
@@ -18,14 +22,48 @@ internal static class NativeTheme
     {
         "#050505", "#141414", "#191919", "#1B1B1B", "#202020", "#242424", "#252525", "#102218", "#292422", "Black"
     };
-    private static readonly AccessibilitySettings Accessibility = new();
-    private static readonly UISettings Settings = new();
+    private static readonly AccessibilitySettings? Accessibility = TryCreate(() => new AccessibilitySettings());
+    private static readonly UISettings? Settings = TryCreate(() => new UISettings());
     private static DispatcherQueue? _dispatcher;
     private static bool _subscribed;
 
     public static event EventHandler? Changed;
-    public static bool IsHighContrast => Accessibility.HighContrast;
-    public static double TextScaleFactor => Settings.TextScaleFactor;
+    public static bool IsHighContrast
+    {
+        get
+        {
+            if (Accessibility is not null)
+            {
+                try { return Accessibility.HighContrast; }
+                catch (Exception error) when (Unsupported(error)) { }
+            }
+            var state = new HighContrastState { Size = (uint)Marshal.SizeOf<HighContrastState>() };
+            return SystemParametersInfo(0x0042, state.Size, ref state, 0) && (state.Flags & 1) != 0;
+        }
+    }
+    public static double TextScaleFactor
+    {
+        get
+        {
+            if (Settings is not null)
+            {
+                try
+                {
+                    var factor = Settings.TextScaleFactor;
+                    if (double.IsFinite(factor) && factor > 0) return factor;
+                }
+                catch (Exception error) when (Unsupported(error)) { }
+            }
+            try
+            {
+                using var preferences = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Accessibility");
+                if (preferences?.GetValue("TextScaleFactor") is int percentage)
+                    return Math.Clamp(percentage, 100, 225) / 100d;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or SecurityException) { }
+            return 1;
+        }
+    }
     public static SolidColorBrush Foreground => Brush("#FFFFFF");
     public static SolidColorBrush Muted => Brush("#919191");
     public static SolidColorBrush Background => Brush("#050505");
@@ -39,12 +77,40 @@ internal static class NativeTheme
         ArgumentNullException.ThrowIfNull(dispatcher);
         _dispatcher = dispatcher;
         if (_subscribed) return;
-        Accessibility.HighContrastChanged += (_, _) => RequestUpdate();
-        Settings.ColorValuesChanged += (_, _) => RequestUpdate();
-        Settings.TextScaleFactorChanged += (_, _) => RequestUpdate();
+        if (Accessibility is not null)
+            TrySubscribe("HighContrastChanged", () => Accessibility.HighContrastChanged += (_, _) => RequestUpdate());
+        if (Settings is not null)
+        {
+            TrySubscribe("ColorValuesChanged", () => Settings.ColorValuesChanged += (_, _) => RequestUpdate());
+            TrySubscribe("TextScaleFactorChanged", () => Settings.TextScaleFactorChanged += (_, _) => RequestUpdate());
+        }
         _subscribed = true;
         Update();
     }
+
+    // The host also calls this for WM_SETTINGCHANGE, covering desktops without WinRT notifications.
+    public static void Refresh() => RequestUpdate();
+
+    private static T? TryCreate<T>(Func<T> create) where T : class
+    {
+        try { return create(); }
+        catch (Exception error) when (Unsupported(error))
+        {
+            StartupDiagnostics.Write("Optional Windows theme API unavailable: " + typeof(T).Name, error);
+            return null;
+        }
+    }
+
+    private static void TrySubscribe(string notification, Action subscribe)
+    {
+        try { subscribe(); }
+        catch (Exception error) when (Unsupported(error))
+        {
+            StartupDiagnostics.Write("Optional Windows theme notification unavailable: " + notification, error);
+        }
+    }
+
+    private static bool Unsupported(Exception error) => error is COMException or PlatformNotSupportedException;
 
     public static SolidColorBrush Brush(string color)
     {
@@ -70,15 +136,40 @@ internal static class NativeTheme
     private static Color Resolve(string value)
     {
         var original = Parse(value);
-        if (!Accessibility.HighContrast || original.A == 0) return original;
+        if (!IsHighContrast || original.A == 0) return original;
         // Preserve an inverse text/background pair for selected tabs and dates.
         // Saturated chart/status colors use the system link color, while dark
         // surfaces and neutral outlines use the user's window and text colors.
-        if (SurfaceColors.Contains(value)) return Settings.UIElementColor(UIElementType.Window);
+        if (SurfaceColors.Contains(value)) return SystemColor(UIElementType.Window, 5);
         var difference = Math.Max(original.R, Math.Max(original.G, original.B)) - Math.Min(original.R, Math.Min(original.G, original.B));
-        if (difference > 24) return Settings.UIElementColor(UIElementType.Hotlight);
-        return Settings.UIElementColor(UIElementType.WindowText);
+        if (difference > 24) return SystemColor(UIElementType.Hotlight, 26);
+        return SystemColor(UIElementType.WindowText, 8);
     }
+
+    private static Color SystemColor(UIElementType element, int win32Color)
+    {
+        if (Settings is not null)
+        {
+            try { return Settings.UIElementColor(element); }
+            catch (Exception error) when (Unsupported(error)) { }
+        }
+        var color = GetSysColor(win32Color);
+        return Microsoft.UI.ColorHelper.FromArgb(255, (byte)color, (byte)(color >> 8), (byte)(color >> 16));
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HighContrastState
+    {
+        internal uint Size;
+        internal uint Flags;
+        internal nint DefaultScheme;
+    }
+
+    [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(uint action, uint parameter, ref HighContrastState state, uint flags);
+    [DllImport("user32.dll")]
+    private static extern uint GetSysColor(int index);
 
     private static Color Parse(string value)
     {

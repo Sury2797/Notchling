@@ -111,7 +111,8 @@ public sealed partial class MainWindow : Window
         if (_quitting) return;
         try { _windowIcon.RefreshForDpi(_tray.SetIcon); }
         catch (Exception error) { System.Diagnostics.Debug.WriteLine($"App icon DPI refresh: {error.Message}"); }
-        RenderShell(false, reposition: false);
+        // Refresh also publishes the existing theme event, which renders the shell once.
+        NativeTheme.Refresh();
     }
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs args)
     {
