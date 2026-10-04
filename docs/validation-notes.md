@@ -107,3 +107,20 @@ python3 -m unittest discover -s tests/release -v
 ```
 
 The linked native-service tests use platform doubles and the source projection check does not run `InitializeComponent`. Windows CI performs the real XAML build; each consumer OS still needs [native qualification](native-qualification.md). The remediation CI run above verifies the named source commit; the historical green run remains separate. Documentation-only follow-up commits do not change those tested sources.
+
+## Notchling branding verification — 4 October 2026
+
+The approved public name is **Notchling**, with **A — Pixel Dragon** as its selected mascot. Source branding, public window/tray labels, application metadata, installer/update filenames, billing mail/return text, README and product documentation were updated together. Existing workspace, credential, entitlement and installer identities remain compatible.
+
+| Check | Recorded result / limit |
+| --- | --- |
+| Linked native C# / WinUI projections | Compiled successfully against the Windows SDK; desktop UI not executed |
+| View-model regressions | 36 Debug scenarios passed; one Release Free-plan scenario passed |
+| Billing/commerce | Updated service built with zero warnings/errors; 58 synthetic commerce checks passed |
+| Release notice fixtures | Five passed after the new application filenames were applied |
+| Project/XAML syntax | Parsed successfully |
+| Pixel Dragon assets | Approved A artwork extracted to a 512 × 512 RGBA master; ten ICO frames from 16–256 px; transparency and small-size previews reviewed against light/dark backgrounds |
+| Native icon lifecycle | Explicit window/tray handles, DPI refresh, Explorer recovery, and deterministic cleanup implemented; linked native source compiled; Windows visual qualification pending |
+| Renamed application Windows build/publish | Pending the branding commit's Windows CI run |
+
+The successful remediation workflow above records its named source revision, before this branding change. It is not evidence that a pending branding build has run.

@@ -1,4 +1,4 @@
-# Privacy and data handling
+# Notchling privacy and data handling
 
 **Development privacy notice — 4 October 2026.** The project's maintainer is [SuryaK999](https://github.com/SuryaK999). Before operating a paid service, publish the actual controller identity, private contact, hosting/subprocessor details, retention schedule and applicable regional rights. Unconfigured services make no billing requests.
 
@@ -13,7 +13,9 @@
 | System / media data | Windows APIs for current local display; optional services may be unavailable |
 | Subscription entitlement | Locally cached signed entitlement/credential state for the configured billing service; contains no payment-card details |
 
-Notch does not provide a cloud workspace synchronization service. There is no app analytics/tracking SDK in this checkout. Plaintext files and export backups can contain personal information; secure the device and store backups carefully.
+Notchling does not provide a cloud workspace synchronization service. There is no app analytics/tracking SDK in this checkout. Plaintext files and export backups can contain personal information; secure the device and store backups carefully.
+
+The data folder keeps its existing `Notch` name for compatibility. The branding change does not relocate local files or replace existing Windows vault identities.
 
 ## Optional network requests
 

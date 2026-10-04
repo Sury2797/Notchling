@@ -200,7 +200,7 @@ public sealed class WindowsSystemService : ISystemService
                 if (!awake) return;
                 _awakeRequests = new BlockingCollection<AwakeRequest>();
                 var requests = _awakeRequests;
-                _awakeThread = new Thread(() => AwakeWorker(requests)) { IsBackground = true, Name = "Notch power request" };
+                _awakeThread = new Thread(() => AwakeWorker(requests)) { IsBackground = true, Name = ProductIdentity.DisplayName + " power request" };
                 _awakeThread.Start();
             }
             var request = new AwakeRequest(awake);

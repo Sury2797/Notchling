@@ -1,4 +1,4 @@
-# Notch — engineering and product audit
+# Notchling — engineering and product audit
 
 **Date:** 3 October 2026
 
@@ -66,7 +66,7 @@ See [validation notes](docs/validation-notes.md), [Windows support](docs/windows
 
 ## Original audit findings
 
-The remainder preserves the original problem descriptions and acceptance intent for traceability. Statements about absent functionality describe the pre-repair snapshot; use the implementation table above for current status.
+The remainder preserves the original problem descriptions and acceptance intent for traceability, including the former **Notch** product name. Statements about absent functionality describe the pre-repair snapshot; use the implementation table above for current status.
 
 ## How to read the findings
 

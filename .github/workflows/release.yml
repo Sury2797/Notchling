@@ -1,4 +1,4 @@
-name: Signed release candidate
+name: Notchling signed release candidate
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
         run: ./scripts/build-release.ps1 -Version $env:NOTCH_RELEASE_VERSION
       - uses: actions/upload-artifact@v6
         with:
-          name: notch-signed-release-candidate
+          name: notchling-signed-release-candidate
           path: artifacts/release/*
           if-no-files-found: error
           retention-days: 30
@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v6
         with:
-          name: notch-signed-release-candidate
+          name: notchling-signed-release-candidate
           path: artifacts/release
       - name: Create reviewable GitHub release draft
         env:
@@ -64,4 +64,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           [[ "$NOTCH_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
-          gh release create "v$NOTCH_RELEASE_VERSION" artifacts/release/* --draft --target "$NOTCH_RELEASE_REVISION" --title "Notch $NOTCH_RELEASE_VERSION" --notes "Signed Windows 10 22H2 and Windows 11 x64 candidate. Complete the native qualification matrix and deployment/customer-policy checklist before publishing this draft."
+          gh release create "v$NOTCH_RELEASE_VERSION" artifacts/release/* --draft --target "$NOTCH_RELEASE_REVISION" --title "Notchling $NOTCH_RELEASE_VERSION" --notes "Signed Windows 10 22H2 and Windows 11 x64 candidate. Complete the native qualification matrix and deployment/customer-policy checklist before publishing this draft."

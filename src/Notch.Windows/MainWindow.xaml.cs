@@ -21,6 +21,7 @@ public sealed partial class MainWindow : Window
     private readonly MainViewModel _vm;
     private readonly OverlayHost _host;
     private readonly TrayService _tray;
+    private readonly WindowIcon _windowIcon;
     private FeaturedToolsView? _featured;
     private UtilityToolsView? _utilities;
     private readonly Dictionary<ModuleId, Button> _buttons = [];
@@ -40,11 +41,14 @@ public sealed partial class MainWindow : Window
         NativeTheme.Initialize(DispatcherQueue);
         _host = new(this);
         _vm = new(DispatcherQueue) { WindowHandle = _host.Handle };
-        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "Notch.ico"));
-        _tray = new(_host.Handle, () => { Open(); Activate(); }, OpenSettings, () => _ = QuitAsync());
+        Title = ProductIdentity.WindowTitle;
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Notchling.ico");
+        AppWindow.SetIcon(iconPath);
+        _windowIcon = new(_host.Handle, iconPath);
+        _tray = new(_host.Handle, () => { Open(); Activate(); }, OpenSettings, () => _ = QuitAsync(), _windowIcon.SmallIcon);
         _host.ToggleRequested += (_, _) => Toggle();
         _host.ShowRequested += (_, _) => Open();
-        _host.DisplayChanged += (_, _) => RenderShell(false, reposition: false);
+        _host.DisplayChanged += OnDisplayChanged;
         _host.Error += (_, message) => _vm.ShowError(message);
         _host.PowerStateChanged += (_, transition) => { if (transition.Suspended) _vm.OnSuspending(); else _vm.OnResumed(transition.SuspendedFor); };
         _vm.CanPresentActivity = () => _host.IsVisible && !EditorHasFocus();
@@ -72,14 +76,14 @@ public sealed partial class MainWindow : Window
     {
         if (_started) return; _started = true;
         await _vm.InitializeAsync(); RenderShell(false);
-        if (!_host.HotkeyRegistered) _vm.ShowError("Ctrl+Shift+Space is already registered by another app. Open Notch from the tray.");
-        if (!_tray.IsAvailable) { _vm.ShowError("The tray icon is unavailable. Right-click the notch for settings or Quit."); _vm.Overlay.Expand(ModuleId.Home); }
+        if (!_host.HotkeyRegistered) _vm.ShowError($"Ctrl+Shift+Space is already registered by another app. Open {ProductIdentity.DisplayName} from the tray.");
+        if (!_tray.IsAvailable) { _vm.ShowError($"The tray icon is unavailable. Right-click {ProductIdentity.DisplayName} for Settings or Quit."); _vm.Overlay.Expand(ModuleId.Home); }
     }
     private MenuFlyout MakeContextMenu()
     {
         var menu = new MenuFlyout();
         void Item(string name, Action action) { var item = new MenuFlyoutItem { Text = name }; item.Click += (_, _) => action(); menu.Items.Add(item); }
-        Item("Open notch", Open); Item("Settings", OpenSettings); Item("Hide notch", _host.Hide); menu.Items.Add(new MenuFlyoutSeparator()); Item("Quit Notch", () => _ = QuitAsync()); return menu;
+        Item("Open " + ProductIdentity.DisplayName, Open); Item("Settings", OpenSettings); Item("Hide " + ProductIdentity.DisplayName, _host.Hide); menu.Items.Add(new MenuFlyoutSeparator()); Item("Quit " + ProductIdentity.DisplayName, () => _ = QuitAsync()); return menu;
     }
     private void BuildToolbar()
     {
@@ -102,11 +106,18 @@ public sealed partial class MainWindow : Window
         }
     }
     private void OnThemeChanged(object? sender, EventArgs args) { if (!_quitting) RenderShell(false); }
+    private void OnDisplayChanged(object? sender, EventArgs args)
+    {
+        if (_quitting) return;
+        try { _windowIcon.RefreshForDpi(_tray.SetIcon); }
+        catch (Exception error) { System.Diagnostics.Debug.WriteLine($"App icon DPI refresh: {error.Message}"); }
+        RenderShell(false, reposition: false);
+    }
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs args)
     {
         if (_quitting) return;
         if (args.PropertyName is nameof(MainViewModel.Preferences) or nameof(MainViewModel.IsDemo) or nameof(MainViewModel.IsReady) or nameof(MainViewModel.IsPremium)) RenderShell(false);
-        else if (args.PropertyName is nameof(MainViewModel.Media) or nameof(MainViewModel.FocusTime)) CompactTitle.Text = _vm.Media?.Title ?? (_vm.FocusRunning ? "Focus · " + _vm.FocusTime : "Notch");
+        else if (args.PropertyName is nameof(MainViewModel.Media) or nameof(MainViewModel.FocusTime)) CompactTitle.Text = _vm.Media?.Title ?? (_vm.FocusRunning ? "Focus · " + _vm.FocusTime : ProductIdentity.DisplayName);
         else if (args.PropertyName == nameof(MainViewModel.Error)) { ErrorBar.Message = _vm.Error; ErrorBar.IsOpen = !string.IsNullOrWhiteSpace(_vm.Error); }
         else if (args.PropertyName is nameof(MainViewModel.Status) or nameof(MainViewModel.SaveState) or nameof(MainViewModel.PlanStatus)) UpdateStatus();
     }
@@ -150,7 +161,7 @@ public sealed partial class MainWindow : Window
         PinButton.Foreground = _vm.Preferences.Pinned ? NativeTheme.SelectedForeground : NativeTheme.Foreground;
         UpdateStatus();
         ErrorBar.Message = _vm.Error; ErrorBar.IsOpen = !string.IsNullOrWhiteSpace(_vm.Error);
-        CompactTitle.Text = _vm.Media?.Title ?? (_vm.FocusRunning ? "Focus · " + _vm.FocusTime : "Notch");
+        CompactTitle.Text = _vm.Media?.Title ?? (_vm.FocusRunning ? "Focus · " + _vm.FocusTime : ProductIdentity.DisplayName);
         if (activity && _vm.Overlay.Activity is { } notification)
         {
             ActivityOpenButton.Visibility = notification.Destination is null ? Visibility.Collapsed : Visibility.Visible;
@@ -255,11 +266,11 @@ public sealed partial class MainWindow : Window
             if (discard) await _vm.DiscardAndDisposeAsync(); else await _vm.DisposeAsync();
             _vm.PropertyChanged -= OnViewModelChanged;
             NativeTheme.Changed -= OnThemeChanged;
-            _utilities?.Dispose(); _featured?.Dispose(); _tray.Dispose(); _host.Dispose(); Close(); Application.Current.Exit();
+            _utilities?.Dispose(); _featured?.Dispose(); _tray.Dispose(); _windowIcon.Dispose(); _host.Dispose(); Close(); Application.Current.Exit();
         }
         catch (Exception error)
         {
-            _quitting = false; _vm.ShowError("Notch could not finish closing: " + error.Message); Open();
+            _quitting = false; _vm.ShowError(ProductIdentity.DisplayName + " could not finish closing: " + error.Message); Open();
         }
         finally { _closingAttempt = false; if (!_quitting) { ToolContent.IsEnabled = _vm.IsReady; PinButton.IsEnabled = _vm.IsReady; foreach (var button in _buttons.Values) button.IsEnabled = true; } }
     }

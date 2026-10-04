@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Notch.Core;
 using System.Runtime.InteropServices;
 
 namespace Notch.Windows;
@@ -14,7 +15,9 @@ public partial class App : Application
         _instance = new Mutex(true, "Local\\Notch.Desktop." + Environment.UserName, out var ownsInstance);
         if (!ownsInstance)
         {
-            var existing = FindWindow(null, "Notch — Desktop companion");
+            var existing = FindWindow(null, ProductIdentity.WindowTitle);
+            // An earlier version can still own the stable single-instance mutex during an upgrade.
+            if (existing == 0) existing = FindWindow(null, "Notch — Desktop companion");
             if (existing != 0) { ShowWindow(existing, 4); PostMessage(existing, 0x8001, 0, 0); }
             Exit(); return;
         }

@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Notch.Core;
 using Notch.Windows.ViewModels;
 using Notch.Windows.Interop;
@@ -287,7 +288,7 @@ public sealed partial class UtilityToolsView : UserControl
     private void ScreenTime()
     {
         ContentStack.Children.Add(Card(Text(_vm.System is { } system ? FocusSession.Format(system.SessionScreenTime) : "00:00", 46)));
-        ContentStack.Children.Add(Text("Active screen time since Notch started. No app names, window titles, or screenshots are recorded. This is a session counter, not a historical activity tracker.", 14, true));
+        ContentStack.Children.Add(Text($"Active screen time since {ProductIdentity.DisplayName} started. No app names, window titles, or screenshots are recorded. This is a session counter, not a historical activity tracker.", 14, true));
     }
     private void Emoji()
     {
@@ -355,9 +356,19 @@ public sealed partial class UtilityToolsView : UserControl
     private void Settings()
     {
         var preferences = _vm.Preferences;
+        var identity = new Grid { ColumnSpacing = 14 };
+        identity.ColumnDefinitions.Add(new() { Width = new GridLength(44) });
+        identity.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        var mascot = new Image { Source = new BitmapImage(new Uri("ms-appx:///Assets/Notchling.png")), Width = 44, Height = 44, Stretch = Stretch.Uniform };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAccessibilityView(mascot, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+        identity.Children.Add(mascot);
+        var about = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+        about.Children.Add(Text(ProductIdentity.DisplayName, 20));
+        about.Children.Add(Text("Native desktop companion · " + typeof(App).Assembly.GetName().Version?.ToString(3), 12, true));
+        Grid.SetColumn(about, 1); identity.Children.Add(about); ContentStack.Children.Add(Card(identity));
         ContentStack.Children.Add(Row(Button("Check for verified updates", _vm.CheckForUpdatesAsync), Button("Release page", () => OpenLink("https://github.com/SuryaK999/Notch-win-linux/releases"))));
         ContentStack.Children.Add(Text("Behavior", 15));
-        Toggle("Pin the expanded notch", preferences.Pinned, value => _vm.Preferences with { Pinned = value });
+        Toggle("Keep Notchling expanded", preferences.Pinned, value => _vm.Preferences with { Pinned = value });
         Toggle("Switch tools on hover", preferences.HoverNavigation, value => _vm.Preferences with { HoverNavigation = value });
         Toggle("Reduce motion", preferences.ReducedMotion, value => _vm.Preferences with { ReducedMotion = value });
         Toggle("Capture clipboard text (memory only)", preferences.CaptureClipboard, value => _vm.Preferences with { CaptureClipboard = value });
@@ -368,7 +379,7 @@ public sealed partial class UtilityToolsView : UserControl
         ContentStack.Children.Add(Row(focus, hydration, Button("Save intervals", () => _vm.SetPreferencesAsync(_vm.Preferences with { FocusMinutes = double.IsFinite(focus.Value) ? (int)focus.Value : 25, HydrationMinutes = double.IsFinite(hydration.Value) ? (int)hydration.Value : 30 }))));
         var monitor = new NumberBox { Header = "Monitor index (0 = primary)", Minimum = 0, Maximum = 16, Value = DraftNumber("monitor", preferences.ActiveMonitor), Width = 260 };
         TrackNumber("monitor", monitor);
-        ContentStack.Children.Add(Row(monitor, Button("Move notch", () => _vm.SetPreferencesAsync(_vm.Preferences with { ActiveMonitor = double.IsFinite(monitor.Value) ? (int)monitor.Value : 0, MonitorDeviceId = null }))));
+        ContentStack.Children.Add(Row(monitor, Button("Move Notchling", () => _vm.SetPreferencesAsync(_vm.Preferences with { ActiveMonitor = double.IsFinite(monitor.Value) ? (int)monitor.Value : 0, MonitorDeviceId = null }))));
         Toggle("Hide during fullscreen apps", preferences.HideInFullscreen, value => _vm.Preferences with { HideInFullscreen = value });
         var horizontal = new NumberBox { Header = "Horizontal offset (DIPs)", Value = DraftNumber("offset-x", preferences.HorizontalOffset), Minimum = -1000, Maximum = 1000, Width = 210 };
         var top = new NumberBox { Header = "Top offset (DIPs)", Value = DraftNumber("offset-y", preferences.TopOffset), Minimum = 0, Maximum = 1000, Width = 210 };
@@ -399,7 +410,7 @@ public sealed partial class UtilityToolsView : UserControl
         else ContentStack.Children.Add(Text("Live subscriptions are awaiting server configuration. Free features work without an account.", 12, true));
         ContentStack.Children.Add(Text("Recent notifications", 15));
         foreach (var activity in _vm.NotificationHistory.Take(10)) ContentStack.Children.Add(Text(activity.Source + ": " + activity.Title, 12, true));
-        ContentStack.Children.Add(Text("Ctrl + Shift + Space opens the notch. Esc collapses. Hover navigation never approves an agent command or launches a payment action.", 12, true));
+        ContentStack.Children.Add(Text("Ctrl + Shift + Space opens Notchling. Esc collapses the panel. Your local notebook stays on this device.", 12, true));
     }
     private void Toggle(string label, bool value, Func<bool, AppPreferences> update)
     {
@@ -454,8 +465,8 @@ public sealed partial class UtilityToolsView : UserControl
         HasOpenDialog = true;
         try
         {
-            var picker = new FileSavePicker { SuggestedFileName = "Notch-notebook" };
-            picker.FileTypeChoices.Add("Notch notebook JSON", new List<string> { ".json" });
+            var picker = new FileSavePicker { SuggestedFileName = ProductIdentity.DisplayName + "-notebook" };
+            picker.FileTypeChoices.Add(ProductIdentity.DisplayName + " notebook JSON", new List<string> { ".json" });
             WinRT.Interop.InitializeWithWindow.Initialize(picker, _vm.WindowHandle);
             var file = await picker.PickSaveFileAsync();
             if (file is null) return;

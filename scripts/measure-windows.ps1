@@ -1,5 +1,5 @@
 param(
-    [string]$ProcessName = "Notch.Windows",
+    [string]$ProcessName = "Notchling.Windows",
     [ValidateRange(10, 300)][int]$Seconds = 30
 )
 $ErrorActionPreference = "Stop"

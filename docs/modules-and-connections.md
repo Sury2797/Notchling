@@ -1,6 +1,6 @@
 # Modules and connections
 
-Notch has three presentation states: a collapsed strip, an expanded selected tool and a temporary live activity. The separate dock changes tools. Pinning keeps a panel open; dismissing an activity restores the previous panel. Activities are deduplicated and use a bounded queue.
+Notchling has three presentation states: a collapsed strip, an expanded selected tool and a temporary live activity. The separate dock changes tools. Pinning keeps a panel open; dismissing an activity restores the previous panel. Activities are deduplicated and use a bounded queue.
 
 The catalog below describes the implemented development build and the planned commercial split. **Release enforces Free/Premium access; billing is available only after secure publisher-service configuration. Debug builds visibly enable development tools.** Native behavior and external connections still require the [release checks](release-readiness.md).
 
@@ -11,7 +11,7 @@ The catalog below describes the implemented development build and the planned co
 | Home | Summary of connected tools and local state | Available navigation summary in both plans; extended dashboard data requires Premium. Empty states precede optional labeled demo data |
 | Media | Windows media sessions, playback, artwork, timeline and volume | Basic play/pause/previous/next in Free; full panel in Premium. The player must expose a system media session; seeking and transport availability depend on that session |
 | Revenue | Read-only Stripe captured successful charges after refunds; daily totals and recent payments | Premium. Requires a restricted Stripe credential. Totals are payment revenue, not subscription MRR; mixed currencies are not summed. Polar, Dodo and AdSense are unsupported |
-| Analytics | Configured HTTPS endpoint using a normalized JSON response | Premium. Optional bearer credential and the adapter schema below; no built-in website tracking or provider OAuth |
+| Analytics | Configured HTTPS endpoint using a normalized JSON response | Premium. Requires a bearer credential and the adapter schema below; no built-in website tracking or provider OAuth |
 | Coding | Import local Claude or Codex session JSONL usage records | Premium. User-selected file only. Repeated Claude messages and cumulative Codex counters avoid double-counting; no inferred subscription quotas |
 | Calendar | Imported iCalendar events, recognized meeting links and local reminders | Premium. Single events, DAILY/WEEKLY rules, exclusions and OS time zones. Unsupported recurrence fails explicitly; no Google/Outlook OAuth or background account sync |
 | Weather | City geocoding, current conditions, hourly and daily forecasts | Premium. Explicit city, no GPS lookup; short-lived cache. Release requires the authenticated licensed weather proxy and attribution; there is no silent public-endpoint fallback |
@@ -37,7 +37,7 @@ The catalog contains Home plus 20 tool panels. Settings handles configuration; A
 
 Connections are optional. A missing account produces an unconfigured state, and a failed request produces an error rather than an unlabeled demo result. Imports operate on files the user chooses. Provider credentials belong in Windows Credential Locker, separately from local workspace JSON.
 
-Disconnecting a service must remove its saved credential and invalidate in-flight results. Never include credential values in setup scripts, examples, test output or screenshots. The Revenue adapter's Stripe credential is separate from the Notch subscription service.
+Disconnecting a service must remove its saved credential and invalidate in-flight results. Never include credential values in setup scripts, examples, test output or screenshots. The Revenue adapter's Stripe credential is separate from the Notchling subscription service.
 
 ## Analytics adapter schema
 
@@ -54,7 +54,7 @@ The configured HTTPS endpoint returns this normalized shape:
 }
 ```
 
-Counts must be nonnegative. The series and page list are bounded. A site label is display text, not an instruction to crawl a website. The saved `analytics` vault entry is sent as a bearer credential to the configured endpoint; credentials embedded in URLs are rejected.
+Counts must be nonnegative. The series and page list are bounded. A site label is display text, not an instruction to crawl a website. A saved `analytics` vault entry is required and sent as a bearer credential to the configured endpoint; credentials embedded in URLs are rejected. The panel identifies the snapshot timestamp and stale state instead of implying continuous live tracking.
 
 The [provider data contracts](../src/Notch.Core/Providers/README.md) define Stripe units and reporting limits, analytics validation, coding-import semantics, supported calendar recurrence and weather licensing requirements.
 

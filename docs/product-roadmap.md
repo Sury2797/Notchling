@@ -1,6 +1,6 @@
 # Product and platform roadmap
 
-Notch is a Windows-first desktop companion built around quick access, local utility and a compact native interface. The product model is a lightweight Free edition and **Premium at US$2 per month**. Linux desktop support follows the Windows release.
+Notchling is a Windows-first desktop companion built around quick access, local utility and a compact native interface. The product model is a lightweight Free edition and **Premium at US$2 per month**. Linux desktop support follows the Windows release.
 
 Debug exposes the broader development catalog; Release enforces the feature split and validates configured signed subscriptions. The repository does not activate a production payment service. See [pricing and subscription policy](pricing.md) for the exact boundaries.
 
@@ -22,7 +22,7 @@ Debug exposes the broader development catalog; Release enforces the feature spli
 
 Validate media, focus, notes, shelf, clipboard and system controls on Windows. Test empty and offline states alongside configured accounts. Refine typography, layout, keyboard focus and dock navigation before adding more integration breadth.
 
-Complete smooth panel-size transitions and measure input response, frame pacing, idle CPU, memory and handle growth. Preserve reduced motion and avoid waking hidden tools to redraw unchanged data.
+Validate panel-size transitions and measure input response, frame pacing, idle CPU, memory and handle growth. Preserve reduced motion and avoid waking hidden tools to redraw unchanged data.
 
 ### 2. Complete service and privacy validation
 
@@ -34,7 +34,7 @@ A commercially distributed app needs an appropriate weather service arrangement 
 
 Ship the basic Free experience without an application account for its local features. Configure and verify the implemented US$2 monthly Premium purchase flow, signed subscription state and Release feature enforcement. Define cancellation, payment failure, offline validation and account recovery before taking payment.
 
-Upgrading must preserve local data. A subscription ending must return access to Free without silently deleting Premium-created notes or file references. Validate the implemented recovery/export path as part of downgrade handling. The in-app read-only Stripe dashboard remains separate from the system used to bill Notch customers.
+Upgrading must preserve local data. A subscription ending must return access to Free without silently deleting Premium-created notes or file references. Validate the implemented recovery/export path as part of downgrade handling. The in-app read-only Stripe dashboard remains separate from the system used to bill Notchling customers.
 
 ### 4. Prepare paid distribution
 

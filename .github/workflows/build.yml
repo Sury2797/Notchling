@@ -1,4 +1,4 @@
-name: Native build and core checks
+name: Notchling native build and core checks
 
 on:
   push:
@@ -70,15 +70,15 @@ jobs:
           --configuration Release --runtime win-x64 --self-contained true
           -p:Platform=x64 -p:WindowsPackageType=None
           -p:WindowsAppSDKSelfContained=true -p:PublishSingleFile=false
-          --output artifacts/notch-windows-x64
+          --output artifacts/notchling-windows-x64
       - name: Bundle publisher notices and release inventory
-        run: python scripts/bundle-notices.py --publish artifacts/notch-windows-x64 --assets src/Notch.Windows/obj/project.assets.json
+        run: python scripts/bundle-notices.py --publish artifacts/notchling-windows-x64 --assets src/Notch.Windows/obj/project.assets.json
       - name: Archive application
         shell: pwsh
-        run: Compress-Archive -Path artifacts/notch-windows-x64/* -DestinationPath artifacts/notch-windows-x64.zip
+        run: Compress-Archive -Path artifacts/notchling-windows-x64/* -DestinationPath artifacts/notchling-windows-x64.zip
       - uses: actions/upload-artifact@v6
         with:
-          name: notch-windows-x64-unpackaged
-          path: artifacts/notch-windows-x64.zip
+          name: notchling-windows-x64-unpackaged
+          path: artifacts/notchling-windows-x64.zip
           if-no-files-found: error
           retention-days: 14

@@ -9,9 +9,9 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if (-not $IsWindows) { throw 'A signed Windows release must be built on Windows.' }
 $root = Split-Path -Parent $PSScriptRoot
-$publish = Join-Path $root 'artifacts/notch-windows-x64'
+$publish = Join-Path $root 'artifacts/notchling-windows-x64'
 $release = [IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
-$temporaryPfx = Join-Path ([IO.Path]::GetTempPath()) ('notch-signing-' + [Guid]::NewGuid().ToString('N') + '.pfx')
+$temporaryPfx = Join-Path ([IO.Path]::GetTempPath()) ('notchling-signing-' + [Guid]::NewGuid().ToString('N') + '.pfx')
 $certificate = $null
 $previousCertificates = @(Get-ChildItem Cert:\CurrentUser\My | Select-Object -ExpandProperty Thumbprint)
 $allowedTimestamp = [Uri]$TimestampUrl
@@ -49,7 +49,7 @@ try {
     Invoke-Checked 'dotnet' @('run', '--project', (Join-Path $root 'tests/Notch.ViewModel.Tests/Notch.ViewModel.Tests.csproj'), '--configuration', 'Release')
     Invoke-Checked 'dotnet' @('publish', (Join-Path $root 'src/Notch.Windows/Notch.Windows.csproj'), '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'true', '-p:Platform=x64', '-p:WindowsPackageType=None', '-p:WindowsAppSDKSelfContained=true', '-p:PublishSingleFile=false', "-p:Version=$Version", "-p:FileVersion=$Version.0", "-p:AssemblyVersion=$Version.0", '--output', $publish)
     # Sign only project-owned binaries; preserve publisher signatures on dependencies.
-    foreach ($file in @('Notch.Windows.exe', 'Notch.Windows.dll', 'Notch.Core.dll')) {
+    foreach ($file in @('Notchling.Windows.exe', 'Notchling.Windows.dll', 'Notch.Core.dll')) {
         $path = Join-Path $publish $file
         Invoke-Checked $signtool @('sign', '/s', 'My', '/sha1', $certificate.Thumbprint, '/fd', 'SHA256', '/tr', $TimestampUrl, '/td', 'SHA256', $path)
         Assert-Signed $path $certificate.Thumbprint
@@ -60,7 +60,7 @@ try {
     Invoke-Checked 'python' @((Join-Path $root 'scripts/bundle-notices.py'), '--publish', $publish, '--assets', (Join-Path $root 'src/Notch.Windows/obj/project.assets.json'), '--strict', '--installer-license', $installerLicense, '--installer-version', $installerVersion)
     $signCommand = '"' + $signtool + '" sign /s My /sha1 ' + $certificate.Thumbprint + ' /fd SHA256 /tr ' + $TimestampUrl + ' /td SHA256 $f'
     Invoke-Checked $Iscc @("/DAppVersion=$Version", "/DPublishDirectory=$publish", "/DReleaseDirectory=$release", "/Snotch=$signCommand", (Join-Path $root 'packaging/windows/Notch.iss'))
-    $installer = Join-Path $release "Notch-$Version-windows-x64-setup.exe"
+    $installer = Join-Path $release "Notchling-$Version-windows-x64-setup.exe"
     Assert-Signed $installer $certificate.Thumbprint
     $publicKeyPin = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($certificate.GetPublicKey())).ToLowerInvariant()
     $manifest = [ordered]@{
@@ -68,16 +68,16 @@ try {
         version = $Version
         minimumWindowsBuild = 19045
         architecture = 'x64'
-        installerUrl = "https://github.com/SuryaK999/Notch-win-linux/releases/download/v$Version/Notch-$Version-windows-x64-setup.exe"
+        installerUrl = "https://github.com/SuryaK999/Notch-win-linux/releases/download/v$Version/Notchling-$Version-windows-x64-setup.exe"
         sha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
         signerPublicKeySha256 = $publicKeyPin
         sizeBytes = (Get-Item $installer).Length
     }
-    $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $release 'notch-update.json') -Encoding utf8NoBOM
-    # SHA256 checksums cover installer + manifest. The installed update helper also
-    # verifies Authenticode and the already-trusted publisher key before launch.
+    $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $release 'notchling-update.json') -Encoding utf8NoBOM
+    # Checksums cover installer + manifest. Update helpers also verify
+    # Authenticode against the already-trusted installed publisher before launch.
     Remove-Item -LiteralPath (Join-Path $release 'SHA256SUMS') -Force -ErrorAction SilentlyContinue
-    foreach ($file in @($installer, (Join-Path $release 'notch-update.json'))) {
+    foreach ($file in @($installer, (Join-Path $release 'notchling-update.json'))) {
         $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
         "$hash  $([IO.Path]::GetFileName($file))" | Add-Content -LiteralPath (Join-Path $release 'SHA256SUMS') -Encoding utf8NoBOM
     }

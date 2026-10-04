@@ -260,7 +260,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     {
         if (_freeModule == _viewModel.SelectedModule && _viewModel.SelectedModule == ModuleId.Focus) { if (_freeFocusText is not null) _freeFocusText.Text = _viewModel.FocusTime; return; }
         _freeModule = _viewModel.SelectedModule; _freeView.Children.Clear();
-        _freeView.Children.Add(new TextBlock { Text = "Notch Free", FontSize = 24, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        _freeView.Children.Add(new TextBlock { Text = ProductIdentity.DisplayName + " Free", FontSize = 24, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         Button Action(string text, Func<Task> action) { var button = new Button { Content = text, Style = (Style)Application.Current.Resources["NotchButtonStyle"] }; button.Click += async (_, _) => await SafeAsync(action); return button; }
         if (_viewModel.SelectedModule == ModuleId.Media)
         {

@@ -142,7 +142,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsDemo => Preferences.DemoMode;
     public bool WorkspaceReadable => _workspaceReadable;
     public bool IsReady => _loaded && !_disposed;
-    private string WorkspaceRecoveryMessage => $"Your saved notebook could not be read. Its file is preserved and notebook saving is paused. Back up and repair or rename {Path.Combine(_dataDirectory, "workspace.json")}, then restart Notch.";
+    private string WorkspaceRecoveryMessage => $"Your saved notebook could not be read. Its file is preserved and notebook saving is paused. Back up and repair or rename {Path.Combine(_dataDirectory, "workspace.json")}, then restart {ProductIdentity.DisplayName}.";
 
     public MainViewModel(DispatcherQueue dispatcher, string? dataDirectory = null, IDataStore? store = null, IMediaService? mediaService = null, ISystemService? systemService = null, ISecretVault? vault = null)
     {
@@ -157,6 +157,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (_subscription is not null && configuration.BillingUrl is { } billingUrl && new Uri(billingUrl).Scheme == Uri.UriSchemeHttps)
             weatherConfiguration = WeatherServiceConfiguration.CommercialProxy(new Uri(new Uri(billingUrl.TrimEnd('/') + "/"), "v1/weather").AbsoluteUri);
         _weatherClient = new(_http, weatherConfiguration, () => _subscription?.SessionToken);
+        // Keep the established location across branding changes so existing notebooks and preferences remain available.
         _dataDirectory = dataDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Notch");
         _store = store ?? new LocalStore(_dataDirectory);
         ClipboardService = new(dispatcher);
@@ -602,7 +603,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         var prepared = await service.DownloadAsync(update, _lifetimeToken);
         if (!await SaveBeforeExitAsync()) return;
         await service.OpenInstallerAsync(prepared, _lifetimeToken);
-        Status = "Update installer opened. Save and quit Notch to let installation proceed.";
+        Status = $"Update installer opened. Save and quit {ProductIdentity.DisplayName} to let installation proceed.";
     }
     public Task RequestLoginAsync(string email) => _subscription?.RequestLoginAsync(email) ?? Task.FromException(new InvalidOperationException(_subscriptionUnavailable));
     public async Task VerifyLoginAsync(string email, string code) { if (_subscription is null) throw new InvalidOperationException(_subscriptionUnavailable); await _subscription.VerifyLoginAsync(email, code); await RefreshSubscriptionAsync(); }
@@ -787,7 +788,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (_disposed) return false;
         if (_loaded) return true;
-        ShowError("Notch is loading your saved settings and notebook. Please wait a moment.");
+        ShowError($"{ProductIdentity.DisplayName} is loading your saved settings and notebook. Please wait a moment.");
         return false;
     }
     private bool ReadyForWorkspaceInput()

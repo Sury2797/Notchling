@@ -1,4 +1,4 @@
-# Support, cancellation and refunds
+# Notchling support, cancellation and refunds
 
 **Development support:** [GitHub Issues](https://github.com/SuryaK999/Notch-win-linux/issues). Include the app version/commit, Windows edition/build, affected tool, expected behavior and minimal reproduction steps. Remove personal data and secrets. The public issue tracker is not a channel for credentials, card data or private billing records.
 

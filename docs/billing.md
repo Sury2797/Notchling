@@ -1,6 +1,6 @@
-# Billing and Premium verification
+# Notchling billing and Premium verification
 
-Notch includes a separate ASP.NET Core service, a portable entitlement validator, and a desktop billing client. Production commerce remains **disabled until the owner supplies a domain, Stripe configuration, an email sender, durable storage, signing keys, customer policies, and licensed weather access**. This repository does not contain live credentials, activate a subscription, or deploy a service. An email login, browser return, local setting, and demo mode cannot grant a paid entitlement.
+Notchling includes a separate ASP.NET Core service, a portable entitlement validator, and a desktop billing client. Production commerce remains **disabled until the owner supplies a domain, Stripe configuration, an email sender, durable storage, signing keys, customer policies, and licensed weather access**. This repository does not contain live credentials, activate a subscription, or deploy a service. An email login, browser return, local setting, and demo mode cannot grant a paid entitlement.
 
 Live Stripe keys additionally require **Billing__CommercialReleaseApproved=true**, set only after the publisher identity, customer terms, private support/refund route, tax configuration, and native release qualification are completed. Test credentials do not activate live charges.
 
@@ -10,7 +10,7 @@ Live Stripe keys additionally require **Billing__CommercialReleaseApproved=true*
 | --- | --- |
 | Price | Checkout verifies an active Stripe price of **US$2 every month**, quantity one. Additional applicable taxes/customer disclosures must be configured before sale. |
 | Free | Basic media transport, one Pomodoro and scratchpad, navigation, settings and accessibility. The desktop gates Premium features; existing saved work remains accessible for recovery/export. |
-| Identity and restore | Verified email with an eight-digit, single-use code; reinstall can restore through the same email. No password or card data enters Notch. |
+| Identity and restore | Verified email with an eight-digit, single-use code; reinstall can restore through the same email. No password or card data enters Notchling. |
 | Devices | Three most recently verified devices. Verifying a fourth replaces the oldest login; its cached proof expires within the offline limit. |
 | Session | A random 256-bit bearer session, hashed on the service and encrypted in Windows Credential Locker, expires after 30 days. |
 | Proof | RSA-SHA256 signature, issuer/audience checks, version, account and device binding. Public verification key only in desktop. |
@@ -54,7 +54,7 @@ Put the service behind HTTPS termination, with direct outbound access to Stripe/
 5. Webhook delivery must preserve raw request bytes and `Stripe-Signature`. The service checks HMAC-SHA256 signatures within five minutes, records processed IDs for 90 days, and **re-queries current Stripe state** for every customer event. Event timestamps/order never directly grant Premium. Provider failures return 503 for Stripe retry rather than acknowledge an unprocessed change.
 6. Verify purchase, refresh, renewal, payment failure, period-end cancellation, immediate cancellation, full/partial refund, dispute, duplicate/out-of-order event, SMTP failure, reinstall, fourth-device replacement and offline expiry in Stripe test mode. Do not collect live payments before these checks and owner configuration are complete.
 
-Customer creation uses a stable idempotency key. Checkout recovers an existing open session and refuses a second active/past-due/unpaid subscription for the same configured price. Browser success messages direct customers back to Notch to refresh; they are never purchase verification.
+Customer creation uses a stable idempotency key. Checkout recovers an existing open session and refuses a second active/past-due/unpaid subscription for the same configured price. Browser success messages direct customers back to Notchling to refresh; they are never purchase verification.
 
 ## API contract
 

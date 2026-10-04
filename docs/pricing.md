@@ -1,6 +1,6 @@
-# Free and Premium
+# Notchling Free and Premium
 
-Notch has a deliberately small **Free** edition and **Premium for US$2 per month**, billed monthly. Commercial charging is inactive until the publisher configures and verifies the billing service, signing and customer policies. Release starts Free; Debug visibly enables development access.
+Notchling has a deliberately small **Free** edition and **Premium for US$2 per month**, billed monthly. Commercial charging is inactive until the publisher configures and verifies the billing service, signing and customer policies. Release starts Free; Debug visibly enables development access.
 
 | Capability | Free — US$0 | Premium — US$2/month |
 | --- | --- | --- |
@@ -30,4 +30,4 @@ On downgrade, local material remains available for recovery/export. Premium edit
 
 Publish the legal publisher identity, private support/refund channel, applicable taxes and regional consumer disclosures. Approve [product terms](product-terms.md), including the proposed first-purchase refund window, and publish [privacy](privacy.md). Configure the production HTTPS domain, Stripe price/secrets, SMTP delivery, entitlement signing key, and licensed weather credentials using [billing setup](billing.md). Perform live sandbox lifecycle tests and separate native Windows 10/11 qualification.
 
-The application's Revenue dashboard is separate: it reads the user's configured Stripe reporting account and shows captured payments after refunds; it does not bill Notch customers or calculate MRR.
+The application's Revenue dashboard is separate: it reads the user's configured Stripe reporting account and shows captured payments after refunds; it does not bill Notchling customers or calculate MRR.

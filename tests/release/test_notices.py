@@ -14,11 +14,11 @@ spec.loader.exec_module(bundle)
 
 class NoticeBundleTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="Notch.Release.Tests-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="Notchling.Release.Tests-")
         self.root = Path(self.temporary.name)
         self.publish = self.root / "publish"
         self.publish.mkdir()
-        (self.publish / "Notch.Windows.exe").write_bytes(b"fixture, not an executable")
+        (self.publish / "Notchling.Windows.exe").write_bytes(b"fixture, not an executable")
         self.package = self.root / "packages/vendor/1.0.0"
         self.package.mkdir(parents=True)
         self.assets = self.root / "assets.json"

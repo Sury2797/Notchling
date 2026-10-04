@@ -1,4 +1,4 @@
-# Signed Windows delivery
+# Notchling signed Windows delivery
 
 The release path targets **Windows 10 22H2/build 19045 x64 and supported Windows 11 x64 releases equally**. Ordinary build CI produces an unsigned evaluation ZIP. The manual [release workflow](../.github/workflows/release.yml) prepares a signed installer, publisher notice bundle, SPDX inventory, checksums and a GitHub **draft** release. No signing credentials, commercial domain or native QA results are supplied by this repository.
 
@@ -11,9 +11,13 @@ The release path targets **Windows 10 22H2/build 19045 x64 and supported Windows
 
 Use version numbers consistently. The release script validates `major.minor.patch`, applies it to assembly/file metadata, names installer assets and writes the update manifest. Do not reuse an already-published version for different bits.
 
+The desktop entry point is `Notchling.Windows.exe`, and the signed installer is `Notchling-<version>-windows-x64-setup.exe`. Evaluation CI uploads `notchling-windows-x64-unpackaged`; the signed-candidate workflow uploads `notchling-signed-release-candidate`. Repository paths and `NOTCH_*` configuration/secret names remain stable.
+
 ## Installation, upgrade and rollback
 
 The Inno Setup installer runs per-user without admin rights. Files live under `%LOCALAPPDATA%\Programs\Notch\app\<version>`. Shortcuts point to that version. Setup refuses to install/uninstall while the application mutex is present, rather than forcibly killing unsaved work. The existing version directory stays available for recovery; failed or cancelled installation uses Inno Setup rollback.
+
+The compatible installation folder and AppId are deliberately retained under the Notchling brand. Setup uses Notchling for displayed names and shortcuts; retaining the identity avoids a second unrelated installation during an evaluation-build upgrade.
 
 Workspace JSON under `%LOCALAPPDATA%\Notch` and Windows Credential Locker entries are retained on upgrade/uninstall. Uninstall does not cancel billing. An intentional data reset requires an export and explicit user action; the installer has no workspace-deletion directive.
 
@@ -21,7 +25,7 @@ Preserve exports before downgrade. Only revert to a prior signed version with a 
 
 ## Verified updates
 
-The stable manifest is `https://github.com/SuryaK999/Notch-win-linux/releases/latest/download/notch-update.json`. `install-update.ps1` accepts only that channel and the exact versioned official installer asset. It bounds installer size, verifies SHA-256 and a valid trusted Authenticode signature, and checks the publisher key against a pin already trusted by the installed release. The remote manifest never supplies its own trust anchor.
+The stable manifest is `https://github.com/SuryaK999/Notch-win-linux/releases/latest/download/notchling-update.json`. `install-update.ps1` accepts only that channel and the exact versioned official installer asset. It bounds installer size, verifies SHA-256 and a valid trusted Authenticode signature, and checks the publisher key against a pin already trusted by the installed release. The remote manifest never supplies its own trust anchor.
 
 Settings also exposes an explicit update action through `WindowsUpdateService`. Its trust anchor requires matching valid Windows-trusted signatures on the installed executable and application assembly; a signed `dotnet.exe` alone cannot authorize an unsigned app DLL. Certificate checks run off the UI thread; the service streams bounded downloads, rechecks the hash/signature before opening Setup and refuses unsigned evaluation builds. It does not force the running app to close.
 

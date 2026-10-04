@@ -1,6 +1,6 @@
 # Third-party software and service notices
 
-The [Notch license](LICENSE) applies to the project's original code and assets. Third-party software, runtime components and service data retain their respective licenses and terms. The Notch license does not replace those terms or grant rights to third-party trademarks.
+The [Notchling license](LICENSE) applies to the project's original code and assets. Third-party software, runtime components and service data retain their respective licenses and terms. The Notchling license does not replace those terms or grant rights to third-party trademarks.
 
 This document records the dependency versions and publisher license files found in the restored Windows project. It is the maintained dependency summary. The release/build pipeline also copies exact publisher license/notice text into `ThirdPartyNotices/` and generates `publish-inventory.json` plus `sbom.spdx.json` from the release restore graph and published files. A restored dependency or build tool is not necessarily included in the published application.
 
@@ -57,7 +57,7 @@ Optional Stripe reporting and user-configured analytics access remain subject to
 
 ## Distribution requirements
 
-A self-contained Notch release includes third-party runtime files. Before distribution, inventory the actual published files and carry the complete applicable publisher licenses, copyright notices and third-party notice documents in the release package. Preserve any required notices already included by the publisher; do not replace them with this summary.
+A self-contained Notchling release includes third-party runtime files. Before distribution, inventory the actual published files and carry the complete applicable publisher licenses, copyright notices and third-party notice documents in the release package. Preserve any required notices already included by the publisher; do not replace them with this summary.
 
 The signed-installer path also records the actual Inno Setup compiler version and copies its installed publisher license.
 

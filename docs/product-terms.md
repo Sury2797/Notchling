@@ -1,4 +1,4 @@
-# Notch application terms
+# Notchling application terms
 
 **Draft policy — 4 October 2026. Billing is disabled until the publisher completes the commercial configuration and publishes these terms with its legal identity and required consumer disclosures.** This document provides reviewable product policy; it is not an active checkout or a claim that a legal review has occurred.
 
@@ -6,7 +6,7 @@ The project maintainer is [SuryaK999](https://github.com/SuryaK999). The source 
 
 ## Free and Premium
 
-Free provides basic media transport, one Pomodoro timer and one local scratchpad. Privacy controls, keyboard access, reduced motion and recovery/export remain available. Premium provides the supported extended tool suite for **US$2 per month**, billed monthly. External provider accounts, API charges and AI credits are separate; Notch includes no cloud sync or unlimited hosted-service allowance.
+Free provides basic media transport, one Pomodoro timer and one local scratchpad. Privacy controls, keyboard access, reduced motion and recovery/export remain available. Premium provides the supported extended tool suite for **US$2 per month**, billed monthly. External provider accounts, API charges and AI credits are separate; Notchling includes no cloud sync or unlimited hosted-service allowance.
 
 Development builds are for evaluation. Debug builds visibly expose development access. Release builds start with Free access unless a trusted subscription service supplies a valid, signed Premium entitlement. Configuring a price string or enabling demo mode does not constitute a purchase.
 
@@ -26,7 +26,7 @@ Before payment is enabled, the publisher must provide a private support channel 
 
 ## Data and availability
 
-Local workspace files remain on the device. Optional connections and billing requests contact their configured services as described in [Privacy](privacy.md). Keep independent backups. On expiry, Notch preserves existing material and allows recovery/export; it does not promise ongoing Premium editing without an active entitlement.
+Local workspace files remain on the device. Optional connections and billing requests contact their configured services as described in [Privacy](privacy.md). Keep independent backups. On expiry, Notchling preserves existing material and allows recovery/export; it does not promise ongoing Premium editing without an active entitlement.
 
 Features depend on compatible Windows APIs, external services and explicitly imported data. Optional unavailable media or accounts do not disable Free local tools. Linux desktop support is future work. Windows support is defined in [Windows support](windows-support.md).
 

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Notch.Core;
 
 namespace Notch.Windows.Interop;
 
@@ -10,6 +11,7 @@ public sealed class TrayService : IDisposable
     private const uint CallbackMessage = 0x8000 + 0x32;
     private const uint TrayId = 1;
     private const uint NimAdd = 0;
+    private const uint NimModify = 1;
     private const uint NimDelete = 2;
     private const uint NimSetVersion = 4;
     private const uint NinSelect = 0x0400;
@@ -22,14 +24,14 @@ public sealed class TrayService : IDisposable
     private readonly NativeMethods.SubclassProc _callback;
     private readonly nuint _subclassId;
     private readonly uint _taskbarCreated;
-    private readonly nint _icon;
+    private nint _icon;
     private bool _iconAdded;
     private bool _version4;
     private bool _disposed;
 
     public bool IsAvailable => _iconAdded;
 
-    public TrayService(nint hwnd, Action open, Action settings, Action quit)
+    public TrayService(nint hwnd, Action open, Action settings, Action quit, nint icon = 0)
     {
         if (hwnd == 0 || !NativeMethods.IsWindow(hwnd))
             throw new ArgumentException("A live native window handle is required.", nameof(hwnd));
@@ -43,7 +45,7 @@ public sealed class TrayService : IDisposable
         _callback = WindowProcedure;
         _subclassId = (nuint)Interlocked.Increment(ref s_nextSubclassId);
         _taskbarCreated = NativeMethods.RegisterWindowMessage("TaskbarCreated");
-        _icon = NativeMethods.SendMessage(hwnd, NativeMethods.WmGetIcon, 2, 0);
+        _icon = icon;
         if (_icon == 0)
             _icon = NativeMethods.SendMessage(hwnd, NativeMethods.WmGetIcon, 0, 0);
         if (_icon == 0)
@@ -51,6 +53,17 @@ public sealed class TrayService : IDisposable
         if (!NativeMethods.SetWindowSubclass(hwnd, _callback, _subclassId, 0))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not attach the notification-area hook.");
         AddIcon();
+    }
+
+    internal void SetIcon(nint icon)
+    {
+        if (_disposed || icon == 0) return;
+        // WindowIcon owns this handle. Keep it current even if Explorer is temporarily unavailable.
+        _icon = icon;
+        if (!_iconAdded) return;
+        var iconData = CreateIconData();
+        iconData.Flags = 0x0002; // NIF_ICON
+        ShellNotifyIcon(NimModify, ref iconData);
     }
 
     private void AddIcon()
@@ -74,7 +87,7 @@ public sealed class TrayService : IDisposable
         Flags = 0x0001 | 0x0002 | 0x0004 | 0x0080, // NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP
         Callback = CallbackMessage,
         Icon = _icon,
-        Tip = "Notch — Open controls",
+        Tip = ProductIdentity.DisplayName + " — Open controls",
         Info = string.Empty,
         InfoTitle = string.Empty,
     };
@@ -118,10 +131,10 @@ public sealed class TrayService : IDisposable
         uint selection;
         try
         {
-            NativeMethods.AppendMenu(menu, 0, 1, "Open Notch");
+            NativeMethods.AppendMenu(menu, 0, 1, "Open " + ProductIdentity.DisplayName);
             NativeMethods.AppendMenu(menu, 0, 2, "Settings");
             NativeMethods.AppendMenu(menu, 0x0800, 0, null);
-            NativeMethods.AppendMenu(menu, 0, 3, "Quit");
+            NativeMethods.AppendMenu(menu, 0, 3, "Quit " + ProductIdentity.DisplayName);
             NativeMethods.GetCursorPos(out var cursor);
             NativeMethods.SetForegroundWindow(_handle);
             selection = NativeMethods.TrackPopupMenuEx(menu, 0x0002 | 0x0100 | 0x0080,

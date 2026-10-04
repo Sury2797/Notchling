@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.UI.Xaml;
+using Notch.Core;
 
 namespace Notch.Windows.Interop;
 
@@ -160,7 +161,7 @@ public sealed class OverlayHost : IDisposable
                 _displayRetry.Start();
             }
             else
-                ReportError("The display layout is temporarily unavailable. Reconnect the display or reopen Notch to retry.");
+                ReportError($"The display layout is temporarily unavailable. Reconnect the display or reopen {ProductIdentity.DisplayName} to retry.");
             return false;
         }
     }
@@ -234,7 +235,7 @@ public sealed class OverlayHost : IDisposable
         catch (Exception error)
         {
             StopResizeAnimation();
-            ReportError($"The notch transition could not be refreshed: {error.Message}");
+            ReportError($"The {ProductIdentity.DisplayName} transition could not be refreshed: {error.Message}");
         }
     }
 
@@ -389,7 +390,7 @@ public sealed class OverlayHost : IDisposable
                 {
                     Show();
                     ShowRequested?.Invoke(this, EventArgs.Empty);
-                }, "Opening Notch");
+                }, "Opening " + ProductIdentity.DisplayName);
                 return 0;
             }
             if (message == NativeMethods.WmHotkey && wParam == HotkeyId)
@@ -397,7 +398,7 @@ public sealed class OverlayHost : IDisposable
                 QueueUiAction(() =>
                 {
                     ToggleRequested?.Invoke(this, EventArgs.Empty);
-                }, "Opening Notch from the keyboard");
+                }, "Opening " + ProductIdentity.DisplayName + " from the keyboard");
                 return 0;
             }
             if (message is NativeMethods.WmDpiChanged or NativeMethods.WmDisplayChange or NativeMethods.WmSettingChange)

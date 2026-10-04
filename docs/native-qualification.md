@@ -1,4 +1,4 @@
-# Native Windows qualification record
+# Notchling native Windows qualification record
 
 **Status: not executed.** This template is not a passing report. Save completed records under `docs/qualification/<version>-<os-build>.md` and attach traces/screenshots that contain no personal data.
 
@@ -17,6 +17,7 @@ Run every row on Windows 10 22H2 x64 and separately on each Windows 11 release s
 | Area | Steps | Expected result | Result / evidence |
 | --- | --- | --- | --- |
 | Clean install | Standard user; no .NET/WinUI developer tools; install, launch, quit, relaunch | Runtimes included; one usable app/tray instance | Pending |
+| Branding | Inspect app/taskbar/tray, Start menu, installer and Settings at small/high-DPI sizes | Notchling name and Pixel Dragon icon; readable small icon; no stale displayed product name | Pending |
 | Upgrade | Create notes/scratchpad/reminders; install newer signed candidate | Save/quit prompt; data and credentials preserved | Pending |
 | Interruption | Cancel setup; interrupt download; wrong hash and untrusted certificate | Existing app remains usable; update refused; no data loss | Pending |
 | Recovery | Launch compatible previous signed version; restore exported workspace | Documented recovery works with no hand-edited JSON | Pending |

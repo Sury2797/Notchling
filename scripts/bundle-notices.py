@@ -31,8 +31,8 @@ def digest(path: Path) -> str:
 
 
 def generate(publish: Path, assets_path: Path, strict: bool, installer_license: Path | None = None, installer_version: str | None = None) -> dict:
-    if not publish.is_dir() or not (publish / "Notch.Windows.exe").is_file():
-        raise ValueError("The publish folder must contain Notch.Windows.exe.")
+    if not publish.is_dir() or not (publish / "Notchling.Windows.exe").is_file():
+        raise ValueError("The publish folder must contain Notchling.Windows.exe.")
     graph = json.loads(assets_path.read_text(encoding="utf-8"))
     roots = [Path(path) for path in graph["packageFolders"]]
     packages = {name: info["path"] for name, info in graph["libraries"].items() if info["type"] == "package"}
@@ -99,14 +99,14 @@ def generate(publish: Path, assets_path: Path, strict: bool, installer_license: 
         spdx_id = f"SPDXRef-Package-{index}"
         record["spdxId"] = spdx_id
         spdx_packages.append({"SPDXID": spdx_id, "name": record["id"], "versionInfo": record["version"], "downloadLocation": record.get("downloadLocation", f"https://www.nuget.org/api/v2/package/{record['id']}/{record['version']}"), "filesAnalyzed": False, "licenseConcluded": "NOASSERTION", "licenseDeclared": record["licenseDeclared"], "copyrightText": "NOASSERTION", "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": record.get("purl", f"pkg:nuget/{record['id']}@{record['version']}")}]})
-        relations.append({"spdxElementId": "SPDXRef-Notch", "relationshipType": "DEPENDS_ON", "relatedSpdxElement": spdx_id} if record["scope"] != "build-or-reference" else {"spdxElementId": spdx_id, "relationshipType": "BUILD_DEPENDENCY_OF", "relatedSpdxElement": "SPDXRef-Notch"})
+        relations.append({"spdxElementId": "SPDXRef-Notchling", "relationshipType": "DEPENDS_ON", "relatedSpdxElement": spdx_id} if record["scope"] != "build-or-reference" else {"spdxElementId": spdx_id, "relationshipType": "BUILD_DEPENDENCY_OF", "relatedSpdxElement": "SPDXRef-Notchling"})
     for index, path in enumerate(sorted(publish.rglob("*"))):
         if not path.is_file() or path.name == "sbom.spdx.json":
             continue
         spdx_id = f"SPDXRef-File-{index}"
         files.append({"SPDXID": spdx_id, "fileName": "./" + path.relative_to(publish).as_posix(), "checksums": [{"algorithm": "SHA256", "checksumValue": digest(path)}], "licenseConcluded": "NOASSERTION", "licenseInfoInFiles": ["NOASSERTION"], "copyrightText": "NOASSERTION"})
-        relations.append({"spdxElementId": "SPDXRef-Notch", "relationshipType": "CONTAINS", "relatedSpdxElement": spdx_id})
-    sbom = {"spdxVersion": "SPDX-2.3", "dataLicense": "CC0-1.0", "SPDXID": "SPDXRef-DOCUMENT", "name": "Notch self-contained Windows x64 publish inventory", "documentNamespace": "https://github.com/SuryaK999/Notch-win-linux/sbom/" + str(uuid.uuid4()), "creationInfo": {"creators": ["Tool: Notch bundle-notices.py"], "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}, "packages": [{"SPDXID": "SPDXRef-Notch", "name": "Notch", "downloadLocation": "https://github.com/SuryaK999/Notch-win-linux/releases", "filesAnalyzed": False, "licenseDeclared": "NOASSERTION", "licenseConcluded": "NOASSERTION", "copyrightText": "Copyright (c) 2026 SuryaK999"}] + spdx_packages, "files": files, "relationships": [{"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Notch"}] + relations}
+        relations.append({"spdxElementId": "SPDXRef-Notchling", "relationshipType": "CONTAINS", "relatedSpdxElement": spdx_id})
+    sbom = {"spdxVersion": "SPDX-2.3", "dataLicense": "CC0-1.0", "SPDXID": "SPDXRef-DOCUMENT", "name": "Notchling self-contained Windows x64 publish inventory", "documentNamespace": "https://github.com/SuryaK999/Notch-win-linux/sbom/" + str(uuid.uuid4()), "creationInfo": {"creators": ["Tool: Notchling bundle-notices.py"], "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}, "packages": [{"SPDXID": "SPDXRef-Notchling", "name": "Notchling", "downloadLocation": "https://github.com/SuryaK999/Notch-win-linux/releases", "filesAnalyzed": False, "licenseDeclared": "NOASSERTION", "licenseConcluded": "NOASSERTION", "copyrightText": "Copyright (c) 2026 SuryaK999"}] + spdx_packages, "files": files, "relationships": [{"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Notchling"}] + relations}
     (publish / "sbom.spdx.json").write_text(json.dumps(sbom, indent=2) + "\n", encoding="utf-8")
     print(f"Bundled publisher documents for {len(records)} dependencies and inventoried {len(files)} shipped files.")
     for problem in unresolved:

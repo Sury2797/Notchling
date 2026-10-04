@@ -1,4 +1,4 @@
-# Windows release readiness
+# Notchling Windows release readiness
 
 This checklist defines acceptance for a public Windows release and the planned US$2/month Premium subscription. Windows and Linux core checks, the Windows x64 build and self-contained publish passed for commit [`131b597`](https://github.com/SuryaK999/Notch-win-linux/commit/131b597f6e2e8cdb084d633db8cd7836ad698a68) in [CI run 37098620398](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37098620398). Interactive Windows validation and commercial-release work remain open.
 
@@ -11,6 +11,7 @@ Record the revision, build URL, OS build, GPU, monitor configuration and observe
 - [ ] Clean Windows 10 22H2 x64 and Windows 11 x64 machines open the extracted folder without a developer SDK.
 - [ ] All published dependencies travel with the folder; startup does not depend on the build machine's package cache.
 - [ ] Single-instance/startup behavior, tray menu, close-to-tray and explicit Quit behave consistently.
+- [ ] App/taskbar/tray icons, installer, Start menu shortcuts, window titles and Settings use Notchling and the Pixel Dragon assets; small/high-DPI icons remain readable.
 - [ ] A signed installer, updates, rollback, upgrade and uninstallation are validated before public distribution. Build CI produces an unsigned review ZIP; the manual signed-candidate workflow requires publisher credentials.
 - [ ] Restore versions, source/distribution permissions, third-party notices and service attribution are reviewed for the release package.
 
@@ -45,7 +46,7 @@ Record the revision, build URL, OS build, GPU, monitor configuration and observe
 - [ ] Analytics refuses insecure/credential-bearing URLs, validates malformed schemas and displays connection failures.
 - [ ] Claude/Codex imports handle cumulative/repeated usage records without double-counting. No file is scanned without an explicit user choice.
 - [ ] Weather city changes refresh the correct location; offline and unknown city states are visible.
-- [ ] Weather attribution is visible. A paid release uses an appropriate Open-Meteo commercial agreement and licensed endpoint; the current free development endpoint is not sufficient.
+- [ ] Weather attribution is visible. Release uses the configured licensed proxy, and the publisher has an appropriate commercial service agreement; unconfigured weather remains unavailable.
 - [ ] Credential save/remove and disconnect are exercised through the Windows vault; secret values are never rendered back or included in logs.
 - [ ] Sounds, emoji, conversions and awake controls respond correctly; explicitly quitting releases sleep inhibition and native resources.
 
@@ -77,7 +78,7 @@ These are proposed acceptance targets, not achieved measurements. Report the act
 | Handles | Record handle count before and after 100 panel changes and 20 audio/media-session changes; expect a plateau rather than monotonic growth |
 | Network | Verify no rapid background provider polling when disconnected or idle; cache weather and bound provider response sizes/pagination |
 
-Use `./scripts/measure-windows.ps1 -ProcessName Notch.Windows -Seconds 60` for a basic CPU, memory and handle sample. Take a separate sample while repeatedly using active controls and animations. This script does not measure rendered frame pacing or replace a Windows performance trace.
+Use `./scripts/measure-windows.ps1 -ProcessName Notchling.Windows -Seconds 60` for a basic CPU, memory and handle sample. Take a separate sample while repeatedly using active controls and animations. This script does not measure rendered frame pacing or replace a Windows performance trace.
 
 ## Release record
 

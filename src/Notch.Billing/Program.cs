@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using Notch.Billing;
+using Notch.Core;
 using Notch.Core.Commerce;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -49,7 +50,7 @@ app.Use(async (context, next) =>
 });
 app.UseRateLimiter();
 app.MapGet("/health/ready", () => billing.Ready ? Results.Ok(new { ready = true }) : Results.Json(new { ready = false }, statusCode: 503));
-app.MapGet("/billing/return", () => Results.Content("<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>Notch subscription</title><body><h1>Return to Notch</h1><p>Use Restore / refresh in Notch to verify your subscription. A browser return does not activate Premium.</p></body></html>", "text/html"));
+app.MapGet("/billing/return", () => Results.Content($"<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>{ProductIdentity.DisplayName} subscription</title><body><h1>Return to {ProductIdentity.DisplayName}</h1><p>Use Restore / refresh in {ProductIdentity.DisplayName} to verify your subscription. A browser return does not activate Premium.</p></body></html>", "text/html"));
 app.MapPost("/v1/auth/request", async (LoginRequest input, BillingEngine engine, CancellationToken token) =>
 { await engine.RequestLoginAsync(input, token); return Results.Accepted(); }).RequireRateLimiting("login");
 app.MapPost("/v1/auth/verify", async (VerifyLoginRequest input, BillingEngine engine, CancellationToken token) =>

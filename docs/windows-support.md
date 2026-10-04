@@ -21,8 +21,10 @@ The cloud execution host is Linux and cannot launch WinUI. Automated source chec
 
 ## Installation and recovery
 
-The release candidate installer is per-user, requires no administrator privileges and installs versioned application files under `%LOCALAPPDATA%\Programs\Notch\app\<version>`. It refuses to continue while Notch is running, so a user can save and quit normally. It never forcibly terminates a process to replace files.
+The release candidate installer is per-user, requires no administrator privileges and installs versioned application files under `%LOCALAPPDATA%\Programs\Notch\app\<version>`. It refuses to continue while Notchling is running, so a user can save and quit normally. It never forcibly terminates a process to replace files.
 
 Workspace data stays in `%LOCALAPPDATA%\Notch`; credentials stay in Windows Credential Locker. Upgrade and uninstall retain both. Remove credentials in Settings and export data before an intentional reset. An older installed app directory remains available as a recovery option; restore a workspace backup before reverting if a future release changes its schema. Only use a prior signed installer when its published release notes say the data schema is compatible.
+
+Notchling's executable is `Notchling.Windows.exe`. The legacy installation/data directory names, vault identities and installer AppId remain compatible; they do not indicate a second product or require manual migration.
 
 A failed/cancelled setup uses Inno Setup's install rollback. Clean installation, interruption, rollback, repeat upgrade and uninstall are **required tests**, not verified outcomes yet. Native installers and updates must be signed; the release script refuses unsigned output.

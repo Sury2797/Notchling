@@ -1,12 +1,14 @@
-# Design principles
+# Notchling design principles
 
-Notch is a compact desktop companion: useful controls near the top of the display, available in a moment and quiet when they are not needed. Windows is the primary platform. The interface and service boundaries are designed around native desktop behavior.
+Notchling is a compact desktop companion: useful controls near the top of the display, available in a moment and quiet when they are not needed. Windows is the primary platform. The interface and service boundaries are designed around native desktop behavior.
 
 ## A small surface with a clear purpose
 
 The collapsed notch presents a short status at the display's top edge. Expanding reveals one selected tool. A separate compact dock provides navigation, while settings and pinning have their own controls. Temporary live activities draw attention to a completed timer or reminder, then return to the previous state.
 
 Panels use near-black surfaces, charcoal cards, white primary text and muted supporting text. Color carries meaning: playback, progress, a warning or a selected state. Content determines the panel's size; every tool should not have to fill a large dashboard.
+
+The Pixel Dragon icon gives Notchling a recognizable companion identity: a compact dark creature with expressive eyes. Use the approved icon assets for the application, installer, tray and documentation; preserve a readable silhouette at small sizes. The mascot belongs in identity and occasional context, rather than competing with content or adding continuous decorative motion.
 
 Home summarizes a workspace. Media exposes playback. Focus keeps a deadline visible. Notes and Scratchpad hold local text. Connected dashboards expose a specific dataset. Each panel must be useful on its own, with truthful empty, busy, unavailable and failed states.
 

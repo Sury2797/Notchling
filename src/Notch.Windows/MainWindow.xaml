@@ -1,7 +1,7 @@
 <Window x:Class="Notch.Windows.MainWindow"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-  Title="Notch — Desktop companion">
+  Title="Notchling — Desktop companion">
   <Grid x:Name="RootGrid" Background="{ThemeResource NotchBackgroundBrush}" KeyDown="OnKeyDown"
     PointerEntered="OnPointerEntered" PointerExited="OnPointerExited">
     <Grid.RowDefinitions>
@@ -13,11 +13,11 @@
     <Border x:Name="PanelSurface" CornerRadius="0,0,26,26" Background="{ThemeResource NotchBackgroundBrush}">
       <Grid>
         <Button x:Name="CompactButton" Background="Transparent" BorderThickness="0" Padding="15,0"
-          HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Click="OnOpenClick" UseSystemFocusVisuals="True" AutomationProperties.Name="Open Notch">
+          HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Click="OnOpenClick" UseSystemFocusVisuals="True" AutomationProperties.Name="Open Notchling">
           <Grid ColumnSpacing="10">
             <Grid.ColumnDefinitions><ColumnDefinition Width="22" /><ColumnDefinition Width="*" /><ColumnDefinition Width="28" /></Grid.ColumnDefinitions>
-            <Border Background="{ThemeResource NotchCardBrush}" BorderBrush="{ThemeResource NotchHairlineBrush}" BorderThickness="1" CornerRadius="6" Width="22" Height="22"><FontIcon Glyph="&#xE80F;" FontSize="12" /></Border>
-            <TextBlock x:Name="CompactTitle" Grid.Column="1" Text="Notch" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+            <Image Source="ms-appx:///Assets/Notchling.png" Width="22" Height="22" Stretch="Uniform" AutomationProperties.AccessibilityView="Raw" />
+            <TextBlock x:Name="CompactTitle" Grid.Column="1" Text="Notchling" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
             <FontIcon x:Name="CompactGlyph" Grid.Column="2" Glyph="&#xE8D6;" FontSize="14" />
           </Grid>
         </Button>
@@ -51,7 +51,7 @@
       <Border Grid.Column="1" CornerRadius="24" Background="{ThemeResource NotchDockBrush}" Padding="5,4">
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4">
           <Button Style="{StaticResource NotchIconButtonStyle}" Background="Transparent" Click="OnSettingsClick" ToolTipService.ToolTip="Settings" AutomationProperties.Name="Settings"><FontIcon Glyph="&#xE713;" FontSize="16" /></Button>
-          <ToggleButton x:Name="PinButton" IsEnabled="False" IsThreeState="False" Style="{StaticResource NotchPinToggleStyle}" Click="OnPinClick" ToolTipService.ToolTip="Keep expanded" AutomationProperties.Name="Keep notch expanded"><FontIcon Glyph="&#xE718;" FontSize="16" /></ToggleButton>
+          <ToggleButton x:Name="PinButton" IsEnabled="False" IsThreeState="False" Style="{StaticResource NotchPinToggleStyle}" Click="OnPinClick" ToolTipService.ToolTip="Keep expanded" AutomationProperties.Name="Keep Notchling expanded"><FontIcon Glyph="&#xE718;" FontSize="16" /></ToggleButton>
         </StackPanel>
       </Border>
     </Grid>

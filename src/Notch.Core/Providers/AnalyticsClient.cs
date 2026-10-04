@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace Notch.Core.Providers;
 
-/// <summary>Consumes an explicitly configured read-only endpoint with the normalized Notch analytics contract.</summary>
+/// <summary>Consumes an explicitly configured read-only endpoint with the normalized Notchling analytics contract.</summary>
 public sealed class AnalyticsClient(HttpClient client, ISecretVault vault, TimeProvider? timeProvider = null)
 {
     public async Task<AnalyticsSnapshot> ReadAsync(string endpoint, string site, CancellationToken ct = default)
