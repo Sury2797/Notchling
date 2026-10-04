@@ -1,13 +1,13 @@
 # Notchling Windows release readiness
 
-This checklist defines acceptance for a public Windows release and the planned US$2/month Premium subscription. The current framework-dependent evaluation installer passed build, package auditing, actual installation, native launch, Free controls, and uninstall for [`7584703`](https://github.com/SuryaK999/Notch-win-linux/commit/7584703b1ca6c634a1d3273bc48f3c85954b74ac) in [CI run 37191033515](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515). Consumer Windows 10/11 native qualification and commercial-release work remain open. Earlier bundled-runtime results remain historical evidence in [validation notes](validation-notes.md).
+This checklist defines acceptance for a public Windows release and the planned US$2/month Premium subscription. The current framework-dependent evaluation installer passed build, package auditing, actual installation, native launch, Free controls, and uninstall for [`fafa2cc`](https://github.com/SuryaK999/Notch-win-linux/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee) in [CI run 37203173532](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37203173532). Consumer Windows 10/11 native qualification and commercial-release work remain open. Earlier bundled-runtime results remain historical evidence in [validation notes](validation-notes.md).
 
 Record the revision, build URL, OS build, GPU, monitor configuration and observed result for each subsequent validation. A Linux host can test portable logic and inspect source; full WinUI builds and native interaction require Windows.
 
 ## Build and deployment
 
 - [x] Windows x64 Release build and self-contained unpackaged publish succeeded for the baseline commit linked above.
-- [x] Evaluation CI succeeds for exact source revision `7584703`; a signed production candidate remains a separate gate.
+- [x] Evaluation CI succeeds for exact source revision `fafa2cc`; a signed production candidate remains a separate gate.
 - [x] One evaluation setup EXE builds and is the normal download; the advanced app-only folder remains secondary.
 - [x] Setup EXE, extracted application, and actual Windows App Runtime transfer sizes recorded; missing-.NET transfer is explicitly an estimate.
 - [x] Runtime payload is absent; the published runtime configuration uses installed .NET 10 and Windows App SDK 1.8 packages.
@@ -91,7 +91,7 @@ Use `./scripts/measure-windows.ps1 -ProcessName Notchling.Windows -Seconds 60` f
 | --- | --- |
 | Linux portable core | 58 historical baseline cases; new revision requires fresh results |
 | Windows portable core | Baseline CI green |
-| Windows WinUI build and publish | Current framework-dependent build and compiled-XAML publication passed on `7584703` |
+| Windows WinUI build and publish | Current framework-dependent build and compiled-XAML publication passed on `fafa2cc` |
 | Single installer and shared prerequisites | Windows cloud setup passed; missing Windows App Runtime downloaded and installed, .NET reused; sizes recorded. Bare Windows 10/11, missing-.NET, UAC, and offline cases remain open |
 | Native Windows launch and interaction | Hosted window and Free UI checks passed; full consumer-OS matrix above remains required |
 | Real provider accounts | Opt-in connection validation required |

@@ -26,7 +26,7 @@ The **Pixel Dragon** is Notchling’s app icon. The Windows application uses **C
 
 ## Current status
 
-**Active development · Windows installer tested · paid launch pending.** The actual setup, installed app launch, and Free media, Pomodoro, and scratchpad interactions [passed in Windows cloud CI](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515). The tested setup EXE is **8.9 MB**. [Download Notchling for Windows](https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe), then follow the steps below.
+**Active development · Windows installer tested · paid launch pending.** The actual setup, installed app launch, and Free media, Pomodoro, and scratchpad interactions [passed in Windows cloud CI](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37203173532). The tested setup EXE is **8.9 MB**. [Download Notchling for Windows](https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe), then follow the steps below.
 
 The [validation notes](docs/validation-notes.md) record the exact revision, measurements, and test limits. Consumer Windows 10/11 qualification, publisher signing, and production commercial configuration remain launch requirements.
 
@@ -138,7 +138,7 @@ Evaluation releases appear in [Releases](https://github.com/SuryaK999/Notch-win-
 
 **One installer is the normal download.** Setup installs the app and checks for the shared .NET and Windows App SDK runtimes. If either is missing, Setup downloads its official installer and installs it; an Internet connection is required, and the .NET installer may request administrator approval. Existing compatible runtimes are reused. No SDK, developer tools, or manual DLL copying is required.
 
-The tested setup EXE is **8,875,059 bytes (8.46 MiB)**; its extracted app files total **40,648,773 bytes (38.77 MiB)**. In the cloud test, Setup downloaded **106.9 MB** for the missing Windows App Runtime and reused installed .NET 10. A machine missing both runtimes needs roughly **147 MB total** for first-install downloads at current versions, including the estimated .NET download. Later installs reuse compatible shared runtimes. See [delivery measurements and limits](docs/release-delivery.md).
+The tested setup EXE is **8,875,854 bytes (8.46 MiB)**; its extracted app files total **40,648,773 bytes (38.77 MiB)**. In the cloud test, Setup downloaded **106.9 MB** for the missing Windows App Runtime and reused installed .NET 10. A machine missing both runtimes needs roughly **147 MB total** for first-install downloads at current versions, including the estimated .NET download. Later installs reuse compatible shared runtimes. See [delivery measurements and limits](docs/release-delivery.md).
 
 This evaluation installer is unsigned and intended for review and development under the source license. Cloud checks cover installation, launch, pinning, no-player media state, Pomodoro, scratchpad persistence, and uninstall; full Windows 10/11 hardware and accessibility qualification remains open.
 

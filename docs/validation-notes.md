@@ -128,20 +128,23 @@ These hosted results are recorded for source commit [`e203c2e`](https://github.c
 
 ## Installed Windows app verification — 4 October 2026 UTC
 
-Source [`7584703`](https://github.com/SuryaK999/Notch-win-linux/commit/7584703b1ca6c634a1d3273bc48f3c85954b74ac) passed every job in [CI run 37191033515](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515). The Windows job tested the actual evaluation setup and the executable installed by it, rather than launching from the build directory. [Download the tested installer artifact](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37191033515/artifacts/11298892753); it contains `Notchling-0.2.0-windows-x64-evaluation-setup.exe` and expires after 14 days.
+Source [`fafa2cc`](https://github.com/SuryaK999/Notch-win-linux/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee) passed every job in [CI run 37203173532](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37203173532), including publication of the `notchling-evaluation-0.2.0` prerelease. The Windows job tested the actual evaluation setup and the executable installed by it, rather than launching from the build directory. [Download the tested Setup EXE](https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe) directly; release downloads require no sign-in or ZIP extraction and do not expire with CI artifacts.
 
 | Check | Actual result / scope |
 | --- | --- |
 | Windows and Linux regression jobs | Passed; 207 cases per host: 92 core, 58 commerce, 36 Debug view-model, one Release Free fixture, 10 native service doubles, and 10 Python release fixtures. Native source projections also compiled. |
 | Native Release build and publish | Real WinUI/XAML build and framework-dependent publish passed; required nonempty `resources.pri` present; no bundled shared runtime files found |
-| Setup EXE size | **8,875,059 bytes**, 8.46 MiB / 8.88 MB |
+| Setup EXE size | **8,875,854 bytes**, 8.46 MiB / 8.88 MB |
 | Published application payload | **40,648,773 bytes**, 38.77 MiB; separate from shared-runtime disk usage and installer bookkeeping |
 | Missing Windows App Runtime | Setup downloaded **106,879,800 bytes**, verified Microsoft's installer signature, installed it, and verified all four required x64 runtime registrations |
 | .NET prerequisite | Existing .NET **10.0.11** reused; the cloud run did not test missing-.NET installation |
-| Native launch | Visible window with expected title and nonzero native icon; first window in **696.9 ms**; five bounded message-responsiveness samples passed |
+| Native launch | Visible window with expected title and nonzero native icon; first window in **816.2 ms**; five bounded message-responsiveness samples passed |
 | Free UI interaction | Opened notch; toggled pin and verified saved preference; genuine no-player media controls disabled; Pomodoro started, paused, and reset; scratchpad edited, durably saved, recovered after navigation, and cleared |
-| Short resource sample | **5.02 seconds** immediately after launch: working set **107.27 MiB**, private memory **30.51 MiB**, CPU **0.778%** normalized across logical processors |
+| Short resource sample | **5.02 seconds** immediately after launch: working set **107.35 MiB**, private memory **31.36 MiB**, CPU **0.700%** normalized across logical processors |
 | Cleanup and uninstall | Bounded cleanup of the owned test process and actual silent uninstaller completed; graceful save-on-Quit and upgrade/rollback were not tested |
+| Public release download | Downloaded the actual published EXE without authentication; Windows PE header, **8,875,854-byte** size, and release SHA-256 matched |
+
+The public installer SHA-256 is `2cde22306bbb0f67f7c18aa1168c1e1068f03f61ddf3bfe0761af6fd6c467ab6`. The separate [main-branch run 37203173413](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37203173413) also passed the same checks. Installer compression/build metadata can produce different bytes between runs; the checksum above identifies the released tag-run EXE.
 
 The diagnostics artifact, `notchling-windows-cloud-test-results`, contains `package-size.json`, `windows-smoke.json`, `windows-ui-smoke.json`, `installer-smoke.log`, and `setup-prerequisites.log`. The native report records OS/version, window bounds, runtime identities, process measurements, and interaction results. The artifact digest identifies GitHub's downloaded archive; it must not be represented as the enclosed setup EXE's SHA-256.
 
