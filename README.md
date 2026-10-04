@@ -9,13 +9,24 @@
 <p align="center">A native Windows notch for media, focus, notes, and everyday controls. Linux support is planned.</p>
 
 <p align="center">
-  <a href="https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml"><img src="https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml/badge.svg" alt="Windows build and cross-platform checks" /></a>
+  <a href="https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe"><img src="docs/assets/badges/windows11-download.svg" alt="Download Notchling Setup EXE for Windows 11 x64" /></a>
+  <a href="https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe"><img src="docs/assets/badges/windows10-download.svg" alt="Download Notchling Setup EXE for Windows 10 22H2 x64" /></a>
+  <a href="#platform-targets"><img src="docs/assets/badges/linux-planned.svg" alt="Linux native app planned; no download available yet" /></a>
+</p>
+
+<p align="center">Windows buttons download the same <a href="https://github.com/SuryaK999/Notch-win-linux/releases/tag/notchling-evaluation-0.2.0">v0.2.0 evaluation installer</a> · 8.9 MB · unsigned · missing shared runtimes download during setup.</p>
+
+<p align="center">
+  <a href="https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml"><img src="https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml/badge.svg?branch=main&amp;event=push" alt="Main branch Windows build and cross-platform checks" /></a>
+  <a href="https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml"><img src="docs/assets/badges/build-app.svg" height="20" alt="Open GitHub Actions to build the Windows app" /></a>
+  <a href="https://github.com/SuryaK999/Notch-win-linux/actions/workflows/release.yml"><img src="docs/assets/badges/signed-release.svg" height="20" alt="Open signed release candidate workflow; production signing setup required" /></a>
 </p>
 
 <p align="center">
   <a href="#the-experience">Experience</a> ·
   <a href="#free-and-premium">Plans</a> ·
-  <a href="#try-notchling">Try Notchling</a> ·
+  <a href="#try-notchling">Downloads</a> ·
+  <a href="#build-and-release-with-github-actions">CI / CD</a> ·
   <a href="#development">Development</a> ·
   <a href="#documentation">Documentation</a>
 </p>
@@ -128,6 +139,21 @@ Workspace limits include a 10 MB serialized file ceiling, bounded text, and up t
 
 ## Try Notchling
 
+### Choose your download
+
+**On Windows 10 or 11 x64, choose Setup `.exe`.** One installer serves both versions; you do not need to choose a different application format or install developer tools.
+
+| Your device or package | What to choose | Where to get it |
+| --- | --- | --- |
+| Windows 11 x64 | **Setup `.exe` — recommended** | [Download the evaluation installer](https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe) |
+| Windows 10 22H2 x64, build 19045 | **The same Setup `.exe`** | [Download the evaluation installer](https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe) |
+| Windows app-only folder | Advanced evaluation with compatible shared runtimes already installed; keep all files together | `notchling-windows-x64-app-only` in [successful build runs](https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml) |
+| Windows `.msi` / `.msix` | No package currently produced; use Setup `.exe` | — |
+| Linux `.AppImage` / `.deb` / `.rpm` | Native application planned; no Linux app download yet | [Linux roadmap](docs/product-roadmap.md) |
+| macOS `.app` / `.dmg`, Windows ARM64 / x86 | No application build configured | — |
+
+The app-only folder is an advanced distribution of the same Windows app, not a self-contained single executable. A Linux core test result does not provide a Linux desktop application.
+
 ### Evaluation builds
 
 1. [Download Notchling Setup for Windows](https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe). This direct `.exe` download requires no GitHub sign-in or ZIP extraction.
@@ -144,7 +170,7 @@ This evaluation installer is unsigned and intended for review and development un
 
 An optional **`notchling-windows-x64-app-only`** artifact provides the extracted application folder for advanced evaluation. It requires the shared runtimes to be installed already; keep its files together and run `Notchling.Windows.exe`. See [Windows support](docs/windows-support.md) for exact prerequisites.
 
-The [signed release workflow](.github/workflows/release.yml) prepares a per-user installer, publisher notices/SBOM, checksums, update manifest, and a reviewable release draft. Stable downloads will appear under [Releases](https://github.com/SuryaK999/Notch-win-linux/releases) after qualification and commercial setup are complete.
+The [signed release workflow](https://github.com/SuryaK999/Notch-win-linux/actions/workflows/release.yml) prepares a per-user installer, publisher notices/SBOM, checksums, update manifest, and a reviewable release draft. Stable downloads will appear under [Releases](https://github.com/SuryaK999/Notch-win-linux/releases) after qualification and commercial setup are complete.
 
 ### Platform targets
 
@@ -153,11 +179,31 @@ The [signed release workflow](.github/workflows/release.yml) prepares a per-user
 | Windows 10 22H2 x64, build 19045 | Equal release target; native qualification required |
 | Supported Windows 11 x64 releases | Equal release target; native qualification required |
 | Linux | Portable core/checks available; native desktop app planned later |
-| Windows ARM64 / macOS | No application release target currently configured |
+| Windows ARM64 / x86 / macOS | No application release target currently configured |
 
 Installation retains the compatible **`%LOCALAPPDATA%\Programs\Notch`** directory. Upgrade and uninstall preserve workspace data and vault credentials. Uninstalling does not cancel a subscription. [Windows support](docs/windows-support.md) and [release delivery](docs/release-delivery.md) cover these guarantees and their acceptance tests.
 
 ## Development
+
+### Build and release with GitHub Actions
+
+Use the download buttons above to install the published evaluation. For a fresh development build, GitHub Actions supplies the build tools on its runners; no local SDK installation is needed.
+
+| Pipeline | Open in GitHub Actions | Trigger and output |
+| --- | --- | --- |
+| Build and checks | [Notchling native build and core checks](https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml) | Push, pull request, or **Run workflow**. Runs Windows/Linux regression checks; builds the native Windows x64 app and Setup EXE; tests the installed app's Free controls and uninstall. |
+| Public evaluation release | [The same build workflow](https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml) | Push a `notchling-evaluation-<version>` tag matching the desktop project's version. After all build/check jobs succeed, publishes an unsigned GitHub prerelease with a direct Setup EXE download. |
+| Signed release candidate | [Notchling signed release candidate](https://github.com/SuryaK999/Notch-win-linux/actions/workflows/release.yml) | **Run workflow** with a `major.minor.patch` version such as `0.2.0`. Requires production signing configuration; creates signed delivery files and a GitHub release **draft** for qualification and review. |
+
+To build a development installer in the cloud:
+
+1. Open the [build workflow](https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml), sign in with repository write access, and choose **Run workflow → main → Run workflow**.
+2. Open the new run and wait for the Windows and Linux jobs to pass.
+3. Under **Artifacts**, download **`notchling-windows-x64-installer`**, extract its ZIP, and run the Setup `.exe` inside.
+
+Downloading an existing run's artifact requires GitHub sign-in; triggering a run requires repository write access. Installer and app-only artifacts expire after **14 days**. The published evaluation EXE is a direct download that requires no GitHub account or extraction and does not expire with those artifacts. **Run workflow** on `main` builds artifacts; it does not publish a public release.
+
+For signed candidates, configure `NOTCH_SIGNING_PFX_BASE64` and `NOTCH_SIGNING_PFX_PASSWORD` as production signing secrets and satisfy any configured `production` environment approvals. The workflow prepares a draft; publishing it follows the [release readiness checklist](docs/release-readiness.md). See [release delivery](docs/release-delivery.md) for setup and qualification. Workflow sources: [build.yml](.github/workflows/build.yml) · [release.yml](.github/workflows/release.yml).
 
 ### Build the Windows app
 
@@ -230,7 +276,7 @@ flowchart LR
 
 One desktop process hosts the app; the billing server is deployed separately and never runs inside it. The [architecture guide](docs/architecture.md) explains scheduling, ownership, cancellation, and storage boundaries.
 
-The recorded remediation baseline passed **202 automated checks**; the Notchling branding revision also passed the cross-platform workflow and real Windows WinUI build/publish. The [validation record](docs/validation-notes.md) ties those results to named revisions and explains the simulated checks. The [audit](flaws.md) preserves original findings and records their repairs and remaining acceptance work.
+The published evaluation's [successful CI run](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37203173532) passed **207 regression checks per Windows/Linux host**, plus the real Windows WinUI build/publish and installed-app checks. Portable fixtures and native service doubles are distinct from the actual Windows UI tests. The [validation record](docs/validation-notes.md) ties results to named revisions and records measurements and test limits. The [audit](flaws.md) preserves original findings and records their repairs and remaining acceptance work.
 
 Before paid distribution, qualify the same signed artifact separately on Windows 10/11, measure modest-hardware responsiveness, verify install/upgrade/update recovery, exercise Stripe/SMTP/weather staging, and approve publisher/support/customer policies. For a basic resource sample:
 

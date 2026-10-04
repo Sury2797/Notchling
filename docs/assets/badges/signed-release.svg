@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="244" height="28" viewBox="0 0 244 28" role="img" aria-labelledby="title">
+  <title id="title">Open the signed release candidate workflow; production signing setup required</title>
+  <defs>
+    <clipPath id="round"><rect width="244" height="28" rx="5"/></clipPath>
+    <linearGradient id="sheen" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".08"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  </defs>
+  <g clip-path="url(#round)">
+    <rect width="244" height="28" fill="#24292f"/>
+    <rect x="112" width="132" height="28" fill="#626b76"/>
+    <rect width="244" height="28" fill="url(#sheen)"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Segoe UI,Arial,Helvetica,sans-serif" font-size="11" font-weight="600">
+    <text x="56" y="18">GitHub Actions</text>
+    <text x="178" y="18">SIGNED RELEASE</text>
+  </g>
+</svg>
