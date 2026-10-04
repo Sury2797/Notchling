@@ -16,7 +16,7 @@ public sealed class TrayService : IDisposable
     private const uint NinKeySelect = 0x0401;
     private static long s_nextSubclassId = 1000;
     private readonly nint _handle;
-    private readonly Action _toggle;
+    private readonly Action _open;
     private readonly Action _settings;
     private readonly Action _quit;
     private readonly NativeMethods.SubclassProc _callback;
@@ -29,15 +29,15 @@ public sealed class TrayService : IDisposable
 
     public bool IsAvailable => _iconAdded;
 
-    public TrayService(nint hwnd, Action toggle, Action settings, Action quit)
+    public TrayService(nint hwnd, Action open, Action settings, Action quit)
     {
         if (hwnd == 0 || !NativeMethods.IsWindow(hwnd))
             throw new ArgumentException("A live native window handle is required.", nameof(hwnd));
-        ArgumentNullException.ThrowIfNull(toggle);
+        ArgumentNullException.ThrowIfNull(open);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(quit);
         _handle = hwnd;
-        _toggle = toggle;
+        _open = open;
         _settings = settings;
         _quit = quit;
         _callback = WindowProcedure;
@@ -93,7 +93,7 @@ public sealed class TrayService : IDisposable
             {
                 var notification = _version4 ? (uint)((long)lParam & 0xFFFF) : unchecked((uint)lParam);
                 if (notification is NinSelect or NinKeySelect || (!_version4 && notification == NativeMethods.WmLeftButtonUp))
-                    _toggle();
+                    _open();
                 else if (notification == NativeMethods.WmContextMenu || (!_version4 && notification == NativeMethods.WmRightButtonUp))
                     OpenContextMenu();
                 return 0;
@@ -134,7 +134,7 @@ public sealed class TrayService : IDisposable
         }
         switch (selection)
         {
-            case 1: _toggle(); break;
+            case 1: _open(); break;
             case 2: _settings(); break;
             case 3: _quit(); break;
         }

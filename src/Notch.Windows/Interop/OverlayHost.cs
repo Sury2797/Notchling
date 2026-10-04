@@ -1,9 +1,12 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.UI.Xaml;
 
 namespace Notch.Windows.Interop;
+
+public sealed record PowerTransition(bool Suspended, DateTimeOffset At, TimeSpan SuspendedFor);
 
 /// <summary>Positions the WinUI surface at the top of a monitor and clips out its floating-toolbar gaps.</summary>
 public sealed class OverlayHost : IDisposable
@@ -17,6 +20,29 @@ public sealed class OverlayHost : IDisposable
     private readonly nuint _subclassId;
     private bool _disposed;
     private bool _displayChangePending;
+    private readonly DispatcherTimer _displayRetry = new();
+    private readonly DispatcherTimer _fullscreenCheck = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _resizeAnimation = new() { Interval = TimeSpan.FromMilliseconds(16) };
+    private Monitor? _placementMonitor;
+    private bool _animationRunning;
+    private long _animationStarted;
+    private double _animationStartWidth;
+    private double _animationStartHeight;
+    private double _animatedWidth;
+    private double _animatedHeight;
+    private Action? _geometryChanged;
+    private int _retryCount;
+    private bool _hidden;
+    private bool _shown;
+    private bool _nativeVisible;
+    private bool _fullscreenSuppressed;
+    private bool _suppressInFullscreen = true;
+    private nint _fullscreenOverride;
+    private NativeMethods.Rect _monitorBounds;
+    private string? _monitorDeviceId;
+    private double _horizontalOffset;
+    private double _topOffset;
+    private long? _suspendedAt;
     private double _width = 256;
     private double _panelHeight = 40;
     private bool _expanded;
@@ -27,11 +53,18 @@ public sealed class OverlayHost : IDisposable
     public event EventHandler? ToggleRequested;
     public event EventHandler? ShowRequested;
     public event EventHandler? DisplayChanged;
+    public event EventHandler<string>? Error;
+    public event EventHandler<PowerTransition>? PowerStateChanged;
 
     public nint Handle => _handle;
     public bool HotkeyRegistered { get; }
     public double LogicalWidth { get; private set; } = 256;
     public double LogicalPanelHeight { get; private set; } = 40;
+    public string? ActiveMonitorDeviceId { get; private set; }
+    public bool IsHidden => _hidden;
+    public bool IsShown => _shown;
+    public bool IsVisible => _shown && !_hidden && !_fullscreenSuppressed;
+    public bool IsFullscreenSuppressed => _fullscreenSuppressed;
 
     public OverlayHost(Window window)
     {
@@ -63,12 +96,17 @@ public sealed class OverlayHost : IDisposable
         var noSystemCorners = 1; // DWMWCP_DONOTROUND; older Windows safely returns an unsupported-attribute HRESULT.
         _ = NativeMethods.DwmSetWindowAttribute(_handle, 33, ref noSystemCorners, sizeof(int));
         HotkeyRegistered = NativeMethods.RegisterHotKey(_handle, HotkeyId, 0x0002 | 0x0004 | 0x4000, 0x20);
+        _displayRetry.Tick += OnDisplayRetry;
+        _fullscreenCheck.Tick += (_, _) => UpdateVisibility();
+        _resizeAnimation.Tick += OnResizeAnimation;
     }
 
     /// <param name="width">Actual expanded window width in device-independent pixels, including its content margins.</param>
     /// <param name="panelHeight">Expanded body height in device-independent pixels, excluding the detached toolbar.</param>
     /// <param name="monitorIndex">Primary monitor is index zero; remaining monitors sort by their desktop coordinates.</param>
-    public void ResizeAndPlace(double width, double panelHeight, bool expanded, bool pinned, int monitorIndex, bool showToolbar = true)
+    public void ResizeAndPlace(double width, double panelHeight, bool expanded, bool pinned, int monitorIndex,
+        bool showToolbar = true, string? monitorDeviceId = null, double horizontalOffset = 0,
+        double topOffset = 0, bool suppressInFullscreen = true, bool animate = false, Action? geometryChanged = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!double.IsFinite(width) || !double.IsFinite(panelHeight) || width <= 0 || panelHeight <= 0)
@@ -81,45 +119,190 @@ public sealed class OverlayHost : IDisposable
         _monitorIndex = monitorIndex;
         _showToolbar = showToolbar;
 
-        var monitors = EnumerateMonitors();
-        if (monitors.Count == 0)
-            return;
-        var monitor = monitors[Math.Clamp(monitorIndex, 0, monitors.Count - 1)];
+        _monitorDeviceId = string.IsNullOrWhiteSpace(monitorDeviceId) ? null : monitorDeviceId;
+        _horizontalOffset = double.IsFinite(horizontalOffset) ? horizontalOffset : 0;
+        _topOffset = double.IsFinite(topOffset) ? Math.Max(0, topOffset) : 0;
+        _suppressInFullscreen = suppressInFullscreen;
+        _resizeAnimation.Stop();
+        _placementMonitor = null;
+        _geometryChanged = geometryChanged;
+        _animationRunning = animate && IsVisible &&
+            (Math.Abs(LogicalWidth - width) > .5 || Math.Abs(LogicalPanelHeight - panelHeight) > .5);
+        if (_animationRunning)
+        {
+            _animationStartWidth = _animatedWidth = LogicalWidth;
+            _animationStartHeight = _animatedHeight = LogicalPanelHeight;
+            _animationStarted = Stopwatch.GetTimestamp();
+        }
+        TryPlace();
+        NotifyGeometryChanged();
+        if (_animationRunning) _resizeAnimation.Start();
+    }
+
+    private bool TryPlace()
+    {
+        try
+        {
+            PlaceCore();
+            _displayRetry.Stop();
+            _retryCount = 0;
+            UpdateVisibility();
+            return true;
+        }
+        catch (Win32Exception exception)
+        {
+            StopResizeAnimation();
+            // Keep the previous usable geometry while the display driver changes topology.
+            Debug.WriteLine($"Overlay display update: {exception.Message}");
+            if (_retryCount < 3)
+            {
+                _displayRetry.Interval = TimeSpan.FromMilliseconds(200 * (1 << _retryCount++));
+                _displayRetry.Start();
+            }
+            else
+                ReportError("The display layout is temporarily unavailable. Reconnect the display or reopen Notch to retry.");
+            return false;
+        }
+    }
+
+    private void PlaceCore()
+    {
+        if (_placementMonitor is null)
+        {
+            var monitors = EnumerateMonitors();
+            if (monitors.Count == 0)
+                throw new Win32Exception("No usable monitor is currently available.");
+            // A saved device identity survives coordinate reordering. If disconnected, prefer primary.
+            _placementMonitor = _monitorDeviceId is not null
+                ? monitors.FirstOrDefault(item => StringComparer.OrdinalIgnoreCase.Equals(item.DeviceName, _monitorDeviceId)) ?? monitors[0]
+                : monitors[Math.Clamp(_monitorIndex, 0, monitors.Count - 1)];
+        }
+        var monitor = _placementMonitor;
         var scale = NativeMethods.GetMonitorDpi(monitor.Handle, _handle) / 96.0;
-        var availableWidth = Math.Max(1, monitor.Bounds.Width / scale - 16);
-        var availableBodyHeight = Math.Max(1, (monitor.Bounds.Bottom - monitor.Bounds.Top) / scale
-            - (expanded && showToolbar ? 80 : 10));
+        var workArea = monitor.WorkArea;
+        if (workArea.Width <= 0 || workArea.Bottom <= workArea.Top)
+            throw new Win32Exception("The selected monitor has no usable work area.");
+        var availableWidth = Math.Max(1, workArea.Width / scale - 16);
+        var topOffset = Math.Min(_topOffset, Math.Max(0, (workArea.Bottom - workArea.Top) / scale - 80));
+        var availableBodyHeight = Math.Max(1, (workArea.Bottom - workArea.Top) / scale - topOffset
+            - (_expanded && _showToolbar ? 70 : 0));
         // On narrow/high-DPI monitors the minimum must fit inside the actual available desktop.
-        var logicalWidth = expanded ? Math.Clamp(width, Math.Min(256, availableWidth), availableWidth)
+        var logicalWidth = _expanded || _animationRunning ? Math.Clamp(_animationRunning ? _animatedWidth : _width, Math.Min(256, availableWidth), availableWidth)
             : Math.Min(256, availableWidth);
-        var logicalBodyHeight = expanded
-            ? Math.Clamp(panelHeight, Math.Min(40, availableBodyHeight), availableBodyHeight)
+        var logicalBodyHeight = _expanded || _animationRunning
+            ? Math.Clamp(_animationRunning ? _animatedHeight : _panelHeight, Math.Min(40, availableBodyHeight), availableBodyHeight)
             : Math.Min(40, availableBodyHeight);
         var physicalWidth = Pixels(logicalWidth, scale);
-        var physicalHeight = Pixels(logicalBodyHeight + (expanded && showToolbar ? 70 : 0), scale);
-        var x = monitor.Bounds.Left + (monitor.Bounds.Width - physicalWidth) / 2;
+        var physicalHeight = Pixels(logicalBodyHeight + (_expanded && _showToolbar ? 70 : 0), scale);
+        var horizontalOffset = Math.Clamp(_horizontalOffset, -availableWidth, availableWidth);
+        var x = Math.Clamp(workArea.Left + (workArea.Width - physicalWidth) / 2 + Pixels(horizontalOffset, scale),
+            workArea.Left, Math.Max(workArea.Left, workArea.Right - physicalWidth));
+        var y = workArea.Top + Pixels(topOffset, scale);
 
-        if (!NativeMethods.SetWindowPos(_handle, NativeMethods.HwndTopmost, x, monitor.Bounds.Top,
+        if (!NativeMethods.SetWindowPos(_handle, NativeMethods.HwndTopmost, x, y,
                 physicalWidth, physicalHeight, NativeMethods.SwpNoActivate))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not position the overlay.");
 
-        ApplyRegion(logicalWidth, logicalBodyHeight, expanded, showToolbar, scale);
+        ApplyRegion(logicalWidth, logicalBodyHeight, _expanded, _showToolbar, scale);
         LogicalWidth = logicalWidth;
         LogicalPanelHeight = logicalBodyHeight;
+        ActiveMonitorDeviceId = monitor.DeviceName;
+        _monitorBounds = monitor.Bounds;
+    }
+
+    private void OnResizeAnimation(object? sender, object args)
+    {
+        if (_disposed || !_animationRunning) { StopResizeAnimation(); return; }
+        var progress = Math.Clamp(Stopwatch.GetElapsedTime(_animationStarted).TotalMilliseconds / 180, 0, 1);
+        // Cubic ease out keeps response immediate and decelerates without an overshoot.
+        var eased = 1 - Math.Pow(1 - progress, 3);
+        _animatedWidth = _animationStartWidth + (_width - _animationStartWidth) * eased;
+        _animatedHeight = _animationStartHeight + (_panelHeight - _animationStartHeight) * eased;
+        if (progress >= 1) StopResizeAnimation();
+        if (TryPlace()) NotifyGeometryChanged();
+    }
+
+    private void StopResizeAnimation()
+    {
+        _resizeAnimation.Stop();
+        _animationRunning = false;
+    }
+
+    private void NotifyGeometryChanged()
+    {
+        try { _geometryChanged?.Invoke(); }
+        catch (Exception error)
+        {
+            StopResizeAnimation();
+            ReportError($"The notch transition could not be refreshed: {error.Message}");
+        }
     }
 
     public void Hide()
     {
         if (!_disposed)
+        {
+            _hidden = true;
+            StopResizeAnimation();
+            _fullscreenCheck.Stop();
             NativeMethods.ShowWindow(_handle, NativeMethods.SwHide);
+            _nativeVisible = false;
+        }
     }
 
-    public void Show()
+    public void Show(bool userRequested = true)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        _shown = true;
+        if (userRequested)
+        {
+            _hidden = false;
+            _fullscreenOverride = NativeMethods.GetForegroundWindow();
+            if (_retryCount >= 3) { _retryCount = 0; TryPlace(); }
+        }
+        if (!_hidden) _fullscreenCheck.Start();
+        UpdateVisibility();
+    }
+
+    private void UpdateVisibility()
+    {
+        if (_disposed) return;
+        var foreground = NativeMethods.GetForegroundWindow();
+        if (foreground != _fullscreenOverride && foreground != _handle) _fullscreenOverride = 0;
+        _fullscreenSuppressed = _suppressInFullscreen && foreground != _fullscreenOverride && IsForegroundFullscreen(foreground);
+        if (IsVisible == _nativeVisible) return;
+        if (!IsVisible)
+        {
+            NativeMethods.ShowWindow(_handle, NativeMethods.SwHide);
+            _nativeVisible = false;
+            return;
+        }
         NativeMethods.ShowWindow(_handle, NativeMethods.SwShowNoActivate);
         NativeMethods.SetWindowPos(_handle, NativeMethods.HwndTopmost, 0, 0, 0, 0,
             NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+        _nativeVisible = true;
+    }
+
+    private bool IsForegroundFullscreen(nint foreground)
+    {
+        if (foreground == 0 || foreground == _handle || NativeMethods.IsIconic(foreground) || _monitorBounds.Width <= 0)
+            return false;
+        var className = new StringBuilder(128);
+        NativeMethods.GetClassName(foreground, className, className.Capacity);
+        if (className.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return false;
+        // A normal maximized window can cover full bounds with an auto-hidden taskbar.
+        // Captioned applications are not presentation/fullscreen surfaces.
+        if ((NativeMethods.GetWindowLong(foreground, NativeMethods.GwlStyle).ToInt64() & NativeMethods.WsCaption) == NativeMethods.WsCaption)
+            return false;
+        return NativeMethods.GetWindowRect(foreground, out var bounds)
+            && bounds.Left <= _monitorBounds.Left && bounds.Top <= _monitorBounds.Top
+            && bounds.Right >= _monitorBounds.Right && bounds.Bottom >= _monitorBounds.Bottom;
+    }
+
+    private void ReportError(string message)
+    {
+        try { Error?.Invoke(this, message); }
+        catch (Exception error) { Debug.WriteLine($"Overlay error notification: {error.Message}"); }
     }
 
     private static int Pixels(double logicalPixels, double scale) =>
@@ -185,9 +368,9 @@ public sealed class OverlayHost : IDisposable
         var monitors = new List<Monitor>();
         NativeMethods.MonitorEnumProc callback = (nint handle, nint _, ref NativeMethods.Rect bounds, nint __) =>
         {
-            var info = new NativeMethods.MonitorInfo { Size = (uint)Marshal.SizeOf<NativeMethods.MonitorInfo>() };
+            var info = new NativeMethods.MonitorInfoEx { Size = (uint)Marshal.SizeOf<NativeMethods.MonitorInfoEx>(), DeviceName = string.Empty };
             if (NativeMethods.GetMonitorInfo(handle, ref info))
-                monitors.Add(new Monitor(handle, info.Monitor, (info.Flags & NativeMethods.MonitorInfoPrimary) != 0));
+                monitors.Add(new Monitor(handle, info.Monitor, info.WorkArea, NativeMethods.GetMonitorDeviceId(info.DeviceName), (info.Flags & NativeMethods.MonitorInfoPrimary) != 0));
             return true;
         };
         NativeMethods.EnumDisplayMonitors(0, 0, callback, 0);
@@ -202,26 +385,25 @@ public sealed class OverlayHost : IDisposable
         {
             if (message == ShowFromExistingInstanceMessage)
             {
-                _window.DispatcherQueue.TryEnqueue(() =>
+                QueueUiAction(() =>
                 {
-                    if (_disposed)
-                        return;
                     Show();
                     ShowRequested?.Invoke(this, EventArgs.Empty);
-                });
+                }, "Opening Notch");
                 return 0;
             }
             if (message == NativeMethods.WmHotkey && wParam == HotkeyId)
             {
-                _window.DispatcherQueue.TryEnqueue(() =>
+                QueueUiAction(() =>
                 {
-                    if (!_disposed)
-                        ToggleRequested?.Invoke(this, EventArgs.Empty);
-                });
+                    ToggleRequested?.Invoke(this, EventArgs.Empty);
+                }, "Opening Notch from the keyboard");
                 return 0;
             }
             if (message is NativeMethods.WmDpiChanged or NativeMethods.WmDisplayChange or NativeMethods.WmSettingChange)
                 QueueDisplayChange();
+            if (message == NativeMethods.WmPowerBroadcast)
+                QueuePowerTransition((uint)wParam);
             if (message == NativeMethods.WmNcDestroy)
                 Dispose();
         }
@@ -233,6 +415,13 @@ public sealed class OverlayHost : IDisposable
         return NativeMethods.DefSubclassProc(window, message, wParam, lParam);
     }
 
+    private void QueueUiAction(Action action, string context) => _window.DispatcherQueue.TryEnqueue(() =>
+    {
+        if (_disposed) return;
+        try { action(); }
+        catch (Exception error) { ReportError($"{context} failed: {error.Message}"); }
+    });
+
     private void QueueDisplayChange()
     {
         if (_disposed || _displayChangePending)
@@ -243,18 +432,52 @@ public sealed class OverlayHost : IDisposable
                 _displayChangePending = false;
                 if (_disposed)
                     return;
-                try
-                {
-                ResizeAndPlace(_width, _panelHeight, _expanded, _pinned, _monitorIndex, _showToolbar);
-                }
-                catch (Win32Exception exception)
-                {
-                    // Display reconfiguration can briefly invalidate monitor geometry.
-                    Debug.WriteLine($"Overlay display update: {exception.Message}");
-                }
-                DisplayChanged?.Invoke(this, EventArgs.Empty);
+                StopResizeAnimation();
+                _placementMonitor = null;
+                _retryCount = 0;
+                if (TryPlace()) PublishDisplayChanged();
             }))
             _displayChangePending = false;
+    }
+
+    private void OnDisplayRetry(object? sender, object args)
+    {
+        _displayRetry.Stop();
+        _placementMonitor = null;
+        if (!_disposed && TryPlace()) PublishDisplayChanged();
+    }
+
+    private void PublishDisplayChanged()
+    {
+        try { DisplayChanged?.Invoke(this, EventArgs.Empty); }
+        catch (Exception error) { ReportError($"The display layout could not be refreshed: {error.Message}"); }
+    }
+
+    private void QueuePowerTransition(uint state)
+    {
+        PowerTransition? transition = null;
+        if (state == NativeMethods.PowerSuspend && _suspendedAt is null)
+        {
+            _suspendedAt = Stopwatch.GetTimestamp();
+            transition = new(true, DateTimeOffset.UtcNow, TimeSpan.Zero);
+        }
+        else if (state is NativeMethods.PowerResumeAutomatic or NativeMethods.PowerResumeSuspend && _suspendedAt is { } started)
+        {
+            _suspendedAt = null;
+            transition = new(false, DateTimeOffset.UtcNow, Stopwatch.GetElapsedTime(started));
+        }
+        if (transition is null) return;
+        void Publish()
+        {
+            if (_disposed) return;
+            try { PowerStateChanged?.Invoke(this, transition); }
+            catch (Exception error) { ReportError($"Power-state recovery failed: {error.Message}"); }
+            if (!transition.Suspended) QueueDisplayChange();
+        }
+        // WM_POWERBROADCAST already runs on the window thread. Pause the timers before
+        // returning to Windows, rather than leaving a suspend callback queued until resume.
+        if (_window.DispatcherQueue.HasThreadAccess) Publish();
+        else _window.DispatcherQueue.TryEnqueue(Publish);
     }
 
     private void OnWindowClosed(object? sender, WindowEventArgs args) => Dispose();
@@ -264,6 +487,11 @@ public sealed class OverlayHost : IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        _displayRetry.Stop();
+        _fullscreenCheck.Stop();
+        StopResizeAnimation();
+        _displayRetry.Tick -= OnDisplayRetry;
+        _resizeAnimation.Tick -= OnResizeAnimation;
         if (HotkeyRegistered)
             NativeMethods.UnregisterHotKey(_handle, HotkeyId);
         NativeMethods.RemoveWindowSubclass(_handle, _callback, _subclassId);
@@ -271,5 +499,5 @@ public sealed class OverlayHost : IDisposable
         GC.KeepAlive(_callback);
     }
 
-    private readonly record struct Monitor(nint Handle, NativeMethods.Rect Bounds, bool Primary);
+    private sealed record Monitor(nint Handle, NativeMethods.Rect Bounds, NativeMethods.Rect WorkArea, string DeviceName, bool Primary);
 }

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <WindowsPackageType>None</WindowsPackageType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CS0169;CS0414</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" ExcludeAssets="build;buildTransitive" />
+    <ProjectReference Include="../../src/Notch.Core/Notch.Core.csproj" />
+    <Compile Include="../../src/Notch.Windows/**/*.cs" Exclude="../../src/Notch.Windows/obj/**/*.cs;../../src/Notch.Windows/bin/**/*.cs" />
+    <Compile Include="../../artifacts/native-source-check/*.generated.cs" />
+  </ItemGroup>
+</Project>

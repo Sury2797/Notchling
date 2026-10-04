@@ -94,5 +94,127 @@ internal static class CalendarCases
             var ancient = Calendar(Event("DTSTART:19000101T090000Z\nRRULE:FREQ=DAILY\nSUMMARY:Daily"));
             Check.Equal(2, IcsCalendar.Parse(ancient, October, October.AddDays(2)).Count);
         });
+        suite.Add("All-day calendar dates remain the same in positive and negative offsets", () =>
+        {
+            var text = Calendar(Event("DTSTART;VALUE=DATE:20261003\nDTEND;VALUE=DATE:20261005\nSUMMARY:Holiday"));
+            var zones = new[]
+            {
+                TimeZoneInfo.CreateCustomTimeZone("Test/+14", TimeSpan.FromHours(14), "+14", "+14"),
+                TimeZoneInfo.CreateCustomTimeZone("Test/-7", TimeSpan.FromHours(-7), "-7", "-7")
+            };
+            foreach (var zone in zones)
+            {
+                var item = IcsCalendar.Parse(text, October.AddDays(-1), October.AddDays(10), zone)[0];
+                Check.True(item.IsAllDay);
+                Check.False(item.IsFloating);
+                Check.Equal(new DateOnly(2026, 10, 3), DateOnly.FromDateTime(item.Start.DateTime));
+                Check.True(CalendarDay.Overlaps(item, new DateOnly(2026, 10, 3), zones[0]));
+                Check.True(CalendarDay.Overlaps(item, new DateOnly(2026, 10, 4), zones[1]));
+                Check.False(CalendarDay.Overlaps(item, new DateOnly(2026, 10, 2), zone));
+                Check.False(CalendarDay.Overlaps(item, new DateOnly(2026, 10, 5), zone));
+                Check.Equal("All day", CalendarDay.TimeLabel(item, new DateOnly(2026, 10, 3), zone));
+            }
+        });
+        suite.Add("Floating appointments resolve against the explicit calendar zone", () =>
+        {
+            var zone = TimeZoneInfo.CreateCustomTimeZone("Test/+0530", TimeSpan.FromMinutes(330), "+0530", "+0530");
+            var text = Calendar(
+                Event("DTSTART:20261003T090000\nDTEND:20261003T100000\nSUMMARY:Floating"),
+                Event("DTSTART:20261003T090000Z\nSUMMARY:UTC"),
+                Event("DTSTART;TZID=America/New_York:20261003T090000\nSUMMARY:Named zone"));
+            var result = IcsCalendar.Parse(text, October, October.AddMonths(1), zone);
+            var floating = result.Single(item => item.Title == "Floating");
+            Check.True(floating.IsFloating);
+            Check.Equal(9, floating.Start.Hour);
+            Check.Equal(TimeSpan.FromMinutes(330), floating.Start.Offset);
+            Check.Equal(TimeSpan.FromHours(1), floating.End - floating.Start);
+            Check.Equal(zone.Id, floating.TimeZoneId);
+            Check.False(result.Single(item => item.Title == "UTC").IsFloating);
+            Check.Equal(TimeSpan.Zero, result.Single(item => item.Title == "UTC").Start.Offset);
+            Check.Equal(TimeSpan.FromHours(-4), result.Single(item => item.Title == "Named zone").Start.Offset);
+        });
+        suite.Add("Calendar day selection includes overnight continuations and excludes exclusive endpoints", () =>
+        {
+            var zone = TimeZoneInfo.CreateCustomTimeZone("Test/-7", TimeSpan.FromHours(-7), "-7", "-7");
+            var text = Calendar(
+                Event("DTSTART:20261003T230000\nDTEND:20261004T020000\nSUMMARY:Overnight"),
+                Event("DTSTART:20261003T230000\nDTEND:20261004T000000\nSUMMARY:Ends at midnight"),
+                Event("DTSTART:20261004T000000\nSUMMARY:Point appointment"));
+            var result = IcsCalendar.Parse(text, October, October.AddMonths(1), zone);
+            var continuation = CalendarDay.EventsForDay(result, new DateOnly(2026, 10, 4), zone);
+            Check.Equal(2, continuation.Count);
+            Check.True(continuation.Any(item => item.Title == "Overnight"));
+            Check.True(continuation.Any(item => item.Title == "Point appointment"));
+            Check.False(continuation.Any(item => item.Title == "Ends at midnight"));
+            Check.True(CalendarDay.TimeLabel(result.Single(item => item.Title == "Overnight"), new DateOnly(2026, 10, 4), zone, System.Globalization.CultureInfo.InvariantCulture).StartsWith("00:00", StringComparison.Ordinal));
+        });
+        suite.Add("All-day default duration and explicit date ends preserve civil days across DST", () =>
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            var from = new DateTimeOffset(2026, 3, 6, 0, 0, 0, TimeSpan.Zero);
+            var text = Calendar(
+                Event("DTSTART;VALUE=DATE:20260308\nRRULE:FREQ=DAILY;COUNT=2\nSUMMARY:One day"),
+                Event("DTSTART;VALUE=DATE:20260307\nDTEND;VALUE=DATE:20260309\nRRULE:FREQ=DAILY;COUNT=2\nSUMMARY:Two days"));
+            var result = IcsCalendar.Parse(text, from, from.AddDays(7), zone);
+            var oneDay = result.Where(item => item.Title == "One day").ToArray();
+            Check.Equal(TimeSpan.FromHours(23), oneDay[0].End - oneDay[0].Start);
+            Check.Equal(TimeSpan.FromHours(24), oneDay[1].End - oneDay[1].Start);
+            foreach (var item in result.Where(item => item.Title == "Two days"))
+                Check.Equal(2, (item.End.Date - item.Start.Date).Days);
+            Check.False(CalendarDay.Overlaps(oneDay[0], new DateOnly(2026, 3, 9), zone));
+        });
+        suite.Add("Floating daily recurrence keeps local time when the calendar zone changes offset", () =>
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            var from = new DateTimeOffset(2026, 3, 6, 0, 0, 0, TimeSpan.Zero);
+            var text = Calendar(Event("DTSTART:20260307T090000\nDURATION:PT30M\nRRULE:FREQ=DAILY;COUNT=3"));
+            var result = IcsCalendar.Parse(text, from, from.AddDays(5), zone);
+            Check.Equal(3, result.Count);
+            Check.True(result.All(item => item.IsFloating && item.Start.Hour == 9));
+            Check.Equal(TimeSpan.FromHours(23), result[1].Start - result[0].Start);
+        });
+        suite.Add("Calendar ranges track loaded days and support future re-expansion", () =>
+        {
+            var text = Calendar(Event("DTSTART:20270403T090000Z\nSUMMARY:Six months ahead"));
+            var initial = CalendarRange.ForMonth(new DateTime(2026, 10, 3), TimeZoneInfo.Utc);
+            Check.True(initial.ContainsMonth(new DateTime(2026, 10, 1)));
+            Check.True(initial.ContainsDate(new DateTime(2026, 11, 30)));
+            Check.False(initial.ContainsDate(new DateTime(2026, 12, 1)));
+            Check.False(initial.ContainsMonth(new DateTime(2027, 4, 1)));
+            Check.Equal(0, IcsCalendar.Parse(text, initial.From, initial.Until, initial.Zone).Count);
+            var future = CalendarRange.ForMonth(new DateTime(2027, 4, 1), TimeZoneInfo.Utc);
+            Check.Equal(1, IcsCalendar.Parse(text, future.From, future.Until, future.Zone).Count);
+        });
+        suite.Add("Calendar day boundaries use actual 23-hour and 25-hour days", () =>
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            var spring = CalendarDay.StartOfDay(new DateOnly(2026, 3, 8), zone);
+            var springEnd = CalendarDay.StartOfDay(new DateOnly(2026, 3, 9), zone);
+            var autumn = CalendarDay.StartOfDay(new DateOnly(2026, 11, 1), zone);
+            var autumnEnd = CalendarDay.StartOfDay(new DateOnly(2026, 11, 2), zone);
+            Check.Equal(TimeSpan.FromHours(23), springEnd - spring);
+            Check.Equal(TimeSpan.FromHours(25), autumnEnd - autumn);
+        });
+        suite.Add("All-day dates survive a midnight daylight-saving gap", () =>
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
+            var from = new DateTimeOffset(2018, 11, 2, 0, 0, 0, TimeSpan.Zero);
+            var text = Calendar(Event("DTSTART;VALUE=DATE:20181104\nSUMMARY:Holiday"));
+            var item = IcsCalendar.Parse(text, from, from.AddDays(5), zone)[0];
+            Check.Equal(new DateOnly(2018, 11, 4), DateOnly.FromDateTime(item.Start.DateTime));
+            Check.Equal(new DateOnly(2018, 11, 5), DateOnly.FromDateTime(item.End.DateTime));
+            Check.True(CalendarDay.Overlaps(item, new DateOnly(2018, 11, 4), zone));
+            Check.Equal(1, CalendarDay.StartOfDay(new DateOnly(2018, 11, 4), zone).Hour);
+        });
+        suite.Add("All-day recurrence excludes dates without losing their date-only semantics", () =>
+        {
+            var zone = TimeZoneInfo.CreateCustomTimeZone("Test/+14", TimeSpan.FromHours(14), "+14", "+14");
+            var text = Calendar(Event("DTSTART;VALUE=DATE:20261003\nRRULE:FREQ=DAILY;COUNT=3\nEXDATE;VALUE=DATE:20261004"));
+            var result = IcsCalendar.Parse(text, October, October.AddDays(10), zone);
+            Check.Equal(2, result.Count);
+            Check.Equal(3, result[0].Start.Day);
+            Check.Equal(5, result[1].Start.Day);
+            Check.True(result.All(item => item.IsAllDay));
+        });
     }
 }

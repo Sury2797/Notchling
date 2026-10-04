@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace Notch.Core.Providers;
 
 /// <summary>Consumes an explicitly configured read-only endpoint with the normalized Notch analytics contract.</summary>
-public sealed class AnalyticsClient(HttpClient client, ISecretVault vault)
+public sealed class AnalyticsClient(HttpClient client, ISecretVault vault, TimeProvider? timeProvider = null)
 {
     public async Task<AnalyticsSnapshot> ReadAsync(string endpoint, string site, CancellationToken ct = default)
     {
@@ -36,6 +36,8 @@ public sealed class AnalyticsClient(HttpClient client, ISecretVault vault)
         if (updatedText.Length < 20 || updatedText[10] != 'T' || !(updatedText.EndsWith('Z') || updatedText.Length >= 6 && (updatedText[^6] == '+' || updatedText[^6] == '-')) ||
             !root.GetProperty("updatedAt").TryGetDateTimeOffset(out var updated))
             throw new InvalidDataException("The analytics updatedAt timestamp is invalid.");
+        if (updated > (timeProvider ?? TimeProvider.System).GetUtcNow().AddMinutes(5))
+            throw new InvalidDataException("The analytics timestamp is in the future. Check the endpoint's clock before refreshing.");
         return new(site.Trim(), active, pageViews, newUsers, counts, pageCounts, updated);
     }
 }

@@ -23,8 +23,25 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Build portable core
         run: dotnet build src/Notch.Core/Notch.Core.csproj --configuration Release
+      - name: Build configurable billing service
+        run: dotnet build src/Notch.Billing/Notch.Billing.csproj --configuration Release
       - name: Execute package-free functional tests
         run: dotnet run --project tests/Notch.Core.Tests/Notch.Core.Tests.csproj --configuration Release
+      - name: Execute billing and entitlement regressions
+        run: dotnet run --project tests/Notch.Commerce.Tests/Notch.Commerce.Tests.csproj --configuration Release
+      - name: Execute simulated view-model lifecycle regressions
+        run: dotnet run --project tests/Notch.ViewModel.Tests/Notch.ViewModel.Tests.csproj --configuration Debug
+      - name: Verify Release defaults to Free and gates direct commands
+        run: dotnet run --project tests/Notch.ViewModel.Tests/Notch.ViewModel.Tests.csproj --configuration Release
+      - name: Execute linked native service scenarios with platform doubles
+        run: dotnet run --project tests/Notch.Native.Tests/Notch.Native.Tests.csproj --configuration Release
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Compile native source and XAML member projections
+        run: python scripts/check-native-source.py
+      - name: Verify notice generation and fail-closed release checks
+        run: python -m unittest discover -s tests/release -v
 
   windows:
     name: Windows x64 unpackaged build
@@ -34,6 +51,17 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Validate Windows release script syntax
+        shell: pwsh
+        run: |
+          Get-ChildItem scripts/*.ps1 | ForEach-Object {
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$parseErrors) | Out-Null
+            if ($parseErrors) { throw ($parseErrors | Out-String) }
+          }
       - name: Build native WinUI application
         run: dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=x64
       - name: Prepare self-contained unpackaged application
@@ -43,6 +71,8 @@ jobs:
           -p:Platform=x64 -p:WindowsPackageType=None
           -p:WindowsAppSDKSelfContained=true -p:PublishSingleFile=false
           --output artifacts/notch-windows-x64
+      - name: Bundle publisher notices and release inventory
+        run: python scripts/bundle-notices.py --publish artifacts/notch-windows-x64 --assets src/Notch.Windows/obj/project.assets.json
       - name: Archive application
         shell: pwsh
         run: Compress-Archive -Path artifacts/notch-windows-x64/* -DestinationPath artifacts/notch-windows-x64.zip

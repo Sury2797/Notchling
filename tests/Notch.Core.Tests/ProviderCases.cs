@@ -31,6 +31,41 @@ internal sealed class FixtureHandler(Func<HttpRequestMessage, int, HttpResponseM
     }
 }
 
+internal sealed class ProviderClock(DateTimeOffset utcNow) : TimeProvider
+{
+    public DateTimeOffset Now { get; set; } = utcNow;
+    public override DateTimeOffset GetUtcNow() => Now;
+}
+
+internal sealed class StallingProviderStream : Stream
+{
+    public bool WasDisposed { get; private set; }
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+    public override void Flush() => throw new NotSupportedException();
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        return 0;
+    }
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    protected override void Dispose(bool disposing) { WasDisposed = true; base.Dispose(disposing); }
+}
+
+internal sealed class StallingProviderContent(StallingProviderStream stream) : HttpContent
+{
+    protected override bool TryComputeLength(out long length) { length = 0; return false; }
+    protected override Task SerializeToStreamAsync(Stream target, TransportContext? context) => throw new NotSupportedException();
+    protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult<Stream>(stream);
+    protected override Task<Stream> CreateContentReadStreamAsync(CancellationToken cancellationToken) => Task.FromResult<Stream>(stream);
+}
+
 internal static class ProviderCases
 {
     private static HttpResponseMessage Json(object value) => Text(JsonSerializer.Serialize(value));
@@ -45,13 +80,17 @@ internal static class ProviderCases
         description = "Fixture payment",
     };
     private static object Page(bool more, params object[] charges) => new { has_more = more, data = charges };
+    private static object Location(string name = "Bengaluru") => new { latitude = 12.97, longitude = 77.59, name, country = "India" };
+    private static WeatherClient Weather(HttpClient http, TimeProvider? clock = null) => new(http,
+        WeatherServiceConfiguration.CommercialProxy("https://billing.example.test/v1/weather"),
+        () => "synthetic-session-token", clock);
 
-    private static object Forecast(bool mismatched = false)
+    private static object Forecast(bool mismatched = false, string zoneId = "Asia/Kolkata", int offsetSeconds = 19800, DateTimeOffset? current = null)
     {
-        var instant = new DateTimeOffset(2026, 10, 3, 6, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds();
+        var instant = (current ?? new DateTimeOffset(2026, 10, 3, 6, 0, 0, TimeSpan.Zero)).ToUnixTimeSeconds();
         return new
         {
-            utc_offset_seconds = 19800, timezone = "Asia/Kolkata",
+            utc_offset_seconds = offsetSeconds, timezone = zoneId,
             current = new { time = instant, temperature_2m = 29d, apparent_temperature = 30d, relative_humidity_2m = 63, weather_code = 2, wind_speed_10m = 8d },
             hourly = new { time = new[] { instant, instant + 3600 }, temperature_2m = mismatched ? new[] { 29d } : new[] { 29d, 30d }, weather_code = new[] { 2, 3 } },
             daily = new { time = new[] { instant }, temperature_2m_max = new[] { 32d }, temperature_2m_min = new[] { 23d }, weather_code = new[] { 3 } },
@@ -134,37 +173,35 @@ internal static class ProviderCases
             using var repeating = new HttpClient(new FixtureHandler((_, _) => Json(Page(true, Charge("same", 100)))));
             await Check.ThrowsAsync<InvalidDataException>(() => new RevenueClient(repeating, FixtureVault.With("stripe")).ReadAsync(RevenueProvider.Stripe, 7));
         });
-        suite.AddAsync("Weather geocodes an explicit city and preserves local forecast time", async () =>
+        suite.AddAsync("Weather uses the licensed authenticated proxy and preserves city-local forecast metadata", async () =>
         {
-            using var handler = new FixtureHandler((request, call) =>
+            using var handler = new FixtureHandler((request, _) =>
             {
-                if (call == 1)
-                {
-                    Check.Equal("geocoding-api.open-meteo.com", request.RequestUri!.Host);
-                    return Json(new { results = new[] { new { latitude = 12.97, longitude = 77.59, name = "Bengaluru", country = "India" } } });
-                }
-                Check.Equal("api.open-meteo.com", request.RequestUri!.Host);
-                return Json(Forecast());
+                Check.Equal("https://billing.example.test/v1/weather?city=Bengaluru", request.RequestUri!.AbsoluteUri);
+                Check.Equal("Bearer", request.Headers.Authorization?.Scheme);
+                Check.Equal("synthetic-session-token", request.Headers.Authorization?.Parameter);
+                return Json(new { location = Location(), forecast = Forecast() });
             });
             using var http = new HttpClient(handler);
-            var weather = new WeatherClient(http);
+            var weather = Weather(http);
             var result = await weather.ReadAsync(" Bengaluru ");
             Check.Equal("Bengaluru, India", result.City);
             Check.Near(29, result.Temperature);
             Check.Equal(TimeSpan.FromMinutes(330), result.Hours[0].Time.Offset);
             Check.Equal(11, result.Hours[0].Time.Hour);
             Check.Equal(new DateOnly(2026, 10, 3), result.Days[0].Date);
+            Check.Equal("Asia/Kolkata", result.TimeZoneId);
+            Check.Equal<TimeSpan?>(TimeSpan.FromMinutes(330), result.UtcOffset);
             Check.Equal(result, await weather.ReadAsync("bengaluru"));
-            Check.Equal(2, handler.Calls);
+            Check.Equal(1, handler.Calls);
         });
         suite.AddAsync("Weather reports unknown cities and inconsistent forecast arrays", async () =>
         {
-            using var unknown = new HttpClient(new FixtureHandler((_, _) => Json(new { results = Array.Empty<object>() })));
-            await Check.ThrowsAsync<InvalidOperationException>(() => new WeatherClient(unknown).ReadAsync("Unknown"));
-            using var mismatch = new HttpClient(new FixtureHandler((_, call) => call == 1
-                ? Json(new { results = new[] { new { latitude = 1d, longitude = 1d, name = "Fixture" } } })
-                : Json(Forecast(mismatched: true))));
-            await Check.ThrowsAsync<InvalidDataException>(() => new WeatherClient(mismatch).ReadAsync("Fixture"));
+            using var unknown = new HttpClient(new FixtureHandler((_, _) => new(HttpStatusCode.NotFound)));
+            var error = await Check.ThrowsAsync<HttpRequestException>(() => Weather(unknown).ReadAsync("Unknown"));
+            Check.Equal(HttpStatusCode.NotFound, error.StatusCode);
+            using var mismatch = new HttpClient(new FixtureHandler((_, _) => Json(new { location = Location("Fixture"), forecast = Forecast(mismatched: true) })));
+            await Check.ThrowsAsync<InvalidDataException>(() => Weather(mismatch).ReadAsync("Fixture"));
         });
         suite.AddAsync("Analytics reads the normalized endpoint without changing its query", async () =>
         {
@@ -207,6 +244,145 @@ internal static class ProviderCases
         {
             using var malformed = new HttpClient(new FixtureHandler((_, _) => Text("""{"activeUsers":3,"pageViews":100,"newUsers":12,"timeline":[],"pages":[],"updatedAt":"2026-10-03T01:02:00"}""")));
             await Check.ThrowsAsync<InvalidDataException>(() => new AnalyticsClient(malformed, FixtureVault.With("analytics")).ReadAsync("https://example.test/data", "Site"));
+        });
+        suite.AddAsync("Provider deadline covers a body that stalls after successful response headers", async () =>
+        {
+            var stream = new StallingProviderStream();
+            using var http = new HttpClient(new FixtureHandler((_, _) => new(HttpStatusCode.OK) { Content = new StallingProviderContent(stream) }))
+            { Timeout = TimeSpan.FromMilliseconds(120) };
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            var error = await Check.ThrowsAsync<TimeoutException>(() => new AnalyticsClient(http, FixtureVault.With("analytics"))
+                .ReadAsync("https://example.test/data?private=hidden", "Site"));
+            Check.True(started.Elapsed < TimeSpan.FromSeconds(5), "The body read did not honor its complete-request deadline.");
+            Check.True(stream.WasDisposed);
+            Check.True(error.Message.Contains("try again", StringComparison.OrdinalIgnoreCase));
+            Check.False(error.Message.Contains("hidden", StringComparison.Ordinal));
+        });
+        suite.AddAsync("Provider cancellation remains cancellation instead of becoming a timeout", async () =>
+        {
+            var stream = new StallingProviderStream();
+            using var http = new HttpClient(new FixtureHandler((_, _) => new(HttpStatusCode.OK) { Content = new StallingProviderContent(stream) }))
+            { Timeout = TimeSpan.FromSeconds(3) };
+            using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+            await Check.ThrowsAsync<OperationCanceledException>(() => new AnalyticsClient(http, FixtureVault.With("analytics"))
+                .ReadAsync("https://example.test/data", "Site", cancel.Token));
+            Check.True(stream.WasDisposed);
+        });
+        suite.AddAsync("Provider connection diagnostics omit private endpoint and transport exception details", async () =>
+        {
+            using var http = new HttpClient(new FixtureHandler((_, _) => throw new HttpRequestException("TLS failure private.example.test?key=synthetic-private")));
+            var error = await Check.ThrowsAsync<HttpRequestException>(() => new AnalyticsClient(http, FixtureVault.With("analytics"))
+                .ReadAsync("https://private.example.test/data?key=synthetic-private", "Site"));
+            Check.True(error.Message.Contains("connection", StringComparison.OrdinalIgnoreCase));
+            Check.False(error.Message.Contains("synthetic-private", StringComparison.Ordinal));
+            Check.True(error.InnerException is null);
+        });
+        suite.AddAsync("Provider authorization and rate limits preserve actionable safe status messages", async () =>
+        {
+            foreach (var item in new[] { (HttpStatusCode.Unauthorized, "credential"), (HttpStatusCode.Forbidden, "permission"), (HttpStatusCode.TooManyRequests, "rate limit") })
+            {
+                using var http = new HttpClient(new FixtureHandler((_, _) => new(item.Item1) { Content = new StringContent("private response details") }));
+                var error = await Check.ThrowsAsync<HttpRequestException>(() => new AnalyticsClient(http, FixtureVault.With("analytics"))
+                    .ReadAsync("https://example.test/data", "Site"));
+                Check.Equal(item.Item1, error.StatusCode);
+                Check.True(error.Message.Contains(item.Item2, StringComparison.OrdinalIgnoreCase));
+                Check.False(error.Message.Contains("private response", StringComparison.Ordinal));
+            }
+        });
+        suite.AddAsync("Revenue snapshots bind UTC reporting boundaries to the requested day count", async () =>
+        {
+            var now = new DateTimeOffset(2026, 10, 4, 0, 0, 30, TimeSpan.Zero);
+            var clock = new ProviderClock(now);
+            using var handler = new FixtureHandler((request, call) =>
+            {
+                var expectedStart = call == 1 ? new DateTimeOffset(2026, 9, 28, 0, 0, 0, TimeSpan.Zero) : new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero);
+                Check.True(request.RequestUri!.Query.Contains("created%5Bgte%5D=" + expectedStart.ToUnixTimeSeconds(), StringComparison.Ordinal));
+                return Json(Page(false));
+            });
+            using var http = new HttpClient(handler);
+            var result = await new RevenueClient(http, FixtureVault.With("stripe"), clock).ReadAsync(RevenueProvider.Stripe, 7);
+            Check.Equal(7, result.RequestedDays);
+            Check.Equal<DateTimeOffset?>(new DateTimeOffset(2026, 9, 28, 0, 0, 0, TimeSpan.Zero), result.RangeStart);
+            Check.Equal<DateTimeOffset?>(now, result.RangeEnd);
+            Check.Equal(7, result.DailyAmounts.Count);
+            clock.Now = now.AddMinutes(1);
+            var today = await new RevenueClient(http, FixtureVault.With("stripe"), clock).ReadAsync(RevenueProvider.Stripe, 1);
+            Check.Equal(1, today.RequestedDays);
+            Check.Equal<DateTimeOffset?>(new DateTimeOffset(2026, 10, 4, 0, 0, 0, TimeSpan.Zero), today.RangeStart);
+        });
+        suite.AddAsync("Weather fails closed without licensed configuration or an authenticated session", async () =>
+        {
+            using var handler = new FixtureHandler((_, _) => throw new InvalidOperationException("Unexpected request"));
+            using var http = new HttpClient(handler);
+            await Check.ThrowsAsync<InvalidOperationException>(() => new WeatherClient(http).ReadAsync("Bengaluru"));
+            await Check.ThrowsAsync<InvalidOperationException>(() => new WeatherClient(http,
+                WeatherServiceConfiguration.CommercialProxy("https://billing.example.test/v1/weather")).ReadAsync("Bengaluru"));
+            await Check.ThrowsAsync<InvalidOperationException>(() => new WeatherClient(http,
+                WeatherServiceConfiguration.CommercialProxy("https://billing.example.test/v1/weather"), () => "synthetic\r\ninvalid").ReadAsync("Bengaluru"));
+            Check.Equal(0, handler.Calls);
+        });
+        suite.Add("Commercial weather configuration rejects insecure, credential-bearing, or development endpoints", () =>
+        {
+            foreach (var endpoint in new[] { "http://example.test/weather", "https://user:secret@example.test/weather", "https://example.test/weather?key=secret", "https://example.test/weather#section", "https://api.open-meteo.com/v1/forecast", "https://geocoding-api.open-meteo.com/v1/search" })
+                Check.Throws<ArgumentException>(() => WeatherServiceConfiguration.CommercialProxy(endpoint));
+#if !DEBUG
+            Check.Throws<InvalidOperationException>(() => WeatherServiceConfiguration.Development());
+#endif
+        });
+        suite.AddAsync("Weather cache expires and malformed proxy objects cannot replace good data", async () =>
+        {
+            var clock = new ProviderClock(new DateTimeOffset(2026, 10, 3, 6, 0, 0, TimeSpan.Zero));
+            using var handler = new FixtureHandler((_, call) => call == 2 ? Text("{\"location\":null,\"forecast\":{}}") : Json(new { location = Location(), forecast = Forecast() }));
+            using var http = new HttpClient(handler);
+            var weather = Weather(http, clock);
+            var first = await weather.ReadAsync("Bengaluru");
+            clock.Now += TimeSpan.FromMinutes(6);
+            await Check.ThrowsAsync<InvalidDataException>(() => weather.ReadAsync("Bengaluru"));
+            var third = await weather.ReadAsync("Bengaluru");
+            Check.Equal(first.City, third.City);
+            Check.Near(first.Temperature, third.Temperature);
+            Check.Equal(first.UpdatedAt, third.UpdatedAt);
+            Check.Equal(3, handler.Calls);
+        });
+        suite.AddAsync("Weather forecast hours retain distinct offsets across a city daylight-saving transition", async () =>
+        {
+            using var http = new HttpClient(new FixtureHandler((_, _) => Json(new
+            {
+                location = Location("New York"),
+                forecast = Forecast(zoneId: "America/New_York", offsetSeconds: -4 * 3600,
+                    current: new DateTimeOffset(2026, 11, 1, 5, 0, 0, TimeSpan.Zero)),
+            })));
+            var result = await Weather(http).ReadAsync("New York");
+            Check.Equal("America/New_York", result.TimeZoneId);
+            Check.Equal(1, result.Hours[0].Time.Hour);
+            Check.Equal(1, result.Hours[1].Time.Hour);
+            Check.Equal(TimeSpan.FromHours(-4), result.Hours[0].Time.Offset);
+            Check.Equal(TimeSpan.FromHours(-5), result.Hours[1].Time.Offset);
+            Check.Equal(new DateOnly(2026, 11, 1), result.Days[0].Date);
+        });
+#if DEBUG
+        suite.AddAsync("Hosted weather development endpoints require explicit debug configuration", async () =>
+        {
+            using var handler = new FixtureHandler((request, call) =>
+            {
+                Check.True(request.Headers.Authorization is null);
+                Check.Equal(call == 1 ? "geocoding-api.open-meteo.com" : "api.open-meteo.com", request.RequestUri!.Host);
+                return call == 1 ? Json(new { results = new[] { Location() } }) : Json(Forecast());
+            });
+            using var http = new HttpClient(handler);
+            var snapshot = await new WeatherClient(http, WeatherServiceConfiguration.Development()).ReadAsync("Bengaluru");
+            Check.Equal("Bengaluru, India", snapshot.City);
+            Check.Equal(2, handler.Calls);
+        });
+#endif
+        suite.AddAsync("Analytics requires its documented credential and rejects a future source clock", async () =>
+        {
+            using var handler = new FixtureHandler((_, _) => Text("""{"activeUsers":3,"pageViews":100,"newUsers":12,"timeline":[],"pages":[],"updatedAt":"2026-10-03T01:10:00Z"}"""));
+            using var http = new HttpClient(handler);
+            await Check.ThrowsAsync<InvalidOperationException>(() => new AnalyticsClient(http, new FixtureVault()).ReadAsync("https://example.test/data", "Site"));
+            Check.Equal(0, handler.Calls);
+            var clock = new ProviderClock(new DateTimeOffset(2026, 10, 3, 1, 2, 0, TimeSpan.Zero));
+            await Check.ThrowsAsync<InvalidDataException>(() => new AnalyticsClient(http, FixtureVault.With("analytics"), clock).ReadAsync("https://example.test/data", "Site"));
         });
     }
 }

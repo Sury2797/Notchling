@@ -1,56 +1,107 @@
 # Validation evidence
 
-Recorded for the initial native implementation and efficiency follow-up on 3 October 2026. Local checks use Linux x86-64; hosted Windows results are recorded separately. Re-run these checks for later changes; this document does not establish the status of a future commit.
+Historical baseline recorded on **3 October 2026**; remediation checks recorded on **4 October 2026** (Asia/Kolkata). The verified baseline is commit [`131b597`](https://github.com/SuryaK999/Notch-win-linux/commit/131b597f6e2e8cdb084d633db8cd7836ad698a68). Later changes require their own checks; this record does not certify a future release.
 
-## Completed locally
+## Verified baseline
 
-- Official .NET SDK 10.0.100 was downloaded over verified HTTPS and matched the SHA-512 hash in Microsoft's release metadata before extraction into `/workspace/.cache/dotnet`.
-- The portable core and package-free test executable compiled and ran with that SDK. **58 tests executed; 58 passed; 0 failed.**
-- Cases cover preference normalization, countdown expiry after missed UI ticks, pause/resume, stopwatch laps, bounded/deduplicated live activities, pin behavior, concurrent atomic JSON writes, cancellation, Unicode storage, traversal rejection and conversions.
-- In-memory provider fixtures verify Stripe net captured charges/refunds/pagination/currency precision/errors, weather time zones/caching/schema checks, HTTPS analytics contracts, Claude repeated messages and Codex cumulative counters.
-- Calendar fixtures verify folding/escaping, excluded/cancelled events, weekly recurrence, named Windows/IANA zones, DST gaps and repeated times, nominal-day versus elapsed-hour durations, old recurrence queries and unsupported input.
-- Native App, MainWindow, Views, ViewModels, Services and Interop C# files compiled against actual Windows SDK projections and the pinned Windows App SDK in temporary Linux cross-target harnesses with zero errors. XAML element property setters, event signatures, resource references and XML syntax were also checked. The UI harness uses generated field/initialization stubs and excludes Windows-only XAML build tasks. An unused-field warning belongs to those temporary stubs. These checks did not execute Windows services or render the interface.
-- Seven added regression cases verify that inactive activity dismissal cannot undo navigation, queued activities cannot revive after forced collapse, oversize and escaped-Unicode saves preserve the previous readable file, and a failed serializer leaves later writes usable.
-- A queued-read cancellation regression verifies that canceling a reader waiting behind a writer preserves saved data and allows subsequent reads and writes. Reads and writes now share the asynchronous gate to prevent the Windows overwrite/delete-pending race seen in CI.
-- **31 temporary linked-source view-model scenarios passed** with simulated dispatchers, timers and Windows services. They exercise corrupt-data preservation, optional startup failure, clipboard notifications, delayed reminders, demo isolation, stale refreshes, startup input guards, accepted settings persistence, port-scan view gating and unchanged lists, stale scan results/errors, worker-thread enumeration, stopwatch notifications and shutdown ordering. These harness files are outside the checkout at `/workspace/.cache/viewmodel-check`; they are not Windows runtime checks.
-- The CI workflow parses as YAML; the optional SDK bootstrap parses as Python; the Bash core-check wrapper passes shell syntax checking.
+| Check | Evidence and result |
+| --- | --- |
+| Linux core build and tests | 58 cases executed; 58 passed; 0 failed |
+| Windows core build and tests | Passed in hosted CI |
+| Windows x64 native Release build | Passed in hosted CI |
+| Self-contained unpackaged Windows publish | Passed in hosted CI; development artifact is unsigned |
+| Simulated view-model behavior | 31 temporary linked-source scenarios passed with simulated Windows services and dispatchers |
+| Native Windows launch and interactive QA | Not yet recorded |
+| Windows performance measurements | Not yet recorded |
+| Subscription billing and enforcement | Not implemented |
+| Linux desktop UI | Not implemented |
 
-Tests use synthetic inputs and mocked HTTP. They do not require production credentials or assert that live provider accounts are connected.
+The Windows and Linux jobs are recorded in [GitHub Actions run 37098620398](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37098620398). The repository's CI badge reports the current workflow status; this table records the named baseline.
 
-## Hosted Windows build
+## Core test coverage
 
-The initial pushed commit, `19a24dbc17a94c04b4f42ed913fdcda9b56855ca`, triggered [workflow run 37097521066](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37097521066). Its public job pages confirm:
+The package-free test executable runs with .NET SDK 10.0.100. Its 58 cases cover:
 
-- **Windows x64 native build and self-contained publish succeeded**, producing the `notch-windows-x64-unpackaged` artifact (98.6 MB).
-- **Linux core checks succeeded**.
-- **Windows core checks failed** during test execution. The follow-up run, [37098205530](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37098205530), identified `UnauthorizedAccessException` in concurrent reads and file replacement. The storage fix makes reads and writes share the same asynchronous gate; its acceptance check remains the original concurrent storage case, with no skipped or weakened assertion.
+- Preference normalization; countdown expiry after missed UI ticks; pause/resume; stopwatch laps; bounded, deduplicated live activities; activity dismissal and pin behavior.
+- Atomic UTF-8 JSON storage, concurrent reads/writes, queued cancellation, corrupt and oversize data preservation, Unicode serialization and path-traversal rejection.
+- Length, mass, temperature and decimal/binary data conversions, including invalid categories, overflow and absolute-zero checks.
+- Stripe captured payments, refunds, pagination, currency precision and errors; weather time zones, caching and schema validation; HTTPS analytics contracts.
+- Claude repeated usage messages and Codex cumulative counters, without double-counting.
+- Calendar folding/escaping, excluded and cancelled events, weekly recurrence, Windows/IANA time zones, DST transitions, nominal-day versus elapsed-hour duration and unsupported input.
 
-GitHub API requests return `Forbidden`, while public GitHub Actions HTML pages are accessible. Detailed logs require sign-in. The test runner now emits escaped GitHub error annotations so failures can be diagnosed from the public run summary. A successful native build does not establish a successful overall workflow or interactive Windows behavior.
+Reads and writes share an asynchronous storage gate. The concurrent-storage case and queued-reader cancellation regression verify that readers cannot interfere with Windows atomic file replacement and that cancellation leaves storage usable.
 
-## Still required
+Provider tests use synthetic inputs and mocked HTTP. They verify parsing and reporting behavior without production credentials; they do not establish live-account connectivity.
 
-A complete `dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=x64` was attempted on Linux. Restore succeeded and the core compiled, but the Windows-only `XamlCompiler.exe` failed with `Exec format error`; its expected `output.json` was not produced. This remains a local host-platform blocker; full builds run in Windows CI.
+## Additional source and lifecycle checks
 
-- Verify a green overall workflow for the revision being reviewed. The README badge links to current CI status; the historical results above are for the named commits.
-- Native application launch, complete module interactions, DPI/monitor behavior, keyboard/accessibility checks, tray lifetime and sleep/resume behavior on Windows.
-- Measured rendered responsiveness, idle CPU, memory use and long-running resource behavior.
-- Reference-style outer-shell morph animations. Current content transitions animate, but native window resizing is immediate.
-- Live provider integration using explicitly configured test credentials. The live Open-Meteo request was not validated in this environment.
-- Commercial weather endpoint configuration, signed distribution and update handling before a paid public release.
-- Billing/account/entitlement work and a Linux desktop UI remain future phases.
+Native App, MainWindow, Views, ViewModels, Services and Interop C# compiled against Windows SDK projections and the pinned Windows App SDK in temporary cross-target harnesses with no errors. XAML property setters, event signatures, resource references and XML syntax were checked. Generated initialization stubs excluded Windows-only XAML tasks, so these checks did not render the UI. Hosted Windows CI subsequently completed the real XAML build and publish.
 
-The [release matrix](release-readiness.md) lists concrete cases. Static C# checks, portable tests and reference images are separate evidence from interactive Windows validation.
+The historical 31 simulated scenarios have now been preserved in [Notch.ViewModel.Tests](../tests/Notch.ViewModel.Tests/README.md) with injected temporary storage, checked-in doubles and new final-save/retry, over-limit rejection and simultaneous-reminder cases. Debug tests expose the development suite; a separate Release fixture verifies Free defaults/direct-command guards. [Notch.Native.SourceChecks](../tests/Notch.Native.SourceChecks/README.md) regenerates member/event projections from the current XAML rather than relying on temporary generated files. Neither suite executes native WinUI.
 
-## Reproduce the local checks
+The CI YAML, Python SDK bootstrap and Bash core-check wrapper also passed syntax checks. The optional bootstrap verifies the SDK archive against the SHA-512 value in Microsoft's official release metadata before extraction.
+
+## Remaining validation
+
+- Native launch and complete tool interactions on Windows, including keyboard accessibility, Narrator, DPI, mixed monitors, tray lifetime and sleep/resume.
+- Measured input response, rendered frame pacing, idle CPU, memory and long-running resource behavior.
+- Perceived native panel motion, interruption and rendered frame pacing at 60/120/144 Hz; source behavior alone is not a measurement.
+- Live supported-provider checks using explicit test credentials, including network failure and disconnect behavior.
+- Commercial weather configuration, signed packaging, update handling and clean-machine installation/upgrade/uninstallation.
+- Live sandbox subscription purchase, renewal, cancellation, refund/dispute, expiry and recovery for the configured service; Release enforcement is covered separately by synthetic fixtures.
+
+A full Windows project build on Linux restores dependencies but cannot execute the Windows-only XAML compiler. Use Windows for the native build. Portable core success is independent of the Linux desktop UI, which remains future work.
+
+The [release matrix](release-readiness.md) defines concrete acceptance cases. Passing tests and a green build establish specific technical checks; they do not establish commercial release readiness.
+
+## Reproduce repository checks
+
+Install the SDK selected by `global.json`, then run from the repository root.
+
+**Linux or another Bash host — portable core:**
 
 ```bash
-python scripts/install-dotnet.py --install-dir /workspace/.cache/dotnet --cache-dir /workspace/.cache/dotnet-downloads
-DOTNET_CLI_HOME=/workspace/.cache/dotnet-home \
-NUGET_PACKAGES=/workspace/.cache/nuget \
-DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-/workspace/.cache/dotnet/dotnet run --project tests/Notch.Core.Tests/Notch.Core.Tests.csproj --configuration Release
+./scripts/check-core.sh
 ```
 
-The custom runner exits with failure when a case fails, times out, or no cases are registered. It is invoked with `dotnet run`, not `dotnet test`, because the repository deliberately avoids external test-runner dependencies.
+The optional verified bootstrap can install an SDK locally without changing the system installation:
 
-The tested SDK installation and core-check wrapper, plus SDK activation/start instructions, were saved as `install_script` and `start_skill` in the cloud configuration draft. The repeatability run completed with 57 passing tests. Saving did not publish a snapshot or establish a fresh-task restoration result.
+```bash
+python3 scripts/install-dotnet.py --install-dir .tools/dotnet --cache-dir .tools/downloads
+NOTCH_DOTNET="$PWD/.tools/dotnet/dotnet" ./scripts/check-core.sh
+```
+
+**Windows PowerShell — core and native build:**
+
+```powershell
+./scripts/check-core.ps1
+dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=x64
+```
+
+The custom runner exits with failure when a case fails, times out or no cases are registered. The wrappers invoke `dotnet run`, because the test executable deliberately has no external test-runner dependency.
+
+## Remediation verification — 4 October 2026
+
+| Check | Recorded result / limit |
+| --- | --- |
+| Portable core | 92 Release cases passed, including monotonic timing, civil calendar semantics and aggregate workspace limits |
+| Commerce | 58 Release checks passed; billing/test projects built with zero warnings/errors; synthetic Stripe HTTP, OTP, refund/dispute and signed-proof coverage |
+| Linked native service scenarios | 10 passed using Windows API doubles; real Windows services were not executed |
+| Checked-in Debug view-model scenarios | 36 executed, 36 passed, 0 failed on the Linux cloud host with simulated native services |
+| Release Free-plan fixture | One executed, one passed; unconfigured Release remained Free and direct paid commands were gated |
+| XAML source generator | Five source XAML documents parsed and regenerated; full linked native C#/WinUI member projections compiled with zero C# errors. Windows UI was not executed. |
+| Publisher notice/SBOM fixtures | Five passed: exact text/hash preservation, build-only scope, missing dependency/runtime-notice refusal, and installer-engine license/provenance inclusion |
+| Actual Windows release / installer / update | Not executed; publisher signing credentials and native Windows machines unavailable |
+
+Run these checks from a clean checkout:
+
+```bash
+dotnet run --project tests/Notch.Commerce.Tests/Notch.Commerce.Tests.csproj --configuration Release
+dotnet run --project tests/Notch.ViewModel.Tests/Notch.ViewModel.Tests.csproj --configuration Debug
+dotnet run --project tests/Notch.ViewModel.Tests/Notch.ViewModel.Tests.csproj --configuration Release
+dotnet run --project tests/Notch.Native.Tests/Notch.Native.Tests.csproj --configuration Release
+python3 scripts/check-native-source.py
+python3 -m unittest discover -s tests/release -v
+```
+
+The linked native-service tests use platform doubles and the source projection check does not run `InitializeComponent`. Windows CI performs the real XAML build; each consumer OS still needs [native qualification](native-qualification.md). No current CI result for the uncommitted remediation is implied by the historical green run.

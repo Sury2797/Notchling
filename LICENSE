@@ -1,0 +1,95 @@
+Notch Source-Available Commercial License
+Version 1.0 — 3 October 2026
+
+Copyright (c) 2026 SuryaK999. All rights reserved except as expressly granted below.
+
+1. Scope
+
+This license applies to original source code, documentation, and assets in this
+repository that are owned by SuryaK999 (the "Copyright Holder"), together called
+the "Software". Third-party components and material bearing separate notices
+remain governed by their respective licenses. This license does not replace or
+restrict rights granted by those third-party licenses.
+
+2. Limited source permission
+
+Subject to retaining this license and applicable copyright notices, you may
+view, download, build, run, and privately modify the Software for local
+evaluation, development, testing, research, and preparing contributions to this
+project. You may use GitHub's standard repository-fork functionality for those
+purposes, subject to GitHub's terms and this license.
+
+This is a source-available license. It does not grant general production-use,
+commercial deployment, or redistribution rights for source-built versions.
+
+3. Official application releases
+
+Official application builds distributed by the Copyright Holder may be used
+under the applicable Free or Premium product terms and any release-specific
+end-user agreement. Those terms determine the features and subscription period
+you are entitled to use. A product subscription does not grant ownership of the
+Software or rights to resell, sublicense, or redistribute it.
+
+Published pricing describes the planned product offering. Publishing this
+repository alone does not activate a subscription, create a payment obligation,
+or offer a functioning checkout. Development builds supplied for evaluation
+remain subject to the evaluation permission above unless expressly designated
+as an official product release with different usage terms.
+
+4. Reserved rights and restrictions
+
+Except for the permissions above, rights are reserved. Without prior written
+permission from the Copyright Holder, you may not:
+
+  a. distribute the Software, modified versions, or compiled copies, except for
+     repository forks and contributions expressly permitted in section 2;
+  b. sell, rent, sublicense, or commercially deploy source-built versions;
+  c. offer the Software or a derivative as a hosted service or competing product;
+  d. remove required copyright or license notices, or present a modified build
+     as an official Notch release; or
+  e. bypass subscription or entitlement controls in an official product release.
+
+The Copyright Holder may distribute, license, and commercialize the Software
+under separate agreements. Additional permissions require an express written
+grant; public availability of the repository is not such a grant. Nothing in
+this license limits rights that applicable law requires to remain available.
+
+5. Contributions
+
+By intentionally submitting an original contribution for inclusion in this
+project, you grant the Copyright Holder a non-exclusive, perpetual, irrevocable,
+worldwide, royalty-free license to use, reproduce, modify, distribute,
+sublicense, and commercialize that contribution as part of the Software. You
+retain ownership of your contribution. You must have authority to grant those
+rights, and must identify any third-party material and its applicable terms.
+Material not intentionally submitted as a contribution is not covered by this
+grant.
+
+6. Names and branding
+
+No right to use the project's names, logos, or branding is granted beyond
+accurately identifying this project or a proposed contribution. This license
+does not grant rights in third-party names or trademarks.
+
+7. Termination
+
+The permissions granted by this license terminate if you materially violate its
+terms. On termination, stop the uses for which permission has terminated. Rights
+under independent third-party licenses and rights preserved by applicable law
+are unaffected. The contribution license in section 5 survives termination.
+
+8. Disclaimer and limitation
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED
+"AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+TO THE SAME EXTENT, THE COPYRIGHT HOLDER AND CONTRIBUTORS ARE NOT LIABLE FOR
+CLAIMS, DAMAGES, OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE,
+WHETHER IN CONTRACT, TORT, OR OTHERWISE.
+
+These limitations do not exclude liability or consumer rights that applicable
+law does not permit to be excluded. Separate official-release agreements may
+provide additional product terms.
+
+For permission enquiries, contact the maintainer through:
+https://github.com/SuryaK999

@@ -1,31 +1,53 @@
 # Product and platform roadmap
 
-Windows is the first product platform. The supplied reference establishes the structure: dark top-center notch, separate compact dock, native panels and transient live activities. Refinement should come from alignment, typography, useful control states and consistent motion. Each panel has a purpose and a width suited to its content.
+Notch is a Windows-first desktop companion built around quick access, local utility and a compact native interface. The product model is a lightweight Free edition and **Premium at US$2 per month**. Linux desktop support follows the Windows release.
 
-## Free and Pro concept
+Debug exposes the broader development catalog; Release enforces the feature split and validates configured signed subscriptions. The repository does not activate a production payment service. See [pricing and subscription policy](pricing.md) for the exact boundaries.
 
-The following is a proposed commercial split for review. No payment flow, account server, entitlement validation or subscription enforcement is present. Pricing should be decided after usability and retention are measured.
+## Current foundation
 
-| Free | Proposed Pro |
+| Area | Current state |
 | --- | --- |
-| Essential media controls, focus timers and local utilities | Multiple workspace configurations and deeper personalization |
-| Local notes, conversions and basic system controls | Advanced connected dashboards and richer history |
-| Keyboard navigation, reduced motion and privacy controls | Optional encrypted synchronization and backed-up workspace state |
-| Basic calendar import and weather | Expanded calendar/account integrations after OAuth work |
+| Native Windows application | C#/WinUI 3 with Windows App SDK; tray, global shortcut, native overlay placement and local tools implemented |
+| Portable core | Timers, state machine, local storage, conversions and provider/import adapters; checks run on Windows and Linux |
+| Connected data | Read-only Stripe reporting, configured HTTPS analytics, Open-Meteo development weather and explicit calendar/coding imports |
+| Build and packaging | Windows x64 Release build and self-contained unpackaged publish verified by [CI](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37098620398) |
+| Interactive release QA | Windows launch, accessibility, monitor behavior, live service checks and performance measurement remain required |
+| Subscriptions | Free/Premium product policy documented; Release enforcement and configurable secure service implemented; production activation and live sandbox validation pending |
+| Linux desktop | Planned; the core is portable, while the UI and operating-system services are Windows-specific |
 
-Accessibility, reduced motion, privacy, reliable local storage and responsive basic controls belong in both tiers. Billing integration is a later task with its own account, entitlement, cancellation and recovery design. Read-only Stripe revenue reporting is separate from charging users for this application.
+## Windows release sequence
 
-## Windows completion order
+### 1. Finish the daily-use experience
 
-1. Compile and launch the WinUI app on a real Windows machine. Resolve native XAML, deployment and service compatibility issues found by the Windows CI job.
-2. Validate the full reference-derived module inventory with keyboard and pointer input. Make offline, unconfigured, empty, busy, unsupported and failed states explicit.
-3. Measure idle use, active animation responsiveness, memory and handle growth. Tune motion and refresh scheduling using actual results.
-4. Verify external connections with user-configured test accounts and representative data. Complete calendar edge cases, media-player differences and monitor/resume checks.
-5. Package a signed installer, add update handling and run clean-machine installation/upgrade/uninstallation QA. This repository currently prepares an unsigned unpackaged review artifact.
-6. Introduce paid accounts and billing only after the core application passes release QA.
+Validate media, focus, notes, shelf, clipboard and system controls on Windows. Test empty and offline states alongside configured accounts. Refine typography, layout, keyboard focus and dock navigation before adding more integration breadth.
 
-## Linux phase
+Complete smooth panel-size transitions and measure input response, frame pacing, idle CPU, memory and handle growth. Preserve reduced motion and avoid waking hidden tools to redraw unchanged data.
 
-The portable core and package-free tests run on Linux now. A Linux overlay UI and Linux media, audio, tray, clipboard, secret storage and monitor implementations are future work. Windows APIs must remain behind the existing service contracts so that the core can be reused.
+### 2. Complete service and privacy validation
 
-A Linux implementation must be validated separately on X11 and Wayland. Compositor support for global shortcuts, overlay placement, always-on-top windows and trays differs. A successful Linux core build does not constitute Linux desktop support. Do not package the Windows executable as a Linux release or present a browser imitation as a native implementation.
+Exercise supported media players, missing audio devices, clipboard opt-in and disable, corrupt workspace recovery, calendar time zones, sleep/resume and monitor changes. Verify provider credentials can be removed and that disconnected dashboards stop requesting data.
+
+A commercially distributed app needs an appropriate weather service arrangement and licensed endpoint. Release weather requires an authenticated commercially licensed proxy; development endpoints are not silently used for paid distribution. Unsupported revenue providers, provider OAuth and calendar account synchronization are separate integration work.
+
+### 3. Validate and activate Free and Premium
+
+Ship the basic Free experience without an application account for its local features. Configure and verify the implemented US$2 monthly Premium purchase flow, signed subscription state and Release feature enforcement. Define cancellation, payment failure, offline validation and account recovery before taking payment.
+
+Upgrading must preserve local data. A subscription ending must return access to Free without silently deleting Premium-created notes or file references. Validate the implemented recovery/export path as part of downgrade handling. The in-app read-only Stripe dashboard remains separate from the system used to bill Notch customers.
+
+### 4. Prepare paid distribution
+
+Configure the signed installer/update pipeline and execute clean-machine installation, upgrade, interruption and uninstallation checks. Complete customer-facing subscription disclosures, support and applicable license/terms review. The current CI ZIP is an unsigned development artifact.
+
+Do not label a build commercially ready until the [release checklist](release-readiness.md) is complete. Build success and test counts are evidence for specific checks, not substitutes for native usability or subscription validation.
+
+## Linux after the Windows release
+
+Reuse `Notch.Core` and its provider contracts while replacing the presentation layer, media, audio, clipboard, tray, secret storage and monitor services. WinUI is Windows-only.
+
+Evaluate X11 and Wayland independently. Global shortcuts, always-on-top behavior, overlay placement and tray support vary by compositor. A passing Linux core suite establishes portable logic; it does not establish Linux desktop support.
+
+## Scope discipline
+
+The launch priority is reliable local utility, then supported opt-in connections. No cloud synchronization, annual plan, lifetime plan or additional device allowance is included in the current product policy. New integrations and commercial terms require an explicit product decision rather than being implied by a toolbar entry.

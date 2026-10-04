@@ -10,6 +10,7 @@ public sealed class WindowsMediaService : IMediaService
     private const long MaximumArtworkBytes = 4 * 1024 * 1024;
     private const int MaximumArtworkFiles = 12;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly SemaphoreSlim _startGate = new(1, 1);
     private readonly object _gate = new();
     private readonly CancellationTokenSource _lifetime = new();
     private readonly string _artworkDirectory = Path.Combine(
@@ -29,16 +30,28 @@ public sealed class WindowsMediaService : IMediaService
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_manager is not null) return;
-        cancellationToken.ThrowIfCancellationRequested();
-        var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync()
-            .AsTask(cancellationToken).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        if (_disposed) return;
-        _manager = manager;
-        manager.CurrentSessionChanged += OnCurrentSessionChanged;
-        manager.SessionsChanged += OnSessionsChanged;
-        await RefreshAsync(_lifetime.Token);
+        await _startGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+            if (_manager is null)
+            {
+                var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync()
+                    .AsTask(lifetime.Token).WaitAsync(TimeSpan.FromSeconds(5), lifetime.Token).ConfigureAwait(false);
+                lifetime.Token.ThrowIfCancellationRequested();
+                lock (_gate)
+                {
+                    if (_disposed) return;
+                    _manager = manager;
+                    manager.CurrentSessionChanged += OnCurrentSessionChanged;
+                    manager.SessionsChanged += OnSessionsChanged;
+                }
+            }
+            // Repeated Start is a real recoverable refresh, including after a transient media error.
+            await RefreshAsync(lifetime.Token).ConfigureAwait(false);
+        }
+        finally { _startGate.Release(); }
     }
 
     public async Task PlayPauseAsync()
@@ -179,10 +192,16 @@ public sealed class WindowsMediaService : IMediaService
             var duration = timeline.EndTime > timeline.StartTime ? timeline.EndTime - timeline.StartTime : TimeSpan.Zero;
             var position = timeline.Position - timeline.StartTime;
             var playing = playback.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+            var playbackRate = playback.PlaybackRate ?? 1;
+            if (!double.IsFinite(playbackRate)) playbackRate = 1;
+            playbackRate = Math.Clamp(playbackRate, -16, 16);
+            var positionUpdatedAt = DateTimeOffset.UtcNow;
             if (playing && timeline.LastUpdatedTime > DateTimeOffset.MinValue)
             {
-                var elapsed = DateTimeOffset.UtcNow - timeline.LastUpdatedTime;
-                if (elapsed > TimeSpan.Zero && elapsed < TimeSpan.FromDays(1)) position += elapsed;
+                var elapsed = positionUpdatedAt - timeline.LastUpdatedTime;
+                if (elapsed > TimeSpan.Zero && elapsed < TimeSpan.FromDays(1))
+                    position = TimeSpan.FromSeconds(Math.Clamp(position.TotalSeconds + elapsed.TotalSeconds * playbackRate,
+                        0, duration.TotalSeconds));
             }
             position = TimeSpan.FromTicks(Math.Clamp(position.Ticks, 0, duration.Ticks));
             var artworkKey = $"{session.SourceAppUserModelId}\n{properties.Title}\n{properties.Artist}\n{properties.AlbumTitle}";
@@ -194,7 +213,10 @@ public sealed class WindowsMediaService : IMediaService
             token.ThrowIfCancellationRequested();
             Publish(new MediaSnapshot(properties.Title, properties.Artist, _artworkPath, playing,
                 position, duration, session.SourceAppUserModelId,
-                playback.Controls.IsPlaybackPositionEnabled && duration > TimeSpan.Zero));
+                playback.Controls.IsPlaybackPositionEnabled && duration > TimeSpan.Zero,
+                playback.Controls.IsPlayEnabled, playback.Controls.IsPauseEnabled,
+                playback.Controls.IsPreviousEnabled, playback.Controls.IsNextEnabled,
+                positionUpdatedAt, playbackRate));
         }
         finally { _refreshGate.Release(); }
     }
@@ -298,6 +320,8 @@ public sealed class WindowsMediaService : IMediaService
         // Wait for in-flight thumbnail I/O before releasing synchronization objects.
         await _refreshGate.WaitAsync().ConfigureAwait(false);
         _refreshGate.Release();
+        await _startGate.WaitAsync().ConfigureAwait(false);
+        _startGate.Release();
         _debounce?.Dispose();
         _lifetime.Dispose();
         // Canceled refresh continuations can still observe the gate; leave its tiny managed object valid.

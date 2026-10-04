@@ -8,7 +8,12 @@ internal static class NativeInput
     {
         Input[] keys = [Key(0x5B), Key(0xBE), Key(0xBE, true), Key(0x5B, true)];
         if (SendInput((uint)keys.Length, keys, Marshal.SizeOf<Input>()) != keys.Length)
+        {
+            // A partial injected chord must not leave the Windows key held down.
+            Input[] releases = [Key(0xBE, true), Key(0x5B, true)];
+            _ = SendInput((uint)releases.Length, releases, Marshal.SizeOf<Input>());
             throw new InvalidOperationException("Windows could not open the emoji picker.");
+        }
     }
     private static Input Key(ushort code, bool up = false) => new() { Type = 1, Keyboard = new() { VirtualKey = code, Flags = up ? 2u : 0u } };
     [StructLayout(LayoutKind.Explicit, Size = 40)] private struct Input { [FieldOffset(0)] public uint Type; [FieldOffset(8)] public KeyboardInput Keyboard; }

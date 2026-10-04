@@ -1,0 +1,67 @@
+name: Signed release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version without v (for example 0.2.0)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signed-release
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    name: Signed x64 installer and notices
+    runs-on: windows-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install installer compiler
+        run: choco install innosetup --version=6.4.3 --yes --no-progress
+      - name: Require publisher signing credentials
+        shell: pwsh
+        env:
+          NOTCH_SIGNING_PFX_BASE64: ${{ secrets.NOTCH_SIGNING_PFX_BASE64 }}
+          NOTCH_SIGNING_PFX_PASSWORD: ${{ secrets.NOTCH_SIGNING_PFX_PASSWORD }}
+          NOTCH_RELEASE_VERSION: ${{ inputs.version }}
+        run: ./scripts/build-release.ps1 -Version $env:NOTCH_RELEASE_VERSION
+      - uses: actions/upload-artifact@v6
+        with:
+          name: notch-signed-release-candidate
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 30
+
+  draft:
+    name: Prepare stable-channel release draft
+    needs: candidate
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: notch-signed-release-candidate
+          path: artifacts/release
+      - name: Create reviewable GitHub release draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTCH_RELEASE_VERSION: ${{ inputs.version }}
+          NOTCH_RELEASE_REVISION: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          [[ "$NOTCH_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          gh release create "v$NOTCH_RELEASE_VERSION" artifacts/release/* --draft --target "$NOTCH_RELEASE_REVISION" --title "Notch $NOTCH_RELEASE_VERSION" --notes "Signed Windows 10 22H2 and Windows 11 x64 candidate. Complete the native qualification matrix and deployment/customer-policy checklist before publishing this draft."

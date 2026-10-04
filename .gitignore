@@ -9,6 +9,14 @@ TestResults/
 *.user
 *.suo
 *.log
+__pycache__/
+*.pyc
 .env
 .env.*
 !.env.example
+*.pfx
+*.p12
+*.private.pem
+*.key
+billing.json
+billing.json.*.tmp

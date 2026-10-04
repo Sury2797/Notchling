@@ -6,8 +6,9 @@ namespace Notch.Core.Providers;
 
 /// <summary>
 /// Reads a bounded subset of iCalendar: single events and daily/weekly recurrence.
-/// Floating date-times and date-only values are interpreted in UTC. Named zones
-/// use the operating system's historical time-zone rules, including daylight saving.
+/// Floating date-times are resolved in the caller's calendar zone (the local zone
+/// by default). Date-only values retain their calendar dates and exclusive end.
+/// Named zones use the operating system's historical rules, including daylight saving.
 /// Unsupported recurrence features fail explicitly instead of losing appointments.
 /// </summary>
 public static class IcsCalendar
@@ -24,17 +25,18 @@ public static class IcsCalendar
     /// <summary>Returns events overlapping the half-open interval [from, until), sorted by start time.</summary>
     /// <exception cref="InvalidDataException">Malformed input, invalid dates, or a resource limit was exceeded.</exception>
     /// <exception cref="NotSupportedException">A recurrence feature outside the supported subset was encountered.</exception>
-    public static IReadOnlyList<CalendarEvent> Parse(string text, DateTimeOffset from, DateTimeOffset until)
+    public static IReadOnlyList<CalendarEvent> Parse(string text, DateTimeOffset from, DateTimeOffset until, TimeZoneInfo? calendarZone = null)
     {
         ArgumentNullException.ThrowIfNull(text);
         if (until < from) throw new ArgumentException("The calendar range must end at or after its start.", nameof(until));
         if (text.Length > MaximumCharacters) throw Invalid("The calendar exceeds the 4 MiB text limit.");
 
+        calendarZone ??= TimeZoneInfo.Local;
         var events = ReadEvents(text);
         var result = new List<CalendarEvent>();
         var evaluated = 0;
         foreach (var properties in events)
-            Expand(properties, from, until, result, ref evaluated);
+            Expand(properties, from, until, calendarZone, result, ref evaluated);
         return result.OrderBy(item => item.Start).ThenBy(item => item.Title, StringComparer.Ordinal).ToArray();
     }
 
@@ -152,13 +154,13 @@ public static class IcsCalendar
         return values[0];
     }
 
-    private static void Expand(Dictionary<string, List<Property>> properties, DateTimeOffset from, DateTimeOffset until, List<CalendarEvent> output, ref int evaluated)
+    private static void Expand(Dictionary<string, List<Property>> properties, DateTimeOffset from, DateTimeOffset until, TimeZoneInfo calendarZone, List<CalendarEvent> output, ref int evaluated)
     {
         foreach (var name in new[] { "RDATE", "EXRULE", "RECURRENCE-ID" })
             if (properties.ContainsKey(name)) throw new NotSupportedException($"Calendar {name} recurrence is not supported.");
 
-        var start = ReadDate(Single(properties, "DTSTART") ?? throw Invalid("An event is missing DTSTART."));
-        var startInstant = ToInstant(start.Local, start.Zone, false)!.Value;
+        var start = ReadDate(Single(properties, "DTSTART") ?? throw Invalid("An event is missing DTSTART."), calendarZone);
+        var startInstant = DateInstant(start, start.Local, false)!.Value;
         var endProperty = Single(properties, "DTEND");
         var durationProperty = Single(properties, "DURATION");
         if (endProperty is not null && durationProperty is not null) throw Invalid("An event cannot contain both DTEND and DURATION.");
@@ -166,12 +168,16 @@ public static class IcsCalendar
         var endZone = start.Zone;
         if (endProperty is not null)
         {
-            var end = ReadDate(endProperty);
+            var end = ReadDate(endProperty, calendarZone);
             if (end.AllDay != start.AllDay) throw Invalid("DTSTART and DTEND must use the same date value type.");
-            duration = new(ToInstant(end.Local, end.Zone, false)!.Value - startInstant);
+            // DATE endpoints are calendar dates, not elapsed 24-hour periods.
+            // In particular a two-day event spanning DST still occupies two days.
+            duration = start.AllDay
+                ? new(end.Local - start.Local, (end.Local.Date - start.Local.Date).Days)
+                : new(ToInstant(end.Local, end.Zone, false)!.Value - startInstant);
             endZone = end.Zone;
         }
-        else duration = durationProperty is not null ? ReadDuration(durationProperty.Value, start.AllDay) : new(start.AllDay ? TimeSpan.FromDays(1) : TimeSpan.Zero);
+        else duration = durationProperty is not null ? ReadDuration(durationProperty.Value, start.AllDay) : new(start.AllDay ? TimeSpan.FromDays(1) : TimeSpan.Zero, start.AllDay ? 1 : 0);
         if (duration.Span < TimeSpan.Zero || (start.AllDay && duration.Span == TimeSpan.Zero)) throw Invalid("DTEND must follow DTSTART (an all-day end is exclusive).");
 
         var ruleProperty = Single(properties, "RRULE");
@@ -185,7 +191,7 @@ public static class IcsCalendar
                     if (exclusions.Count >= MaximumOccurrences) throw Invalid("An event exceeds the 2,000 exclusion limit.");
                     var date = ReadDate(property with { Value = value }, start.Zone);
                     if (date.AllDay != start.AllDay) throw Invalid("EXDATE must use the same date value type as DTSTART.");
-                    exclusions.Add(ToInstant(date.Local, date.Zone, false)!.Value.UtcTicks);
+                    exclusions.Add(DateInstant(date, date.Local, false)!.Value.UtcTicks);
                 }
         }
         var title = Unescape(Single(properties, "SUMMARY")?.Value ?? "Untitled event");
@@ -194,7 +200,7 @@ public static class IcsCalendar
 
         CheckBudget(ref evaluated);
         if (rule?.Until is null || startInstant <= rule.Until)
-            AddOccurrence(startInstant, duration, endZone, title, meetingUrl, exclusions, from, until, output);
+            AddOccurrence(startInstant, duration, endZone, start, title, meetingUrl, exclusions, from, until, output);
         if (rule is null || rule.Count == 1 || until <= startInstant || from == until || (rule.Until is { } ruleEnd && ruleEnd < startInstant)) return;
 
         var ordinal = 1;
@@ -209,14 +215,14 @@ public static class IcsCalendar
             var step = rule.Count is null ? Math.Max(1L, (localEarliest.Date - start.Local.Date).Days / rule.Interval - 1L) : 1L;
             while (AddDays(start.Local, step * rule.Interval) is { } candidate)
             {
-                var instant = ToInstant(candidate, start.Zone, true);
+                var instant = DateInstant(start, candidate, true);
                 if (instant is not null)
                 {
                     if (instant >= until || (rule.Until is { } last && instant > last)) break;
                     CheckBudget(ref evaluated);
                     ordinal++;
                     if (rule.Count is { } count && ordinal > count) break;
-                    AddOccurrence(instant.Value, duration, endZone, title, meetingUrl, exclusions, from, until, output);
+                    AddOccurrence(instant.Value, duration, endZone, start, title, meetingUrl, exclusions, from, until, output);
                     if (rule.Count == ordinal) break;
                 }
                 else CheckBudget(ref evaluated);
@@ -236,13 +242,13 @@ public static class IcsCalendar
                     var dayOffset = ((int)day - (int)rule.WeekStart + 7) % 7;
                     if (AddDays(weekStart, dayOffset) is not { } candidate) return;
                     if (candidate <= start.Local) continue;
-                    var instant = ToInstant(candidate, start.Zone, true);
+                    var instant = DateInstant(start, candidate, true);
                     if (instant is null) { CheckBudget(ref evaluated); continue; }
                     if (instant >= until || (rule.Until is { } last && instant > last)) return;
                     CheckBudget(ref evaluated);
                     ordinal++;
                     if (rule.Count is { } count && ordinal > count) return;
-                    AddOccurrence(instant.Value, duration, endZone, title, meetingUrl, exclusions, from, until, output);
+                    AddOccurrence(instant.Value, duration, endZone, start, title, meetingUrl, exclusions, from, until, output);
                     if (rule.Count == ordinal) return;
                 }
                 week++;
@@ -250,7 +256,7 @@ public static class IcsCalendar
         }
     }
 
-    private static void AddOccurrence(DateTimeOffset start, DurationValue duration, TimeZoneInfo endZone, string title, string? meetingUrl, HashSet<long> exclusions, DateTimeOffset from, DateTimeOffset until, List<CalendarEvent> output)
+    private static void AddOccurrence(DateTimeOffset start, DurationValue duration, TimeZoneInfo endZone, CalendarDate source, string title, string? meetingUrl, HashSet<long> exclusions, DateTimeOffset from, DateTimeOffset until, List<CalendarEvent> output)
     {
         if (exclusions.Contains(start.UtcTicks) || from == until) return;
         DateTimeOffset end;
@@ -262,17 +268,19 @@ public static class IcsCalendar
                 var localEnd = AddDays(start.DateTime, duration.NominalDays) ?? throw Invalid("A calendar duration ends outside the supported date range.");
                 // A nominal day preserves wall time. If its endpoint falls in a
                 // gap, RFC 5545 uses the offset immediately before that gap.
-                var dayEnd = endZone.IsInvalidTime(localEnd)
+                var dayEnd = source.AllDay
+                    ? new DateTimeOffset(localEnd, endZone.GetUtcOffset(localEnd))
+                    : endZone.IsInvalidTime(localEnd)
                     ? new DateTimeOffset(localEnd, endZone.GetUtcOffset(localEnd.AddDays(-2)))
                     : ToInstant(localEnd, endZone, false)!.Value;
-                end = TimeZoneInfo.ConvertTime(dayEnd.Add(duration.Clock), endZone);
+                end = source.AllDay ? dayEnd : TimeZoneInfo.ConvertTime(dayEnd.Add(duration.Clock), endZone);
             }
         }
         catch (ArgumentOutOfRangeException exception) { throw Invalid("A calendar occurrence ends outside the supported date range.", exception); }
         if (start < until && (end > from || (duration.Span == TimeSpan.Zero && start >= from)))
         {
             if (output.Count >= MaximumOccurrences) throw Invalid("The requested range exceeds the 2,000 occurrence limit.");
-            output.Add(new(title, start, end, meetingUrl));
+            output.Add(new(title, start, end, meetingUrl, source.AllDay, source.Floating, source.Zone.Id));
         }
     }
 
@@ -289,14 +297,14 @@ public static class IcsCalendar
         {
             if (zoneId is not null) throw Invalid("Date-only calendar values cannot have a TZID.");
             if (!DateTime.TryParseExact(property.Value, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)) throw Invalid("A calendar date is invalid.");
-            return new(DateTime.SpecifyKind(date, DateTimeKind.Unspecified), TimeZoneInfo.Utc, true);
+            return new(DateTime.SpecifyKind(date, DateTimeKind.Unspecified), fallbackZone ?? TimeZoneInfo.Local, true, false);
         }
         var isUtc = property.Value.EndsWith('Z');
         if (isUtc && zoneId is not null) throw Invalid("A UTC calendar date cannot also have a TZID.");
         var value = isUtc ? property.Value[..^1] : property.Value;
         if (!DateTime.TryParseExact(value, "yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var local)) throw Invalid("A calendar date-time is invalid.");
-        var zone = isUtc ? TimeZoneInfo.Utc : zoneId is not null ? ResolveZone(zoneId) : fallbackZone ?? TimeZoneInfo.Utc;
-        return new(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), zone, false);
+        var zone = isUtc ? TimeZoneInfo.Utc : zoneId is not null ? ResolveZone(zoneId) : fallbackZone ?? TimeZoneInfo.Local;
+        return new(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), zone, false, !isUtc && zoneId is null);
     }
 
     private static TimeZoneInfo ResolveZone(string id)
@@ -329,6 +337,12 @@ public static class IcsCalendar
         catch (ArgumentException exception) { throw Invalid("A calendar date-time is outside the supported date range.", exception); }
     }
 
+    // DATE values have no time zone under RFC 5545. The offset is only an
+    // indexing aid; preserve the actual civil date even in a midnight DST gap.
+    private static DateTimeOffset? DateInstant(CalendarDate date, DateTime local, bool skipInvalid) => date.AllDay
+        ? new DateTimeOffset(local, date.Zone.GetUtcOffset(local))
+        : ToInstant(local, date.Zone, skipInvalid);
+
     private static Rule ReadRule(string value, CalendarDate start)
     {
         var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -350,7 +364,7 @@ public static class IcsCalendar
             if (count is not null) throw Invalid("An RRULE cannot contain both COUNT and UNTIL.");
             var date = ReadDate(new("UNTIL", new(StringComparer.OrdinalIgnoreCase), untilValue), start.Zone);
             if (date.AllDay != start.AllDay) throw Invalid("RRULE UNTIL must use the same date value type as DTSTART.");
-            until = ToInstant(date.Local, date.Zone, false);
+            until = DateInstant(date, date.Local, false);
         }
         var weekStart = fields.TryGetValue("WKST", out var weekStartValue) ? Weekday(weekStartValue) : DayOfWeek.Monday;
         DayOfWeek[] days = [start.Local.DayOfWeek];
@@ -430,7 +444,7 @@ public static class IcsCalendar
 
     private static InvalidDataException Invalid(string message, Exception? exception = null) => new(message, exception);
     private sealed record Property(string Name, Dictionary<string, string> Parameters, string Value);
-    private sealed record CalendarDate(DateTime Local, TimeZoneInfo Zone, bool AllDay);
+    private sealed record CalendarDate(DateTime Local, TimeZoneInfo Zone, bool AllDay, bool Floating);
     private sealed record DurationValue(TimeSpan Span, long NominalDays = 0, TimeSpan Clock = default);
     private sealed record Rule(string Frequency, int Interval, int? Count, DateTimeOffset? Until, DayOfWeek WeekStart, DayOfWeek[] Days);
 }

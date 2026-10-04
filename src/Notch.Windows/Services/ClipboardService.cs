@@ -9,8 +9,12 @@ public sealed class ClipboardService : IDisposable
 {
     private const int MaximumItems = 50;
     private const int MaximumTextLength = 100_000;
+    private const int MaximumPendingCaptures = 50;
     private readonly DispatcherQueue _dispatcher;
     private readonly List<ClipboardItem> _items = [];
+    private readonly Queue<PendingCapture> _pending = new();
+    private CancellationTokenSource _captureLifetime = new();
+    private bool _capturing;
     private bool _enabled;
     private bool _disposed;
     private long _generation;
@@ -26,9 +30,10 @@ public sealed class ClipboardService : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         OnDispatcher(() =>
         {
+            if (_disposed) return;
             if (_enabled == enabled) return;
             _enabled = enabled;
-            _generation++;
+            InvalidateCaptures();
             if (enabled) Clipboard.ContentChanged += OnContentChanged;
             else
             {
@@ -48,6 +53,7 @@ public sealed class ClipboardService : IDisposable
         {
             try
             {
+                if (_disposed) { completion.TrySetCanceled(); return; }
                 var package = new DataPackage();
                 package.SetText(text);
                 Clipboard.SetContent(package);
@@ -61,34 +67,103 @@ public sealed class ClipboardService : IDisposable
     public void Clear()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        OnDispatcher(() => { _generation++; ClearCore(); });
+        OnDispatcher(() => { if (_disposed) return; InvalidateCaptures(); ClearCore(); });
     }
 
-    private async void OnContentChanged(object? sender, object args)
+    private void OnContentChanged(object? sender, object args)
+    {
+        OnDispatcher(CaptureCurrentClipboard);
+    }
+
+    private void CaptureCurrentClipboard()
     {
         if (!_enabled || _disposed) return;
-        var generation = ++_generation;
         try
         {
             var content = Clipboard.GetContent();
             if (content.Contains("ExcludeClipboardContentFromMonitorProcessing")) return;
             if (!content.Contains(StandardDataFormats.Text)) return;
-            var text = await content.GetTextAsync();
-            OnDispatcher(() =>
+            if (_pending.Count >= MaximumPendingCaptures)
             {
-                if (!_enabled || _disposed || generation != _generation || string.IsNullOrWhiteSpace(text)) return;
-                // Avoid silently truncating sensitive/code content into a misleading clipboard entry.
-                if (text.Length > MaximumTextLength) return;
-                _items.RemoveAll(item => item.Text == text);
-                _items.Insert(0, new ClipboardItem(Guid.NewGuid(), text, DateTimeOffset.UtcNow));
-                if (_items.Count > MaximumItems) _items.RemoveRange(MaximumItems, _items.Count - MaximumItems);
-                Changed?.Invoke(this, Items);
-            });
+                _pending.Dequeue();
+                Error?.Invoke(this, "Clipboard capture is busy. An older pending entry was skipped.");
+            }
+            // Snapshot the package at notification time. Queue readers so slower owners cannot reorder history.
+            _pending.Enqueue(new(content, _generation, _captureLifetime.Token, DateTimeOffset.UtcNow));
+            if (!_capturing)
+            {
+                _capturing = true;
+                _ = CapturePendingAsync();
+            }
         }
         catch (Exception error)
         {
-            if (!_disposed) _dispatcher.TryEnqueue(() => Error?.Invoke(this, $"Clipboard text is unavailable: {error.Message}"));
+            if (!_disposed) Error?.Invoke(this, $"Clipboard capture is unavailable: {error.Message}");
         }
+    }
+
+    private async Task CapturePendingAsync()
+    {
+        while (true)
+        {
+            PendingCapture? request = null;
+            if (!await TryOnDispatcherAsync(() =>
+            {
+                if (_disposed || _pending.Count == 0) _capturing = false;
+                else request = _pending.Dequeue();
+            }).ConfigureAwait(false) || request is null) return;
+            try
+            {
+                request.Token.ThrowIfCancellationRequested();
+                var text = await request.Content.GetTextAsync().AsTask(request.Token)
+                    .WaitAsync(TimeSpan.FromSeconds(3), request.Token).ConfigureAwait(false);
+                await TryOnDispatcherAsync(() =>
+                {
+                    if (!_enabled || _disposed || request.Generation != _generation || string.IsNullOrWhiteSpace(text)) return;
+                    // Never silently truncate code or sensitive content into a misleading entry.
+                    if (text.Length > MaximumTextLength)
+                    {
+                        Error?.Invoke(this, "Clipboard text exceeds the 100,000-character capture limit and was skipped.");
+                        return;
+                    }
+                    _items.RemoveAll(item => item.Text == text);
+                    _items.Insert(0, new ClipboardItem(Guid.NewGuid(), text, request.CapturedAt));
+                    if (_items.Count > MaximumItems) _items.RemoveRange(MaximumItems, _items.Count - MaximumItems);
+                    Changed?.Invoke(this, Items);
+                }).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception error)
+            {
+                await TryOnDispatcherAsync(() =>
+                {
+                    if (!_disposed && _enabled && request.Generation == _generation)
+                        Error?.Invoke(this, $"Clipboard text could not be captured: {error.Message}");
+                }).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private void InvalidateCaptures()
+    {
+        _generation++;
+        _pending.Clear();
+        _captureLifetime.Cancel();
+        _captureLifetime.Dispose();
+        _captureLifetime = new();
+    }
+
+    private Task<bool> TryOnDispatcherAsync(Action action)
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Invoke()
+        {
+            try { action(); completion.TrySetResult(true); }
+            catch (Exception error) { completion.TrySetException(error); }
+        }
+        if (_dispatcher.HasThreadAccess) Invoke();
+        else if (!_dispatcher.TryEnqueue(Invoke)) completion.TrySetResult(false);
+        return completion.Task;
     }
 
     private void ClearCore()
@@ -112,8 +187,11 @@ public sealed class ClipboardService : IDisposable
         {
             Clipboard.ContentChanged -= OnContentChanged;
             _enabled = false;
-            _generation++;
+            InvalidateCaptures();
+            _captureLifetime.Dispose();
             ClearCore();
         });
     }
+
+    private sealed record PendingCapture(DataPackageView Content, long Generation, CancellationToken Token, DateTimeOffset CapturedAt);
 }

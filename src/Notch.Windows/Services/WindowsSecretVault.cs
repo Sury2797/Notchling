@@ -7,7 +7,8 @@ namespace Notch.Windows.Services;
 public sealed class WindowsSecretVault : ISecretVault
 {
     private const string Resource = "Notch.Windows";
-    private readonly PasswordVault _vault = new();
+    private PasswordVault? _vault;
+    private PasswordVault Vault => _vault ??= new();
     private readonly object _gate = new();
 
     public void Save(string name, string value)
@@ -20,14 +21,14 @@ public sealed class WindowsSecretVault : ISecretVault
             var previous = Find(name);
             try
             {
-                if (previous is not null) _vault.Remove(previous);
-                _vault.Add(new PasswordCredential(Resource, name, value));
+                if (previous is not null) Vault.Remove(previous);
+                Vault.Add(new PasswordCredential(Resource, name, value));
             }
             catch
             {
                 if (previous is not null)
                 {
-                    try { _vault.Add(previous); } catch { /* Original failure is the useful error. */ }
+                    try { Vault.Add(previous); } catch { /* Original failure is the useful error. */ }
                 }
                 throw;
             }
@@ -52,7 +53,7 @@ public sealed class WindowsSecretVault : ISecretVault
         lock (_gate)
         {
             var credential = Find(name);
-            if (credential is not null) _vault.Remove(credential);
+            if (credential is not null) Vault.Remove(credential);
         }
     }
 
@@ -60,7 +61,7 @@ public sealed class WindowsSecretVault : ISecretVault
     {
         try
         {
-            var credential = _vault.Retrieve(Resource, name);
+            var credential = Vault.Retrieve(Resource, name);
             // Retrieve before removal so rollback still has the original encrypted value.
             credential.RetrievePassword();
             return credential;

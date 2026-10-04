@@ -5,6 +5,7 @@ PreferenceCases.Register(suite);
 TimerCases.Register(suite);
 OverlayCases.Register(suite);
 StoreCases.Register(suite);
+WorkspaceCases.Register(suite);
 ConverterCases.Register(suite);
 ProviderCases.Register(suite);
 CalendarCases.Register(suite);

@@ -6,19 +6,34 @@ using Notch.Windows.Services;
 using System.Collections.ObjectModel;
 using System.Net;
 using System.Collections.Specialized;
+using Notch.Core.Commerce;
 
 namespace Notch.Windows.ViewModels;
 
 public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly DispatcherQueue _dispatcher;
-    private readonly IMediaService _mediaService = new WindowsMediaService();
-    private readonly ISystemService _systemService = new WindowsSystemService();
-    private readonly ISecretVault _vault = new WindowsSecretVault();
-    private readonly LocalStore _store;
+    private readonly IMediaService _mediaService;
+    private readonly ISystemService _systemService;
+    private readonly ISecretVault _vault;
+    private readonly IDataStore _store;
     private readonly string _dataDirectory;
     private readonly HttpClient _http = new(new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.All }) { Timeout = TimeSpan.FromSeconds(20) };
     private readonly WeatherClient _weatherClient;
+    private readonly SubscriptionService? _subscription;
+    private readonly string _subscriptionUnavailable;
+    private readonly HashSet<Guid> _queuedReminders = [];
+    private string? _calendarSource;
+    private CalendarRange? _calendarRange;
+    private int _workspaceRevision;
+    private bool _workspaceDirty;
+    private string _saveState = "Saved locally";
+    private SavedNote? _deletedNote;
+    private bool _lastPremium;
+    private bool _discardOnDispose;
+    private long? _nonScratchpadBytes;
+    public Func<bool>? CanPresentActivity { get; set; }
+    public ObservableCollection<LiveActivity> NotificationHistory { get; } = [];
     private readonly CancellationTokenSource _lifetime = new();
     private readonly CancellationToken _lifetimeToken;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
@@ -70,7 +85,44 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public AnalyticsSnapshot? Analytics { get => _analytics; private set => Set(ref _analytics, value); }
     public string Status { get => _status; private set => Set(ref _status, value); }
     public string Error { get => _error; private set => Set(ref _error, value); }
-    public string Scratchpad { get => _scratchpad; set { if (!ReadyForInput()) return; value ??= ""; if (Set(ref _scratchpad, value.Length > 500000 ? value[..500000] : value)) ScheduleSave(); } }
+    public string Scratchpad
+    {
+        get => _scratchpad;
+        set
+        {
+            if (!ReadyForWorkspaceInput()) return;
+            value ??= "";
+            WorkspaceLimits.RequireText(value, WorkspaceLimits.MaximumTextLength, "Scratchpad");
+            WorkspaceLimits.RequireScalarBudget(_nonScratchpadBytes ??= WorkspaceLimits.Measure(LocalSnapshot() with { Scratchpad = "" }), value);
+            if (Set(ref _scratchpad, value)) ScheduleSave();
+        }
+    }
+    public string SaveState { get => _saveState; private set => Set(ref _saveState, value); }
+    public bool HasUnsavedChanges => _workspaceDirty || _preferencesChanged;
+    public bool CanUndoNoteDeletion => _deletedNote is not null;
+#if DEBUG
+    public bool IsDevelopmentBuild => true;
+#else
+    public bool IsDevelopmentBuild => false;
+#endif
+    public bool IsPremium => IsDevelopmentBuild || _subscription?.Current.IsPremium == true;
+    public string PlanStatus => IsDevelopmentBuild ? "Development build — all tools enabled" : IsPremium ? "Premium — US$2/month" : "Free — basic media, Pomodoro and scratchpad";
+    public string SubscriptionStatus => _subscription?.Current.Message ?? _subscriptionUnavailable;
+    public bool BillingConfigured => _subscription is not null;
+    public bool CanAccessModule(ModuleId module) => IsPremium || module is ModuleId.Home or ModuleId.Media or ModuleId.Focus or ModuleId.Scratchpad or ModuleId.Settings or ModuleId.Tools;
+    private bool RequirePremium(ModuleId module)
+    {
+        if (CanAccessModule(module)) return true;
+        ShowError("This tool is included in Premium. Your existing data remains available for export in Settings.");
+        return false;
+    }
+    private bool RequirePremiumFeature()
+    {
+        if (IsPremium) return true;
+        ShowError("This control is included in Premium. Basic playback, Pomodoro and scratchpad remain available."); return false;
+    }
+    public bool CalendarRangeLoaded(DateTime month) => _calendarRange?.ContainsMonth(month) == true;
+
     public IReadOnlyList<int> ListeningPorts { get => _ports; private set { if (!_ports.SequenceEqual(value)) Set(ref _ports, value); } }
     public IReadOnlyList<CalendarEvent> CalendarEvents { get => _calendarEvents; private set => Set(ref _calendarEvents, value); }
     public ObservableCollection<SavedNote> Notes { get; } = [];
@@ -92,21 +144,37 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsReady => _loaded && !_disposed;
     private string WorkspaceRecoveryMessage => $"Your saved notebook could not be read. Its file is preserved and notebook saving is paused. Back up and repair or rename {Path.Combine(_dataDirectory, "workspace.json")}, then restart Notch.";
 
-    public MainViewModel(DispatcherQueue dispatcher)
+    public MainViewModel(DispatcherQueue dispatcher, string? dataDirectory = null, IDataStore? store = null, IMediaService? mediaService = null, ISystemService? systemService = null, ISecretVault? vault = null)
     {
         _dispatcher = dispatcher;
         _lifetimeToken = _lifetime.Token;
-        _weatherClient = new(_http);
-        _dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Notch");
-        _store = new(_dataDirectory);
+        _mediaService = mediaService ?? new WindowsMediaService();
+        _systemService = systemService ?? new WindowsSystemService();
+        _vault = vault ?? new WindowsSecretVault();
+        var configuration = ProductConfiguration.Load();
+        SubscriptionService.TryCreateFromConfiguration(_http, _vault, configuration.BillingUrl, configuration.EntitlementPublicKeyPem, out _subscription, out _subscriptionUnavailable);
+        WeatherServiceConfiguration? weatherConfiguration = null;
+        if (_subscription is not null && configuration.BillingUrl is { } billingUrl && new Uri(billingUrl).Scheme == Uri.UriSchemeHttps)
+            weatherConfiguration = WeatherServiceConfiguration.CommercialProxy(new Uri(new Uri(billingUrl.TrimEnd('/') + "/"), "v1/weather").AbsoluteUri);
+        _weatherClient = new(_http, weatherConfiguration, () => _subscription?.SessionToken);
+        _dataDirectory = dataDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Notch");
+        _store = store ?? new LocalStore(_dataDirectory);
         ClipboardService = new(dispatcher);
         ClipboardService.Changed += OnClipboardChanged;
+        ClipboardService.Error += OnServiceError;
         _mediaService.Changed += OnMediaChanged;
+        _mediaService.Error += OnServiceError;
+        Overlay.ActivityPresented += (_, activity) =>
+        {
+            if (_queuedReminders.Remove(activity.Id)) _deliveredReminders.Add(activity.Id);
+            NotificationHistory.Insert(0, activity);
+            if (NotificationHistory.Count > 50) NotificationHistory.RemoveAt(50);
+        };
         Overlay.Changed += (_, _) => { if (_disposed) return; _viewGeneration++; Notify(nameof(SelectedModule)); _ = RefreshForViewAsync(); UpdateStopwatchTick(); };
         _tick.Tick += OnTick;
         _stopwatchTick.Tick += (_, _) => { if (!_disposed) Notify(nameof(StopwatchTime)); };
         foreach (var collection in new INotifyCollectionChanged[] { Notes, Shelf, Links })
-            collection.CollectionChanged += (_, _) => ScheduleSave();
+            collection.CollectionChanged += (_, _) => { _nonScratchpadBytes = null; ScheduleSave(); };
         Reminders.CollectionChanged += OnRemindersChanged;
     }
     public async Task InitializeAsync()
@@ -154,13 +222,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             Overlay.Pinned = Preferences.Pinned;
             _focus.Pomodoro.Reset(TimeSpan.FromMinutes(Preferences.FocusMinutes));
             _focus.Hydration.Reset(TimeSpan.FromMinutes(Preferences.HydrationMinutes));
-            _focus.Hydration.Start();
+            if (IsPremium) _focus.Hydration.Start();
             _loaded = true;
+            if (_subscription is not null) await ExecuteAsync(RefreshSubscriptionAsync);
             _tick.Start();
             NotifyTimers();
             if (IsDemo) LoadDemo();
             Notify(nameof(IsReady));
-            await ExecuteAsync(() => { ClipboardService.SetEnabled(Preferences.CaptureClipboard); return Task.CompletedTask; });
+            await ExecuteAsync(() => { ClipboardService.SetEnabled(IsPremium && Preferences.CaptureClipboard); return Task.CompletedTask; });
             if (_disposed) return;
             await ExecuteAsync(() => _mediaService.StartAsync(_lifetimeToken));
             if (_disposed) return;
@@ -184,7 +253,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         Clipboard.Clear(); foreach (var item in items) Clipboard.Add(item);
         Notify(nameof(Clipboard));
     }
-    public void SelectModule(ModuleId module) { if (_disposed) return; Error = _workspaceReadable ? "" : WorkspaceRecoveryMessage; Overlay.Expand(module); }
+    private void OnServiceError(object? sender, string message)
+    {
+        if (!_disposed) _dispatcher.TryEnqueue(() => { if (!_disposed) ShowError(message); });
+    }
+    public void SelectModule(ModuleId module)
+    {
+        if (_disposed) return;
+        if (!RequirePremium(module)) { Overlay.Expand(ModuleId.Settings); return; }
+        Error = _workspaceReadable ? "" : WorkspaceRecoveryMessage;
+        Overlay.Expand(module);
+    }
     public void ShowError(string message)
     {
         if (!_disposed) Error = _workspaceReadable ? message : $"{WorkspaceRecoveryMessage}\n{message}";
@@ -197,7 +276,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         catch (Exception error) when (Recoverable(error))
         {
             if (_disposed) return;
-            var message = error is HttpRequestException ? "The service could not be reached. Check the connection and try again." : error.Message;
+            var message = error is HttpRequestException httpError && httpError.StatusCode is null ? "The service could not be reached. Check the connection and try again." : error.Message;
             Error = !_workspaceReadable && !message.Contains(WorkspaceRecoveryMessage, StringComparison.Ordinal) ? $"{WorkspaceRecoveryMessage}\n{message}" : message;
         }
     }
@@ -260,10 +339,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (old.CodingPath != Preferences.CodingPath && (origin != _codingRequest || originGeneration != _codingRequest.Generation)) { Invalidate(_codingRequest); if (!IsDemo) Coding = null; }
         if (old.CalendarPath != Preferences.CalendarPath && (origin != _calendarRequest || originGeneration != _calendarRequest.Generation)) { Invalidate(_calendarRequest); if (!IsDemo) CalendarEvents = []; }
         Overlay.Pinned = Preferences.Pinned;
-        await ExecuteAsync(() => { ClipboardService.SetEnabled(Preferences.CaptureClipboard); return Task.CompletedTask; });
+        await ExecuteAsync(() => { ClipboardService.SetEnabled(IsPremium && Preferences.CaptureClipboard); return Task.CompletedTask; });
         if (_disposed) return;
         if (old.FocusMinutes != Preferences.FocusMinutes && !FocusRunning) _focus.Pomodoro.Reset(TimeSpan.FromMinutes(Preferences.FocusMinutes));
-        if (old.HydrationMinutes != Preferences.HydrationMinutes) { _focus.Hydration.Reset(TimeSpan.FromMinutes(Preferences.HydrationMinutes)); _focus.Hydration.Start(); }
+        if (old.HydrationMinutes != Preferences.HydrationMinutes)
+        {
+            var wasRunning = _focus.Hydration.IsRunning;
+            _focus.Hydration.Reset(TimeSpan.FromMinutes(Preferences.HydrationMinutes));
+            if (IsPremium && wasRunning) _focus.Hydration.Start();
+        }
         if (old.DemoMode != Preferences.DemoMode)
         {
             _dataGeneration++;
@@ -287,7 +371,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
         if (_disposed) return;
         Notify(nameof(IsDemo)); NotifyTimers();
-        await PersistAsync("preferences", Preferences, _lifetimeToken);
+        var savedPreferencesGeneration = _preferencesGeneration;
+        var savedPreferences = Preferences;
+        await PersistAsync("preferences", savedPreferences, _lifetimeToken);
+        if (savedPreferencesGeneration == _preferencesGeneration) _preferencesChanged = false;
+        Notify(nameof(HasUnsavedChanges));
     }
     public Task PlayPauseAsync()
     {
@@ -297,10 +385,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
     public Task PreviousAsync() => !ReadyForInput() || IsDemo ? Task.CompletedTask : _mediaService.PreviousAsync();
     public Task NextAsync() => !ReadyForInput() || IsDemo ? Task.CompletedTask : _mediaService.NextAsync();
-    public Task SeekMediaAsync(double proportion) => !ReadyForInput() || IsDemo || Media is null ? Task.CompletedTask : _mediaService.SeekAsync(Media.Duration * Math.Clamp(proportion, 0, 1));
+    public Task SeekMediaAsync(double proportion) => !ReadyForInput() || !RequirePremiumFeature() || IsDemo || Media is null ? Task.CompletedTask : _mediaService.SeekAsync(Media.Duration * Math.Clamp(proportion, 0, 1));
     public async Task SetVolumeAsync(double value)
     {
-        if (!ReadyForInput()) return;
+        if (!ReadyForInput() || !RequirePremiumFeature()) return;
         if (IsDemo) { if (System is { } system) System = system with { Volume = Math.Clamp(value, 0, 1) }; return; }
         _volumeDelay?.Cancel(); _volumeDelay?.Dispose();
         _volumeDelay = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeToken);
@@ -324,11 +412,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
     public void ToggleFocus() { if (!ReadyForInput()) return; if (FocusRunning) _focus.Pomodoro.Pause(); else _focus.Pomodoro.Start(); NotifyTimers(); }
     public void ResetFocus() { if (!ReadyForInput()) return; _focus.Pomodoro.Reset(TimeSpan.FromMinutes(Preferences.FocusMinutes)); NotifyTimers(); }
-    public void StartCountdown(int minutes) { if (!ReadyForInput()) return; _focus.Countdown.Reset(TimeSpan.FromMinutes(Math.Clamp(minutes, 1, 180))); _focus.Countdown.Start(); NotifyTimers(); }
-    public void ToggleStopwatch() { if (!ReadyForInput()) return; if (StopwatchRunning) _focus.Stopwatch.Pause(); else _focus.Stopwatch.Start(); UpdateStopwatchTick(); NotifyTimers(); }
-    public void ResetStopwatch() { if (!ReadyForInput()) return; var hadLaps = _focus.Stopwatch.Laps.Count > 0; _focus.Stopwatch.Reset(); UpdateStopwatchTick(); NotifyTimers(); if (hadLaps) Notify(nameof(StopwatchLaps)); }
-    public void LapStopwatch() { if (!ReadyForInput() || !StopwatchRunning) return; _focus.Stopwatch.Lap(); Notify(nameof(StopwatchLaps)); Status = $"Lap {_focus.Stopwatch.Laps.Count}: {StopwatchTime}"; }
-    public void DrankWater() { if (!ReadyForInput()) return; _focus.Hydration.Reset(TimeSpan.FromMinutes(Preferences.HydrationMinutes)); _focus.Hydration.Start(); NotifyTimers(); Status = "Hydration reminder reset."; }
+    public void StartCountdown(int minutes) { if (!ReadyForInput() || !RequirePremiumFeature()) return; _focus.Countdown.Reset(TimeSpan.FromMinutes(Math.Clamp(minutes, 1, 180))); _focus.Countdown.Start(); NotifyTimers(); }
+    public void ToggleStopwatch() { if (!ReadyForInput() || !RequirePremiumFeature()) return; if (StopwatchRunning) _focus.Stopwatch.Pause(); else _focus.Stopwatch.Start(); UpdateStopwatchTick(); NotifyTimers(); }
+    public void ResetStopwatch() { if (!ReadyForInput() || !RequirePremiumFeature()) return; var hadLaps = _focus.Stopwatch.Laps.Count > 0; _focus.Stopwatch.Reset(); UpdateStopwatchTick(); NotifyTimers(); if (hadLaps) Notify(nameof(StopwatchLaps)); }
+    public void LapStopwatch() { if (!ReadyForInput() || !RequirePremiumFeature() || !StopwatchRunning) return; _focus.Stopwatch.Lap(); Notify(nameof(StopwatchLaps)); Status = $"Lap {_focus.Stopwatch.Laps.Count}: {StopwatchTime}"; }
+    public void DrankWater() { if (!ReadyForInput() || !RequirePremiumFeature()) return; _focus.Hydration.Reset(TimeSpan.FromMinutes(Preferences.HydrationMinutes)); _focus.Hydration.Start(); NotifyTimers(); Status = "Hydration reminder reset."; }
     private void UpdateStopwatchTick()
     {
         if (_disposed) return;
@@ -338,14 +426,22 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void OnTick(object? sender, object args)
     {
         if (_disposed) return;
+        ReconcileEntitlement();
+        Overlay.SetInteractionSuppressed(CanPresentActivity?.Invoke() == false);
         Overlay.Tick();
         if (_focus.Pomodoro.Tick()) Activity(ActivityKind.Focus, "Focus", "Session complete", "Take a breath. You earned it.");
-        if (_focus.Countdown.Tick()) Activity(ActivityKind.Focus, "Countdown", "Timer complete", null);
-        if (_focus.Hydration.Tick()) Activity(ActivityKind.Information, "Hydration", "Time for a little water", "Open Focus to reset your reminder.");
+        if (IsPremium && _focus.Countdown.Tick()) Activity(ActivityKind.Focus, "Countdown", "Timer complete", null);
+        if (IsPremium && _focus.Hydration.Tick()) Activity(ActivityKind.Information, "Hydration", "Time for a little water", "Open Focus to reset your reminder.");
         NotifyTimers();
         var now = DateTimeOffset.Now;
-        foreach (var reminder in Reminders.Where(item => !item.Completed && item.DueAt <= now).ToArray())
-            if (_deliveredReminders.Add(reminder.Id)) Activity(ActivityKind.Meeting, "Reminder", reminder.Title, null);
+        if (IsPremium)
+            foreach (var reminder in Reminders.Where(item => !item.Completed && item.DueAt <= now).ToArray())
+                if (!_deliveredReminders.Contains(reminder.Id) && _queuedReminders.Add(reminder.Id))
+                {
+                    var accepted = Overlay.ShowActivity(new(reminder.Id, ActivityKind.Meeting, "Reminder", reminder.Title, null, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(8), Destination: ModuleId.Calendar));
+                    if (!accepted) _queuedReminders.Remove(reminder.Id);
+                }
+        if (_tickCounter % 300 == 0 && _subscription is not null) _ = ExecuteAsync(RefreshSubscriptionAsync);
         if (++_tickCounter % 5 == 0 && Overlay.Mode == OverlayMode.Expanded && SelectedModule is ModuleId.Home or ModuleId.System or ModuleId.Media or ModuleId.Servers or ModuleId.ScreenTime)
             _ = ExecuteAsync(RefreshAsync);
     }
@@ -355,11 +451,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
     public void Activity(ActivityKind kind, string source, string title, string? detail)
     {
-        if (!_disposed) Overlay.ShowActivity(new(Guid.NewGuid(), kind, source, title, detail, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(8)));
+        if (!_disposed)
+        {
+            Overlay.SetInteractionSuppressed(CanPresentActivity?.Invoke() == false);
+            var destination = kind is ActivityKind.Focus || source == "Hydration" ? ModuleId.Focus : kind == ActivityKind.Meeting ? ModuleId.Calendar : (ModuleId?)null;
+            Overlay.ShowActivity(new(Guid.NewGuid(), kind, source, title, detail, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(8), Destination: destination));
+        }
     }
     public async Task RefreshWeatherAsync(string? city = null)
     {
-        if (!ReadyForInput() || IsDemo) return;
+        if (!ReadyForInput() || !RequirePremium(ModuleId.Weather) || IsDemo) return;
         var request = BeginRequest(_weatherRequest);
         try
         {
@@ -374,7 +475,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
     public async Task RefreshRevenueAsync(RevenueProvider provider, int days = 30)
     {
-        if (!ReadyForInput()) return;
+        if (!ReadyForInput() || !RequirePremium(ModuleId.Revenue)) return;
         if (IsDemo) { if (Revenue is { } revenue) Revenue = revenue with { Provider = provider }; return; }
         var request = BeginRequest(_revenueRequest);
         try
@@ -388,7 +489,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
     public async Task RefreshAnalyticsAsync()
     {
-        if (!ReadyForInput() || IsDemo) return;
+        if (!ReadyForInput() || !RequirePremium(ModuleId.Analytics) || IsDemo) return;
         if (string.IsNullOrWhiteSpace(Preferences.AnalyticsEndpoint)) throw new InvalidOperationException("Configure an HTTPS analytics endpoint in Settings.");
         var request = BeginRequest(_analyticsRequest);
         try
@@ -402,7 +503,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
     public async Task ImportCodingAsync(string path)
     {
-        if (!ReadyForInput() || IsDemo) return;
+        if (!ReadyForInput() || !RequirePremium(ModuleId.Coding) || IsDemo) return;
         var request = BeginRequest(_codingRequest);
         try
         {
@@ -415,9 +516,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception error) when (Recoverable(error) && !CanPublish(_codingRequest, request)) { }
     }
-    public async Task ImportCalendarAsync(string path)
+    public async Task ImportCalendarAsync(string path, DateTime? month = null)
     {
-        if (!ReadyForInput() || IsDemo) return;
+        if (!ReadyForInput() || !RequirePremium(ModuleId.Calendar) || IsDemo) return;
         var request = BeginRequest(_calendarRequest);
         try
         {
@@ -425,9 +526,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             if (info.Length > 5 * 1024 * 1024) throw new InvalidDataException("Calendar file exceeds the 5 MB limit.");
             var content = await File.ReadAllTextAsync(path, request.Token);
             if (!CanPublish(_calendarRequest, request)) return;
-            var lowerBound = DateTimeOffset.Now.AddMonths(-1); var upperBound = DateTimeOffset.Now.AddMonths(3);
-            var snapshot = await Task.Run(() => IcsCalendar.Parse(content, lowerBound, upperBound), request.Token);
+            var range = CalendarRange.ForMonth(month ?? DateTime.Today);
+            var snapshot = await Task.Run(() => IcsCalendar.Parse(content, range.From, range.Until, range.Zone), request.Token);
             if (!CanPublish(_calendarRequest, request)) return;
+            _calendarSource = content; _calendarRange = range;
             CalendarEvents = snapshot;
             if (Preferences.CalendarPath != path) await ApplyPreferencesAsync(Preferences with { CalendarPath = path }, _calendarRequest, request.Generation);
             if (!CanPublish(_calendarRequest, request)) return;
@@ -449,64 +551,146 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (provider == "analytics") { Invalidate(_analyticsRequest); if (!IsDemo) Analytics = null; }
         else { Invalidate(_revenueRequest); if (!IsDemo) Revenue = null; }
     }
+    public async Task EnsureCalendarMonthAsync(DateTime month)
+    {
+        if (IsDemo || CalendarRangeLoaded(month) || _calendarSource is null) return;
+        var request = BeginRequest(_calendarRequest);
+        var range = CalendarRange.ForMonth(month);
+        var content = _calendarSource;
+        var snapshot = await Task.Run(() => IcsCalendar.Parse(content, range.From, range.Until, range.Zone), request.Token);
+        if (!CanPublish(_calendarRequest, request)) return;
+        _calendarRange = range; CalendarEvents = snapshot;
+    }
+    public void OnSuspending() => _focus.OnSuspending();
+    public void OnResumed(TimeSpan duration) { _focus.OnResumed(duration); NotifyTimers(); _ = ExecuteAsync(RetryNativeServicesAsync); }
+    public async Task RetryNativeServicesAsync() { await _mediaService.StartAsync(_lifetimeToken); ClipboardService.SetEnabled(IsPremium && Preferences.CaptureClipboard); await RefreshAsync(); }
+    public async Task RefreshSubscriptionAsync()
+    {
+        if (_subscription is null) return;
+        if (string.IsNullOrWhiteSpace(_subscription.SessionToken)) { ReconcileEntitlement(force: true); return; }
+        try { await _subscription.RefreshAsync(); }
+        finally { ReconcileEntitlement(force: true); }
+    }
+    private void ReconcileEntitlement(bool force = false)
+    {
+        var premium = IsPremium;
+        var changed = premium != _lastPremium;
+        if (!force && !changed) return;
+        _lastPremium = premium;
+        Notify(nameof(IsPremium)); Notify(nameof(PlanStatus)); Notify(nameof(SubscriptionStatus));
+        if (!changed) return;
+        if (premium && _loaded)
+        {
+            ClipboardService.SetEnabled(Preferences.CaptureClipboard);
+            if (!_focus.Hydration.IsRunning) _focus.Hydration.Start();
+        }
+        if (!premium)
+        {
+            ClipboardService.SetEnabled(false); _focus.Hydration.Pause(); _focus.Countdown.Pause(); _focus.Stopwatch.Pause();
+            if (_realAwake) { _systemService.SetAwake(false); _realAwake = false; Awake = false; Notify(nameof(Awake)); }
+            Overlay.ClearActivities(); _queuedReminders.Clear();
+        }
+        if (!CanAccessModule(SelectedModule)) Overlay.Expand(ModuleId.Settings);
+    }
+    public async Task CheckForUpdatesAsync()
+    {
+        using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = true, AutomaticDecompression = DecompressionMethods.All });
+        var service = new WindowsUpdateService(http);
+        var update = await service.CheckAsync(_lifetimeToken);
+        if (update is null) { Status = "You have the current stable version."; return; }
+        Status = "Downloading verified update " + update.Version + "…";
+        var prepared = await service.DownloadAsync(update, _lifetimeToken);
+        if (!await SaveBeforeExitAsync()) return;
+        await service.OpenInstallerAsync(prepared, _lifetimeToken);
+        Status = "Update installer opened. Save and quit Notch to let installation proceed.";
+    }
+    public Task RequestLoginAsync(string email) => _subscription?.RequestLoginAsync(email) ?? Task.FromException(new InvalidOperationException(_subscriptionUnavailable));
+    public async Task VerifyLoginAsync(string email, string code) { if (_subscription is null) throw new InvalidOperationException(_subscriptionUnavailable); await _subscription.VerifyLoginAsync(email, code); await RefreshSubscriptionAsync(); }
+    public Task<Uri> CheckoutAsync() => _subscription?.CreateCheckoutAsync() ?? Task.FromException<Uri>(new InvalidOperationException(_subscriptionUnavailable));
+    public Task<Uri> CustomerPortalAsync() => _subscription?.CreatePortalAsync() ?? Task.FromException<Uri>(new InvalidOperationException(_subscriptionUnavailable));
+    public void SignOut() { _subscription?.SignOut(); ReconcileEntitlement(force: true); }
+    public async Task SignOutAsync() { var signOut = _subscription?.SignOutAsync(); ReconcileEntitlement(force: true); try { if (signOut is not null) await signOut; } finally { ReconcileEntitlement(force: true); } }
     public void AddNote(string title, string text)
     {
-        if (!ReadyForInput()) return;
+        if (!ReadyForWorkspaceInput() || !RequirePremium(ModuleId.Notes)) return;
         if (Notes.Count >= 100) throw new InvalidOperationException("The local notebook is limited to 100 notes.");
         if (string.IsNullOrWhiteSpace(text)) throw new ArgumentException("Write a note first.");
-        Notes.Insert(0, new(Guid.NewGuid(), string.IsNullOrWhiteSpace(title) ? "Untitled note" : title.Trim()[..Math.Min(80, title.Trim().Length)], text[..Math.Min(500000, text.Length)], DateTimeOffset.Now));
+        WorkspaceLimits.RequireText(title, WorkspaceLimits.MaximumTitleLength, "Note title");
+        WorkspaceLimits.RequireText(text, WorkspaceLimits.MaximumTextLength, "Note");
+        var note = new SavedNote(Guid.NewGuid(), string.IsNullOrWhiteSpace(title) ? "Untitled note" : title.Trim(), text, DateTimeOffset.Now);
+        WorkspaceLimits.RequireStorageBudget(LocalSnapshot() with { Notes = [note, .. Notes] });
+        Notes.Insert(0, note);
     }
     public void UpdateNote(Guid id, string title, string text)
     {
-        if (!ReadyForInput()) return;
+        if (!ReadyForWorkspaceInput()) return;
         var item = Notes.FirstOrDefault(note => note.Id == id); if (item is null) return;
-        Notes[Notes.IndexOf(item)] = item with { Title = string.IsNullOrWhiteSpace(title) ? "Untitled note" : title[..Math.Min(80, title.Length)], Text = text[..Math.Min(500000, text.Length)], UpdatedAt = DateTimeOffset.Now };
+        WorkspaceLimits.RequireText(title, WorkspaceLimits.MaximumTitleLength, "Note title");
+        WorkspaceLimits.RequireText(text, WorkspaceLimits.MaximumTextLength, "Note");
+        var replacement = item with { Title = string.IsNullOrWhiteSpace(title) ? "Untitled note" : title.Trim(), Text = text, UpdatedAt = DateTimeOffset.Now };
+        WorkspaceLimits.RequireStorageBudget(LocalSnapshot() with { Notes = Notes.Select(note => note.Id == id ? replacement : note).ToArray() });
+        Notes[Notes.IndexOf(item)] = replacement;
     }
-    public void RemoveNote(Guid id) { if (!ReadyForInput()) return; var item = Notes.FirstOrDefault(note => note.Id == id); if (item is not null) Notes.Remove(item); }
+    public void RemoveNote(Guid id) { if (!ReadyForWorkspaceInput()) return; var item = Notes.FirstOrDefault(note => note.Id == id); if (item is not null) { _deletedNote = item; Notes.Remove(item); Notify(nameof(CanUndoNoteDeletion)); Status = "Note deleted. Undo is available until the next deletion or restart."; } }
+    public void UndoNoteDeletion() { if (!ReadyForWorkspaceInput() || _deletedNote is not { } note) return; if (Notes.Count >= 100) throw new InvalidOperationException("Remove a note before restoring this deletion; the notebook is limited to 100 notes."); WorkspaceLimits.RequireStorageBudget(LocalSnapshot() with { Notes = [note, .. Notes] }); Notes.Insert(0, note); _deletedNote = null; Notify(nameof(CanUndoNoteDeletion)); }
     public void AddReminder(string title, DateTimeOffset due)
     {
-        if (!ReadyForInput()) return;
+        if (!ReadyForWorkspaceInput()) return;
         if (string.IsNullOrWhiteSpace(title)) throw new ArgumentException("Write a reminder first.");
         if (Reminders.Count >= 100) throw new InvalidOperationException("The local reminder list is limited to 100 items.");
-        Reminders.Add(new(Guid.NewGuid(), title.Trim()[..Math.Min(120, title.Trim().Length)], due, false));
+        if (!RequirePremium(ModuleId.Calendar)) return;
+        WorkspaceLimits.RequireText(title, 120, "Reminder title");
+        var reminder = new ReminderItem(Guid.NewGuid(), title.Trim(), due, false);
+        WorkspaceLimits.RequireStorageBudget(LocalSnapshot() with { Reminders = [.. Reminders, reminder] });
+        Reminders.Add(reminder);
     }
-    public void CompleteReminder(Guid id) { if (!ReadyForInput()) return; var item = Reminders.FirstOrDefault(reminder => reminder.Id == id); if (item is not null) Reminders[Reminders.IndexOf(item)] = item with { Completed = !item.Completed }; }
-    public void RemoveReminder(Guid id) { if (!ReadyForInput()) return; var item = Reminders.FirstOrDefault(reminder => reminder.Id == id); if (item is not null) Reminders.Remove(item); }
+    public void CompleteReminder(Guid id) { if (!ReadyForWorkspaceInput()) return; var item = Reminders.FirstOrDefault(reminder => reminder.Id == id); if (item is not null) Reminders[Reminders.IndexOf(item)] = item with { Completed = !item.Completed }; }
+    public void RemoveReminder(Guid id) { if (!ReadyForWorkspaceInput()) return; var item = Reminders.FirstOrDefault(reminder => reminder.Id == id); if (item is not null) Reminders.Remove(item); }
     public void AddShelf(string path)
     {
-        if (!ReadyForInput()) return;
+        if (!ReadyForWorkspaceInput()) return;
+        if (!RequirePremium(ModuleId.Shelf)) return;
         path = Path.GetFullPath(path);
         if (!File.Exists(path) && !Directory.Exists(path)) throw new FileNotFoundException("The dropped file is no longer available.");
         if (Shelf.Any(item => item.Path.Equals(path, StringComparison.OrdinalIgnoreCase))) return;
         if (Shelf.Count >= 100) throw new InvalidOperationException("The file shelf is limited to 100 entries.");
-        Shelf.Insert(0, new(Guid.NewGuid(), path, DateTimeOffset.Now));
+        var shelfItem = new ShelfItem(Guid.NewGuid(), path, DateTimeOffset.Now);
+        WorkspaceLimits.RequireStorageBudget(LocalSnapshot() with { Shelf = [shelfItem, .. Shelf] });
+        Shelf.Insert(0, shelfItem);
     }
-    public void RemoveShelf(Guid id) { if (!ReadyForInput()) return; var item = Shelf.FirstOrDefault(file => file.Id == id); if (item is not null) Shelf.Remove(item); }
+    public void RemoveShelf(Guid id) { if (!ReadyForWorkspaceInput()) return; var item = Shelf.FirstOrDefault(file => file.Id == id); if (item is not null) Shelf.Remove(item); }
     public void AddLink(string title, string url)
     {
-        if (!ReadyForInput()) return;
+        if (!ReadyForWorkspaceInput()) return;
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http") || !string.IsNullOrEmpty(uri.UserInfo)) throw new ArgumentException("Use an http or https link without embedded credentials.");
         if (Links.Count >= 100) throw new InvalidOperationException("The link shelf is limited to 100 entries.");
-        Links.Insert(0, new(Guid.NewGuid(), string.IsNullOrWhiteSpace(title) ? uri.Host : title.Trim(), uri.AbsoluteUri));
+        if (!RequirePremium(ModuleId.Links)) return;
+        WorkspaceLimits.RequireText(title, 200, "Link title"); WorkspaceLimits.RequireText(url, 4096, "Link URL");
+        var link = new SavedLink(Guid.NewGuid(), string.IsNullOrWhiteSpace(title) ? uri.Host : title.Trim(), uri.AbsoluteUri);
+        WorkspaceLimits.RequireStorageBudget(LocalSnapshot() with { Links = [link, .. Links] });
+        Links.Insert(0, link);
     }
-    public void RemoveLink(Guid id) { if (!ReadyForInput()) return; var item = Links.FirstOrDefault(link => link.Id == id); if (item is not null) Links.Remove(item); }
+    public void RemoveLink(Guid id) { if (!ReadyForWorkspaceInput()) return; var item = Links.FirstOrDefault(link => link.Id == id); if (item is not null) Links.Remove(item); }
     public void SetAwake(bool awake)
     {
-        if (!ReadyForInput()) return;
+        if (!ReadyForInput() || (awake && !RequirePremiumFeature())) return;
         if (!IsDemo) { _systemService.SetAwake(awake); _realAwake = awake; }
         Awake = awake; Notify(nameof(Awake));
     }
     private void OnRemindersChanged(object? sender, NotifyCollectionChangedEventArgs args)
     {
+        _nonScratchpadBytes = null;
         if (_disposed) return;
-        if (args.Action == NotifyCollectionChangedAction.Reset) _deliveredReminders.Clear();
+        if (args.Action == NotifyCollectionChangedAction.Reset) { _deliveredReminders.Clear(); _queuedReminders.Clear(); Overlay.ClearActivities(); }
         if (args.OldItems is { } oldItems)
-            foreach (ReminderItem item in oldItems) _deliveredReminders.Remove(item.Id);
+            foreach (ReminderItem item in oldItems) { _deliveredReminders.Remove(item.Id); _queuedReminders.Remove(item.Id); Overlay.CancelActivity(item.Id); }
         ScheduleSave();
     }
     private void ScheduleSave()
     {
-        if (!_loaded || _disposed || !_workspaceReadable) return;
+        if (!_loaded || _disposed) return;
+        _workspaceDirty = true; _workspaceRevision++; Notify(nameof(HasUnsavedChanges)); SaveState = "Unsaved changes";
+        if (!_workspaceReadable) return;
         _saveDelay?.Cancel(); _saveDelay?.Dispose(); _saveDelay = new();
         var token = _saveDelay.Token;
         _ = ExecuteAsync(async () => { await Task.Delay(400, token); await SaveLocalAsync(token); });
@@ -514,6 +698,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private LocalData LocalSnapshot() => new(Notes.ToArray(), Reminders.ToArray(), Shelf.ToArray(), Links.ToArray(), Scratchpad);
     private static void ValidateWorkspace(LocalData data)
     {
+        if ((data.Notes ?? []).Any(item => item is null) || (data.Reminders ?? []).Any(item => item is null) || (data.Shelf ?? []).Any(item => item is null) || (data.Links ?? []).Any(item => item is null))
+            throw new InvalidDataException("The notebook contains an invalid empty record. The original file is preserved.");
         if (data.Notes?.Length > 100 || data.Reminders?.Length > 100 || data.Shelf?.Length > 100 || data.Links?.Length > 100
             || data.Scratchpad?.Length > 500000 || (data.Notes ?? []).Any(note => note?.Text?.Length > 500000))
             throw new InvalidDataException("The saved notebook exceeds a supported item or text limit. It must be repaired before saving.");
@@ -528,7 +714,62 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             if (item is not null && (identifier(item) == Guid.Empty || !seen.Add(identifier(item)))) return true;
         return false;
     }
-    private Task SaveLocalAsync(CancellationToken cancellationToken = default) => !_workspaceReadable ? Task.CompletedTask : PersistAsync("workspace", LocalSnapshot(), cancellationToken);
+    private async Task SaveLocalAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_workspaceReadable) return;
+        var revision = _workspaceRevision;
+        var snapshot = LocalSnapshot();
+        WorkspaceLimits.RequireStorageBudget(snapshot);
+        SaveState = "Saving…";
+        try { await PersistAsync("workspace", snapshot, cancellationToken); }
+        catch { SaveState = "Save failed — changes remain in memory"; throw; }
+        if (revision == _workspaceRevision) { _workspaceDirty = false; SaveState = "Saved locally"; Notify(nameof(HasUnsavedChanges)); }
+    }
+    public async Task<bool> SaveBeforeExitAsync()
+    {
+        _saveDelay?.Cancel();
+        try
+        {
+            Task[] writes; lock (_shutdownGate) writes = _pendingWrites.ToArray();
+            try { await Task.WhenAll(writes); } catch (Exception error) when (Recoverable(error)) { /* Retry durable saves below; an earlier native or cancelled write cannot decide whether the current notebook is durable. */ }
+            if (_preferencesChanged) { var generation = _preferencesGeneration; var snapshot = Preferences; await PersistAsync("preferences", snapshot, CancellationToken.None); if (generation == _preferencesGeneration) _preferencesChanged = false; }
+            if (_loaded && !_workspaceReadable && _workspaceDirty) throw new InvalidDataException("Recover or export the unsaved notebook before quitting.");
+            if (_loaded && _workspaceReadable) await SaveLocalAsync(CancellationToken.None);
+            Notify(nameof(HasUnsavedChanges));
+            if (HasUnsavedChanges) throw new InvalidOperationException("New changes arrived while saving. Retry after editing finishes.");
+            return true;
+        }
+        catch (Exception error) when (Recoverable(error)) { SaveState = "Save failed — export or retry before quitting"; ShowError("Your changes could not be saved: " + error.Message); return false; }
+    }
+    public async Task ExportWorkspaceAsync(string path)
+    {
+        var bytes = WorkspaceLimits.SerializeExport(LocalSnapshot());
+        await File.WriteAllBytesAsync(path, bytes, _lifetimeToken);
+        Status = "Notebook exported. Keep the file private; it contains your local notes and shortcuts.";
+    }
+    public async Task RestoreWorkspaceAsync(string path)
+    {
+        var file = new FileInfo(path);
+        if (file.Length > LocalStore.MaximumBytes) throw new InvalidDataException("Notebook import exceeds 10 MB.");
+        var data = global::System.Text.Json.JsonSerializer.Deserialize<LocalData>(await File.ReadAllTextAsync(path, _lifetimeToken), new global::System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new InvalidDataException("The export contains no notebook.");
+        ValidateWorkspace(data); WorkspaceLimits.RequireStorageBudget(data);
+        if (!_workspaceReadable) await RecoverWorkspaceAsync();
+        await ExportWorkspaceAsync(Path.Combine(_dataDirectory, "workspace-before-import-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + ".json"));
+        Notes.Clear(); foreach (var item in data.Notes ?? []) Notes.Add(item);
+        Reminders.Clear(); foreach (var item in data.Reminders ?? []) Reminders.Add(item);
+        Shelf.Clear(); foreach (var item in data.Shelf ?? []) Shelf.Add(item);
+        Links.Clear(); foreach (var item in data.Links ?? []) Links.Add(item);
+        _scratchpad = data.Scratchpad ?? ""; Notify(nameof(Scratchpad)); ScheduleSave();
+        await SaveLocalAsync(_lifetimeToken); Status = "Notebook restored. A backup of the previous workspace was kept.";
+    }
+    public Task RecoverWorkspaceAsync()
+    {
+        if (_workspaceReadable) return Task.CompletedTask;
+        var source = Path.Combine(_dataDirectory, "workspace.json");
+        if (File.Exists(source)) File.Move(source, Path.Combine(_dataDirectory, "workspace-unreadable-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + ".json"));
+        _workspaceReadable = true; Notify(nameof(WorkspaceReadable)); Error = ""; Status = "Unreadable file preserved as a backup. You can now restore an export or start a new notebook.";
+        return Task.CompletedTask;
+    }
     private async Task PersistAsync<T>(string name, T value, CancellationToken cancellationToken)
     {
         Task write;
@@ -548,6 +789,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (_loaded) return true;
         ShowError("Notch is loading your saved settings and notebook. Please wait a moment.");
         return false;
+    }
+    private bool ReadyForWorkspaceInput()
+    {
+        if (!ReadyForInput()) return false;
+        if (!_workspaceReadable) throw new InvalidOperationException("Preserve the unreadable notebook using Settings recovery before editing. Your draft remains available for export.");
+        return true;
     }
     private static string Limited(string? value, int maximum, string fallback = "")
     {
@@ -605,8 +852,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CalendarEvents = [new("Product review · sample", DateTimeOffset.Now.AddHours(1), DateTimeOffset.Now.AddHours(2), null)];
         Status = "DEMO MODE — all displayed metrics are sample data.";
     }
+    public async ValueTask DiscardAndDisposeAsync() { _discardOnDispose = true; await DisposeAsync(); }
     public async ValueTask DisposeAsync()
     {
+        if (!_disposed && !_discardOnDispose && !await SaveBeforeExitAsync()) throw new IOException("The notebook could not be saved; disposal was cancelled to preserve your edits.");
         Task[] pendingWrites;
         lock (_shutdownGate)
         {
@@ -622,12 +871,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         // Acquire it once more so the current reader releases it before services are disposed.
         await _refreshLock.WaitAsync();
         try { await Task.WhenAll(pendingWrites); } catch (Exception error) when (Recoverable(error)) { }
-        try { if (_preferencesChanged) await _store.WriteAsync("preferences", Preferences); }
-        catch (Exception error) when (Recoverable(error)) { }
-        try { if (_loaded && _workspaceReadable) await _store.WriteAsync("workspace", LocalSnapshot()); }
-        catch (Exception error) when (Recoverable(error)) { }
-        ClipboardService.Changed -= OnClipboardChanged; ClipboardService.Dispose();
-        _mediaService.Changed -= OnMediaChanged;
+        ClipboardService.Changed -= OnClipboardChanged; ClipboardService.Error -= OnServiceError; ClipboardService.Dispose();
+        _mediaService.Changed -= OnMediaChanged; _mediaService.Error -= OnServiceError;
         try { await _mediaService.DisposeAsync(); } catch (Exception error) when (Recoverable(error)) { }
         _systemService.Dispose(); _http.Dispose(); _store.Dispose();
         _saveDelay?.Dispose(); _volumeDelay?.Dispose(); _lifetime.Dispose(); _refreshLock.Dispose();

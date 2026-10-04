@@ -7,6 +7,33 @@ internal static class ProviderHttp
 {
     public static async Task<JsonDocument> ReadJsonAsync(HttpClient client, HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        // ResponseHeadersRead ends HttpClient's own timeout once headers arrive. Keep
+        // one deadline alive through the bounded body read, including a stalled stream.
+        var timeout = client.Timeout == Timeout.InfiniteTimeSpan ? TimeSpan.FromSeconds(20) : client.Timeout;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(timeout);
+        try
+        {
+            return await ReadResponseAsync(client, request, deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("The provider did not finish responding in time. Check the connection and try again.");
+        }
+        catch (HttpRequestException error) when (error.StatusCode is null)
+        {
+            // Transport exception messages can include private endpoints or query
+            // strings. Keep them out of desktop status text and diagnostics.
+            throw new HttpRequestException("Could not connect to the provider. Check the connection and try again.");
+        }
+        catch (IOException)
+        {
+            throw new HttpRequestException("The provider connection ended before the response was complete. Try again.");
+        }
+    }
+
+    private static async Task<JsonDocument> ReadResponseAsync(HttpClient client, HttpRequestMessage request, CancellationToken cancellationToken)
+    {
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
@@ -14,7 +41,8 @@ internal static class ProviderHttp
             {
                 HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "Access was refused. Check the configured credential and its read permissions.",
                 HttpStatusCode.TooManyRequests => "The provider rate limit was reached. Try again later.",
-                _ => "The provider request failed."
+                HttpStatusCode.ServiceUnavailable => "The provider is temporarily unavailable. Try again later.",
+                _ => "The provider request failed. Try again later."
             };
             throw new HttpRequestException($"{reason} HTTP {(int)response.StatusCode}.", null, response.StatusCode);
         }

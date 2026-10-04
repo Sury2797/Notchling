@@ -2,7 +2,13 @@ using System.Text.Json;
 
 namespace Notch.Core;
 
-public sealed class LocalStore : IDisposable
+public interface IDataStore : IDisposable
+{
+    Task<T?> ReadAsync<T>(string name, CancellationToken cancellationToken = default);
+    Task WriteAsync<T>(string name, T value, CancellationToken cancellationToken = default);
+}
+
+public sealed class LocalStore : IDataStore
 {
     public const long MaximumBytes = 10 * 1024 * 1024;
     private readonly string _directory;

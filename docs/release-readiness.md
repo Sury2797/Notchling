@@ -1,15 +1,18 @@
 # Windows release readiness
 
-This checklist is the acceptance plan for the native Windows application. The cloud host is Linux: it can validate the portable core and perform limited static checks, but cannot run WinUI XAML compilation or verify Windows shell behavior. CI definitions are not evidence of a green Windows build. Record the Windows build URL, commit, OS build, GPU, monitor configuration and test result when executing these checks.
+This checklist defines acceptance for a public Windows release and the planned US$2/month Premium subscription. Windows and Linux core checks, the Windows x64 build and self-contained publish passed for commit [`131b597`](https://github.com/SuryaK999/Notch-win-linux/commit/131b597f6e2e8cdb084d633db8cd7836ad698a68) in [CI run 37098620398](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37098620398). Interactive Windows validation and commercial-release work remain open.
+
+Record the revision, build URL, OS build, GPU, monitor configuration and observed result for each subsequent validation. A Linux host can test portable logic and inspect source; full WinUI builds and native interaction require Windows.
 
 ## Build and deployment
 
-- [ ] Windows x64 Release build and self-contained unpackaged publish succeed for this commit.
-- [ ] A clean Windows 11 machine opens the extracted folder without a developer SDK.
+- [x] Windows x64 Release build and self-contained unpackaged publish succeeded for the baseline commit linked above.
+- [ ] Release-candidate CI succeeds for the exact revision selected for distribution.
+- [ ] Clean Windows 10 22H2 x64 and Windows 11 x64 machines open the extracted folder without a developer SDK.
 - [ ] All published dependencies travel with the folder; startup does not depend on the build machine's package cache.
 - [ ] Single-instance/startup behavior, tray menu, close-to-tray and explicit Quit behave consistently.
-- [ ] A signed installer, updates, rollback, upgrade and uninstallation are validated before public distribution. CI currently produces an unsigned review ZIP.
-- [ ] Restore versions, dependency notices, license and third-party attribution are reviewed.
+- [ ] A signed installer, updates, rollback, upgrade and uninstallation are validated before public distribution. Build CI produces an unsigned review ZIP; the manual signed-candidate workflow requires publisher credentials.
+- [ ] Restore versions, source/distribution permissions, third-party notices and service attribution are reviewed for the release package.
 
 ## Interaction and display matrix
 
@@ -46,6 +49,21 @@ This checklist is the acceptance plan for the native Windows application. The cl
 - [ ] Credential save/remove and disconnect are exercised through the Windows vault; secret values are never rendered back or included in logs.
 - [ ] Sounds, emoji, conversions and awake controls respond correctly; explicitly quitting releases sleep inhibition and native resources.
 
+## Subscription and commercial release
+
+Release enforces basic Free access and Premium at US$2 per month through signed subscription proofs. Checkout is disabled unless the owner configures the secure service; native and live sandbox evidence are required. See [pricing](pricing.md) for the planned feature boundaries and subscription lifecycle.
+
+- [ ] Free exposes the compact notch, basic play/pause/previous/next, one Pomodoro and one Scratchpad; Premium exposes the full supported catalog.
+- [ ] Privacy controls, keyboard access, reduced motion and local data-integrity protections remain available in both editions.
+- [ ] Checkout clearly displays the monthly price, recurring billing, applicable taxes and cancellation terms before payment.
+- [ ] Purchase and renewal state are verified by a secure service; billing secrets do not travel in the desktop binary.
+- [ ] Duplicate, delayed and out-of-order billing events do not produce inconsistent entitlements.
+- [ ] Cancellation stops future renewal and preserves access through the confirmed paid period, subject to a disclosed refund policy.
+- [ ] Expiry returns access to Free without silently deleting local notes or file references; recovery/export is available.
+- [ ] Payment failure, refunds, offline validation, account recovery and device rules have explicit, tested behavior.
+- [ ] Weather uses an appropriate commercial service agreement and licensed endpoint.
+- [ ] Customer support, refund policy, subscription disclosures and applicable terms are ready before payment is enabled.
+
 ## Measured responsiveness and efficiency
 
 These are proposed acceptance targets, not achieved measurements. Report the actual machine, sample duration, foreground panel and process counts alongside results.
@@ -65,12 +83,12 @@ Use `./scripts/measure-windows.ps1 -ProcessName Notch.Windows -Seconds 60` for a
 
 | Evidence | Result |
 | --- | --- |
-| Linux portable core | Run the package-free executable and record the executed/passed/failed counts |
-| Windows portable core | Windows CI result required |
-| Windows WinUI build | Windows CI result required |
+| Linux portable core | 58 historical baseline cases; new revision requires fresh results |
+| Windows portable core | Baseline CI green |
+| Windows WinUI build and publish | Baseline CI green; unsigned unpackaged artifact |
 | Native Windows launch and interaction | Manual matrix above required |
 | Real provider accounts | Opt-in connection validation required |
 | Linux native UI | Planned later; unavailable in this implementation |
-| Billing and subscriptions | Deferred; Free/Pro concept only |
+| Billing and subscriptions | Release gates and configurable billing service implemented; production activation/live sandbox validation pending |
 
-Unchecked items are remaining work, not passing results. A source-level implementation, generated image or static C# compile cannot stand in for interactive native QA.
+Unchecked items are remaining work, not passing results. Source-level checks and successful compilation cannot stand in for interactive native QA.

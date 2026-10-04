@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Notch.Core;
 using Notch.Windows.ViewModels;
+using Notch.Windows.Interop;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -23,15 +24,25 @@ public sealed partial class UtilityToolsView : UserControl
     private Slider? _systemVolume;
     private bool _updatingSystemVolume;
     private readonly Dictionary<Guid, (string Title, string Body)> _noteDrafts = [];
+    private readonly Dictionary<string, string> _formDrafts = [];
+    private readonly Dictionary<string, string> _credentialDrafts = [];
+    private ModuleId? _renderedModule;
+    private string? _scratchpadDraft;
+    private bool _invalidDrafts;
+    public bool HasInvalidDrafts => _invalidDrafts;
+    public bool IsManipulating => _systemVolume?.PointerCaptures.Count > 0;
+
     public UtilityToolsView(MainViewModel viewModel)
     {
         InitializeComponent(); _vm = viewModel;
-        Loaded += (_, _) => { if (!_attached) { _vm.PropertyChanged += Changed; _attached = true; } Render(); };
+        Loaded += (_, _) => { if (!_attached) { _vm.PropertyChanged += Changed; _attached = true; } if (_renderedModule != _vm.SelectedModule) Render(); };
         Unloaded += (_, _) => { _vm.PropertyChanged -= Changed; _attached = false; };
     }
     private void Changed(object? sender, PropertyChangedEventArgs args)
     {
-        if (args.PropertyName is nameof(MainViewModel.SelectedModule) or nameof(MainViewModel.Preferences) or nameof(MainViewModel.IsReady)) Render();
+        if (args.PropertyName == nameof(MainViewModel.SelectedModule)) { if (_renderedModule != _vm.SelectedModule) Render(); }
+        else if (args.PropertyName == nameof(MainViewModel.IsReady) || args.PropertyName == nameof(MainViewModel.IsPremium)) Render();
+        else if (args.PropertyName == nameof(MainViewModel.Preferences) && _vm.SelectedModule != ModuleId.Settings) Render();
         else if (_vm.SelectedModule == ModuleId.System && args.PropertyName == nameof(MainViewModel.System)) UpdateSystemPanel();
         else if (_vm.SelectedModule is ModuleId.Servers or ModuleId.ScreenTime && args.PropertyName is nameof(MainViewModel.System) or nameof(MainViewModel.ListeningPorts)) Render();
         else if (_vm.SelectedModule == ModuleId.Clipboard && args.PropertyName == nameof(MainViewModel.Clipboard)) Render();
@@ -39,7 +50,7 @@ public sealed partial class UtilityToolsView : UserControl
     private TextBlock Text(string value, double size = 13, bool muted = false) => new()
     {
         Text = value, FontSize = size, TextWrapping = TextWrapping.Wrap,
-        Foreground = new SolidColorBrush(muted ? Microsoft.UI.ColorHelper.FromArgb(255, 150, 150, 150) : Microsoft.UI.Colors.White),
+        Foreground = muted ? NativeTheme.Muted : NativeTheme.Foreground,
     };
     private Button Button(string title, Func<Task> action, bool primary = false)
     {
@@ -51,7 +62,15 @@ public sealed partial class UtilityToolsView : UserControl
     private static StackPanel Row(params UIElement[] elements)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        foreach (var element in elements) row.Children.Add(element); return row;
+        foreach (var element in elements) row.Children.Add(element);
+        row.SizeChanged += (_, _) =>
+        {
+            var needed = elements.Sum(element => element is FrameworkElement control && double.IsFinite(control.Width) ? control.Width : element.DesiredSize.Width) + Math.Max(0, elements.Length - 1) * 10;
+            row.Orientation = row.ActualWidth > 0 && row.ActualWidth < needed ? Orientation.Vertical : Orientation.Horizontal;
+            foreach (var element in elements)
+                if (element is FrameworkElement control && double.IsFinite(control.Width)) control.MaxWidth = Math.Max(150, row.ActualWidth);
+        };
+        return row;
     }
     private Border Card(UIElement child) => new() { Style = (Style)Application.Current.Resources["NotchCardStyle"], Child = child, Padding = new Thickness(16) };
     private TextBox Input(string placeholder, string value = "", bool multiline = false) => new()
@@ -59,12 +78,20 @@ public sealed partial class UtilityToolsView : UserControl
         PlaceholderText = placeholder, Text = value, AcceptsReturn = multiline, TextWrapping = multiline ? TextWrapping.Wrap : TextWrapping.NoWrap,
         Style = (Style)Application.Current.Resources["NotchTextBoxStyle"], MinWidth = 150,
     };
+    private TextBox DraftInput(string key, string placeholder, string value = "", bool multiline = false)
+    {
+        var input = Input(placeholder, _formDrafts.GetValueOrDefault(key, value), multiline);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(input, placeholder);
+        input.TextChanged += (_, _) => _formDrafts[key] = input.Text;
+        return input;
+    }
     private void Header(string title, string description)
     {
         ContentStack.Children.Add(Text(title, 22)); ContentStack.Children.Add(Text(description, 12, true));
     }
     private void Render()
     {
+        _renderedModule = _vm.SelectedModule;
         ContentStack.Children.Clear();
         var definition = ModuleCatalog.Get(_vm.SelectedModule);
         Header(definition.Title, definition.Description);
@@ -99,7 +126,7 @@ public sealed partial class UtilityToolsView : UserControl
             content.Children.Add(new FontIcon { Glyph = module.Glyph, FontSize = 20, HorizontalAlignment = HorizontalAlignment.Center });
             content.Children.Add(Text(module.Title, 11));
             var button = Button(module.Title, () => _vm.SelectModule(module.Id)); button.Content = content; button.Height = 86; button.HorizontalAlignment = HorizontalAlignment.Stretch;
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, module.Title);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, module.Title + (_vm.CanAccessModule(module.Id) ? "" : " — Premium"));
             Grid.SetColumn(button, i % 7); Grid.SetRow(button, i / 7); grid.Children.Add(button);
         }
         ContentStack.Children.Add(grid);
@@ -109,6 +136,7 @@ public sealed partial class UtilityToolsView : UserControl
     {
         var grid = new Grid { ColumnSpacing = 18 }; grid.ColumnDefinitions.Add(new() { Width = new GridLength(210) }); grid.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
         var list = new StackPanel { Spacing = 6 };
+        if (_vm.CanUndoNoteDeletion) list.Children.Add(Button("Undo last deletion", () => { _vm.UndoNoteDeletion(); Render(); }));
         list.Children.Add(Button("+ New note", () => { _editingNote = null; Render(); }));
         foreach (var note in _vm.Notes)
         {
@@ -124,10 +152,11 @@ public sealed partial class UtilityToolsView : UserControl
         titleInput.TextChanged += (_, _) => _noteDrafts[draftKey] = (titleInput.Text, bodyInput.Text);
         bodyInput.TextChanged += (_, _) => _noteDrafts[draftKey] = (titleInput.Text, bodyInput.Text);
         editor.Children.Add(_noteTitle); editor.Children.Add(_noteBody);
+        editor.Children.Add(Text("Title: 80 characters. Body: 500,000 characters. Oversized drafts stay available for export.", 11, true));
         editor.Children.Add(Row(Button("Save note", () =>
         {
             if (_editingNote is { } id) _vm.UpdateNote(id, _noteTitle.Text, _noteBody.Text);
-            else { _vm.AddNote(_noteTitle.Text, _noteBody.Text); _editingNote = _vm.Notes[0].Id; }
+            else { if (!_vm.CanAccessModule(ModuleId.Notes)) throw new InvalidOperationException("Premium expired. Export your full draft from Settings before quitting."); _vm.AddNote(_noteTitle.Text, _noteBody.Text); _editingNote = _vm.Notes[0].Id; }
             _noteDrafts.Remove(draftKey);
             Render();
         }, true), Button("Delete", () => { if (_editingNote is { } id) _vm.RemoveNote(id); _noteDrafts.Remove(draftKey); _editingNote = null; Render(); })));
@@ -135,10 +164,14 @@ public sealed partial class UtilityToolsView : UserControl
     }
     private void Scratchpad()
     {
-        var input = Input("Let your thoughts land here…", _vm.Scratchpad, true); input.Height = 220;
-        input.TextChanged += (_, _) => _vm.Scratchpad = input.Text;
+        var input = Input("Let your thoughts land here…", _scratchpadDraft ?? _vm.Scratchpad, true); input.Height = 220;
+        input.TextChanged += (_, _) =>
+        {
+            _scratchpadDraft = input.Text;
+            _ = _vm.ExecuteAsync(() => { _vm.Scratchpad = input.Text; _scratchpadDraft = null; return Task.CompletedTask; });
+        };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(input, "Scratchpad");
-        ContentStack.Children.Add(input); ContentStack.Children.Add(Text("Saved automatically on this device. Plain text; no sync or account.", 12, true));
+        ContentStack.Children.Add(input); ContentStack.Children.Add(Text("Saved automatically on this device. Plain text; no sync or account. Limit: 500,000 characters; validation errors preserve the full draft.", 12, true));
     }
     private void Shelf()
     {
@@ -180,7 +213,7 @@ public sealed partial class UtilityToolsView : UserControl
     {
         ContentStack.Children.Add(Row(
             Button("Documents", () => OpenFile(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments))),
-            Button("Downloads", () => OpenFile(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"))),
+            Button("Downloads", () => OpenFile(NativeFolders.DownloadsPath)),
             Button("Desktop", () => OpenFile(Environment.GetFolderPath(Environment.SpecialFolder.Desktop)))));
         ContentStack.Children.Add(Button("Add a frequently used file", PickFilesAsync)); ShelfList();
     }
@@ -202,9 +235,9 @@ public sealed partial class UtilityToolsView : UserControl
     }
     private void Links()
     {
-        var title = Input("Title"); title.Width = 200;
-        var url = Input("https://…"); url.Width = 330;
-        ContentStack.Children.Add(Row(title, url, Button("Add", () => { _vm.AddLink(title.Text, url.Text); Render(); }, true)));
+        var title = DraftInput("link-title", "Title"); title.Width = 200;
+        var url = DraftInput("link-url", "https://…"); url.Width = 330;
+        ContentStack.Children.Add(Row(title, url, Button("Add", () => { _vm.AddLink(title.Text, url.Text); _formDrafts.Remove("link-title"); _formDrafts.Remove("link-url"); Render(); }, true)));
         foreach (var item in _vm.Links)
         {
             var text = Text(item.Title); text.Width = 320;
@@ -270,10 +303,18 @@ public sealed partial class UtilityToolsView : UserControl
         ContentStack.Children.Add(grid); ContentStack.Children.Add(Button("Open Windows emoji picker", () => NativeInput.OpenEmojiPicker()));
     }
     private AmbientSound? _sound;
-    private AmbientSound Sound => _sound ??= new();
+    private AmbientSound Sound
+    {
+        get
+        {
+            if (_sound is null) { _sound = new(); _sound.Error += (_, error) => DispatcherQueue.TryEnqueue(() => _vm.ShowError(error)); }
+            return _sound;
+        }
+    }
     private void Sounds()
     {
         ContentStack.Children.Add(Text("A quiet backdrop for focused work.", 16));
+        if (!Sound.IsAvailable) { ContentStack.Children.Add(Text(Sound.UnavailableReason ?? "Audio is unavailable. Install the optional Windows media components, then retry.", 13, true)); return; }
         ContentStack.Children.Add(Row(Button("White noise", () => Sound.PlayAsync(false)), Button("Brown noise", () => Sound.PlayAsync(true)), Button("Stop", () => Sound.Stop())));
         ContentStack.Children.Add(Text("Generated locally. No streaming, tracking, or external audio library.", 12, true));
         var slider = new Slider { Minimum = 0, Maximum = 1, Value = Sound.Volume, StepFrequency = .01 };
@@ -314,24 +355,50 @@ public sealed partial class UtilityToolsView : UserControl
     private void Settings()
     {
         var preferences = _vm.Preferences;
+        ContentStack.Children.Add(Row(Button("Check for verified updates", _vm.CheckForUpdatesAsync), Button("Release page", () => OpenLink("https://github.com/SuryaK999/Notch-win-linux/releases"))));
         ContentStack.Children.Add(Text("Behavior", 15));
-        Toggle("Pin the expanded notch", preferences.Pinned, value => preferences with { Pinned = value });
-        Toggle("Switch tools on hover", preferences.HoverNavigation, value => preferences with { HoverNavigation = value });
-        Toggle("Reduce motion", preferences.ReducedMotion, value => preferences with { ReducedMotion = value });
-        Toggle("Capture clipboard text (memory only)", preferences.CaptureClipboard, value => preferences with { CaptureClipboard = value });
-        Toggle("Demo mode — show clearly labeled sample data", preferences.DemoMode, value => preferences with { DemoMode = value });
-        var focus = new NumberBox { Header = "Focus length (minutes)", Value = preferences.FocusMinutes, Minimum = 1, Maximum = 180, Width = 190 };
-        var hydration = new NumberBox { Header = "Hydration interval (minutes)", Value = preferences.HydrationMinutes, Minimum = 5, Maximum = 180, Width = 210 };
+        Toggle("Pin the expanded notch", preferences.Pinned, value => _vm.Preferences with { Pinned = value });
+        Toggle("Switch tools on hover", preferences.HoverNavigation, value => _vm.Preferences with { HoverNavigation = value });
+        Toggle("Reduce motion", preferences.ReducedMotion, value => _vm.Preferences with { ReducedMotion = value });
+        Toggle("Capture clipboard text (memory only)", preferences.CaptureClipboard, value => _vm.Preferences with { CaptureClipboard = value });
+        Toggle("Demo mode — show clearly labeled sample data", preferences.DemoMode, value => _vm.Preferences with { DemoMode = value });
+        var focus = new NumberBox { Header = "Focus length (minutes)", Value = DraftNumber("focus-minutes", preferences.FocusMinutes), Minimum = 1, Maximum = 180, Width = 190 };
+        var hydration = new NumberBox { Header = "Hydration interval (minutes)", Value = DraftNumber("hydration-minutes", preferences.HydrationMinutes), Minimum = 5, Maximum = 180, Width = 210 };
+        TrackNumber("focus-minutes", focus); TrackNumber("hydration-minutes", hydration);
         ContentStack.Children.Add(Row(focus, hydration, Button("Save intervals", () => _vm.SetPreferencesAsync(_vm.Preferences with { FocusMinutes = double.IsFinite(focus.Value) ? (int)focus.Value : 25, HydrationMinutes = double.IsFinite(hydration.Value) ? (int)hydration.Value : 30 }))));
-        var monitor = new NumberBox { Header = "Monitor index (0 = primary)", Minimum = 0, Maximum = 16, Value = preferences.ActiveMonitor, Width = 260 };
-        ContentStack.Children.Add(Row(monitor, Button("Move notch", () => _vm.SetPreferencesAsync(_vm.Preferences with { ActiveMonitor = double.IsFinite(monitor.Value) ? (int)monitor.Value : 0 }))));
+        var monitor = new NumberBox { Header = "Monitor index (0 = primary)", Minimum = 0, Maximum = 16, Value = DraftNumber("monitor", preferences.ActiveMonitor), Width = 260 };
+        TrackNumber("monitor", monitor);
+        ContentStack.Children.Add(Row(monitor, Button("Move notch", () => _vm.SetPreferencesAsync(_vm.Preferences with { ActiveMonitor = double.IsFinite(monitor.Value) ? (int)monitor.Value : 0, MonitorDeviceId = null }))));
+        Toggle("Hide during fullscreen apps", preferences.HideInFullscreen, value => _vm.Preferences with { HideInFullscreen = value });
+        var horizontal = new NumberBox { Header = "Horizontal offset (DIPs)", Value = DraftNumber("offset-x", preferences.HorizontalOffset), Minimum = -1000, Maximum = 1000, Width = 210 };
+        var top = new NumberBox { Header = "Top offset (DIPs)", Value = DraftNumber("offset-y", preferences.TopOffset), Minimum = 0, Maximum = 1000, Width = 210 };
+        TrackNumber("offset-x", horizontal); TrackNumber("offset-y", top);
+        ContentStack.Children.Add(Row(horizontal, top, Button("Apply position", () => _vm.SetPreferencesAsync(_vm.Preferences with { HorizontalOffset = horizontal.Value, TopOffset = top.Value }))));
+        ContentStack.Children.Add(Button("Retry media and clipboard services", _vm.RetryNativeServicesAsync));
+        ContentStack.Children.Add(Text("Notebook and recovery", 15));
+        ContentStack.Children.Add(Text(_vm.SaveState, 12, true));
+        ContentStack.Children.Add(Row(Button("Save now", async () => { FlushDrafts(); await _vm.SaveBeforeExitAsync(); }), Button("Export notebook", () => ExportAllAsync(includeDrafts: true)), Button("Restore export", ImportWorkspaceAsync)));
+        if (!_vm.WorkspaceReadable) ContentStack.Children.Add(Button("Preserve unreadable file and start recovery", _vm.RecoverWorkspaceAsync));
         ContentStack.Children.Add(Text("Connections", 15));
         Credential("Stripe read-only key", "stripe"); Credential("Analytics bearer token", "analytics");
-        var endpoint = Input("HTTPS analytics endpoint", preferences.AnalyticsEndpoint ?? ""); endpoint.Width = 430;
+        var endpoint = DraftInput("analytics-endpoint", "HTTPS analytics endpoint", preferences.AnalyticsEndpoint ?? ""); endpoint.Width = 430;
         ContentStack.Children.Add(Row(endpoint, Button("Save endpoint", () => _vm.SetPreferencesAsync(_vm.Preferences with { AnalyticsEndpoint = endpoint.Text }))));
         ContentStack.Children.Add(Text("Analytics expects the documented normalized JSON contract. Polar, Dodo, AdSense, Google OAuth and commercial weather licensing remain release work; no connection is implied.", 12, true));
-        ContentStack.Children.Add(Text("Free + Pro product concept", 15));
-        ContentStack.Children.Add(Card(Text("Free: local essentials. Planned Pro: connected workspaces and revenue insights. Pricing, entitlements, and billing are not activated in this build.", 13)));
+        ContentStack.Children.Add(Text("Free + Premium", 15));
+        ContentStack.Children.Add(Card(Text(_vm.PlanStatus + ". " + _vm.SubscriptionStatus, 13)));
+        ContentStack.Children.Add(Text("Free includes basic playback, one Pomodoro and a scratchpad. Premium is US$2/month. Purchase and cancellation use the secure browser checkout; stored data can always be exported.", 12, true));
+        if (_vm.BillingConfigured)
+        {
+            var email = DraftInput("billing-email", "Email for purchase or restore");
+            var code = DraftInput("billing-code", "One-time email code");
+            ContentStack.Children.Add(Row(email, Button("Send sign-in code", () => _vm.RequestLoginAsync(email.Text))));
+            ContentStack.Children.Add(Row(code, Button("Sign in / restore", async () => { await _vm.VerifyLoginAsync(email.Text, code.Text); _formDrafts.Remove("billing-code"); Render(); })));
+            ContentStack.Children.Add(Row(Button("Upgrade — US$2/month", async () => { var uri = await _vm.CheckoutAsync(); await global::Windows.System.Launcher.LaunchUriAsync(uri); }), Button("Manage / cancel", async () => { var uri = await _vm.CustomerPortalAsync(); await global::Windows.System.Launcher.LaunchUriAsync(uri); })));
+            ContentStack.Children.Add(Row(Button("Refresh access", _vm.RefreshSubscriptionAsync), Button("Sign out", async () => { await _vm.SignOutAsync(); Render(); })));
+        }
+        else ContentStack.Children.Add(Text("Live subscriptions are awaiting server configuration. Free features work without an account.", 12, true));
+        ContentStack.Children.Add(Text("Recent notifications", 15));
+        foreach (var activity in _vm.NotificationHistory.Take(10)) ContentStack.Children.Add(Text(activity.Source + ": " + activity.Title, 12, true));
         ContentStack.Children.Add(Text("Ctrl + Shift + Space opens the notch. Esc collapses. Hover navigation never approves an agent command or launches a payment action.", 12, true));
     }
     private void Toggle(string label, bool value, Func<bool, AppPreferences> update)
@@ -341,8 +408,9 @@ public sealed partial class UtilityToolsView : UserControl
     }
     private void Credential(string label, string provider)
     {
-        var password = new PasswordBox { Header = label, Width = 430, PasswordRevealMode = PasswordRevealMode.Hidden };
-        ContentStack.Children.Add(Row(password, Button("Save", () => { _vm.SaveCredential(provider, password.Password); password.Password = ""; }), Button("Remove", () => _vm.DeleteCredential(provider))));
+        var password = new PasswordBox { Header = label, Width = 430, PasswordRevealMode = PasswordRevealMode.Hidden, Password = _credentialDrafts.GetValueOrDefault(provider, "") };
+        password.PasswordChanged += (_, _) => _credentialDrafts[provider] = password.Password;
+        ContentStack.Children.Add(Row(password, Button("Save", () => { _vm.SaveCredential(provider, password.Password); _credentialDrafts.Remove(provider); password.Password = ""; }), Button("Remove", () => _vm.DeleteCredential(provider))));
     }
     private static void OpenFile(string path)
     {
@@ -359,14 +427,62 @@ public sealed partial class UtilityToolsView : UserControl
         if (path.Contains('"')) throw new ArgumentException("Invalid file path.");
         Process.Start(new ProcessStartInfo { FileName = "explorer.exe", Arguments = "/select,\"" + Path.GetFullPath(path) + "\"", UseShellExecute = true });
     }
+    private double DraftNumber(string key, double fallback) => _formDrafts.TryGetValue(key, out var text) && double.TryParse(text, CultureInfo.InvariantCulture, out var value) ? value : fallback;
+    private void TrackNumber(string key, NumberBox box) => box.ValueChanged += (_, _) => _formDrafts[key] = box.Value.ToString(CultureInfo.InvariantCulture);
     public void FlushDrafts()
     {
-        foreach (var (id, draft) in _noteDrafts.Where(item => !string.IsNullOrWhiteSpace(item.Value.Body)))
+        _invalidDrafts = false;
+        try
         {
-            if (id == Guid.Empty) _vm.AddNote(draft.Title, draft.Body);
-            else _vm.UpdateNote(id, draft.Title, draft.Body);
+            if (_scratchpadDraft is { } scratchpad) { _vm.Scratchpad = scratchpad; _scratchpadDraft = null; }
+            foreach (var (id, draft) in _noteDrafts.ToArray())
+            {
+                if (id == Guid.Empty)
+                {
+                    if (string.IsNullOrWhiteSpace(draft.Title) && string.IsNullOrWhiteSpace(draft.Body)) { _noteDrafts.Remove(id); continue; }
+                    if (!_vm.CanAccessModule(ModuleId.Notes)) throw new InvalidOperationException("Your new note draft is preserved. Export it before quitting or restore Premium access.");
+                    _vm.AddNote(draft.Title, draft.Body);
+                }
+                else _vm.UpdateNote(id, draft.Title, draft.Body);
+                _noteDrafts.Remove(id);
+            }
         }
-        _noteDrafts.Clear();
+        catch { _invalidDrafts = true; throw; }
     }
-    public void Dispose() { _sound?.Dispose(); _vm.PropertyChanged -= Changed; }
+    public async Task ExportAllAsync(bool includeDrafts = false)
+    {
+        HasOpenDialog = true;
+        try
+        {
+            var picker = new FileSavePicker { SuggestedFileName = "Notch-notebook" };
+            picker.FileTypeChoices.Add("Notch notebook JSON", new List<string> { ".json" });
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, _vm.WindowHandle);
+            var file = await picker.PickSaveFileAsync();
+            if (file is null) return;
+            await _vm.ExportWorkspaceAsync(file.Path);
+            if (includeDrafts && (_noteDrafts.Count > 0 || _scratchpadDraft is not null))
+            {
+                var draftPath = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(file.Path)!, System.IO.Path.GetFileNameWithoutExtension(file.Path) + "-unsaved-drafts.json");
+                var drafts = new { Notes = _noteDrafts.Select(item => new { Id = item.Key, item.Value.Title, Text = item.Value.Body }), Scratchpad = _scratchpadDraft };
+                await File.WriteAllBytesAsync(draftPath, WorkspaceLimits.SerializeExport(drafts));
+                _vm.ShowError("Notebook and unsaved draft recovery files exported. The drafts file is separate so content over normal limits is preserved in full.");
+            }
+        }
+        finally { HasOpenDialog = false; }
+    }
+    private async Task ImportWorkspaceAsync()
+    {
+        HasOpenDialog = true;
+        try
+        {
+            var picker = new FileOpenPicker(); picker.FileTypeFilter.Add(".json");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, _vm.WindowHandle);
+            var file = await picker.PickSingleFileAsync(); if (file is null) return;
+            var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Restore notebook?", Content = "This replaces the current notebook. A backup of the previous notebook will be kept. Export or save your unfinished drafts first.", PrimaryButtonText = "Restore", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            FlushDrafts(); await _vm.RestoreWorkspaceAsync(file.Path); Render();
+        }
+        finally { HasOpenDialog = false; }
+    }
+    public void Dispose() { _sound?.Dispose(); _credentialDrafts.Clear(); _vm.PropertyChanged -= Changed; }
 }

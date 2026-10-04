@@ -5,23 +5,23 @@ public enum OverlayMode { Collapsed, Expanded, Activity }
 public enum ActivityKind { Sale, Meeting, Agent, Focus, Information }
 public enum RevenueProvider { Stripe, Polar, Dodo, AdSense }
 public sealed record ModuleDefinition(ModuleId Id, string Title, string Glyph, double Width, double Height, string Description);
-public sealed record MediaSnapshot(string Title, string Artist, string? ArtworkPath, bool IsPlaying, TimeSpan Position, TimeSpan Duration, string Source, bool CanSeek);
+public sealed record MediaSnapshot(string Title, string Artist, string? ArtworkPath, bool IsPlaying, TimeSpan Position, TimeSpan Duration, string Source, bool CanSeek, bool CanPlay = true, bool CanPause = true, bool CanPrevious = true, bool CanNext = true, DateTimeOffset? PositionUpdatedAt = null, double PlaybackRate = 1);
 public sealed record SystemSnapshot(double CpuPercent, double MemoryPercent, int? BatteryPercent, double Volume, string OutputDevice, TimeSpan SessionScreenTime);
 public sealed record ClipboardItem(Guid Id, string Text, DateTimeOffset CapturedAt);
 public sealed record SavedNote(Guid Id, string Title, string Text, DateTimeOffset UpdatedAt);
 public sealed record ReminderItem(Guid Id, string Title, DateTimeOffset DueAt, bool Completed);
 public sealed record ShelfItem(Guid Id, string Path, DateTimeOffset AddedAt);
 public sealed record SavedLink(Guid Id, string Title, string Url);
-public sealed record CalendarEvent(string Title, DateTimeOffset Start, DateTimeOffset End, string? MeetingUrl);
+public sealed record CalendarEvent(string Title, DateTimeOffset Start, DateTimeOffset End, string? MeetingUrl, bool IsAllDay = false, bool IsFloating = false, string? TimeZoneId = null);
 public sealed record RevenuePayment(string Id, string Description, decimal Amount, string Currency, DateTimeOffset CreatedAt);
-public sealed record RevenueSnapshot(RevenueProvider Provider, decimal Total, string Currency, IReadOnlyList<RevenuePayment> Payments, IReadOnlyList<decimal> DailyAmounts, DateTimeOffset UpdatedAt, bool Complete = true);
+public sealed record RevenueSnapshot(RevenueProvider Provider, decimal Total, string Currency, IReadOnlyList<RevenuePayment> Payments, IReadOnlyList<decimal> DailyAmounts, DateTimeOffset UpdatedAt, bool Complete = true, int RequestedDays = 0, DateTimeOffset? RangeStart = null, DateTimeOffset? RangeEnd = null);
 public sealed record WeatherHour(DateTimeOffset Time, double Temperature, int Code);
 public sealed record WeatherDay(DateOnly Date, double Maximum, double Minimum, int Code);
-public sealed record WeatherSnapshot(string City, double Temperature, double FeelsLike, int Humidity, double Wind, int Code, IReadOnlyList<WeatherHour> Hours, IReadOnlyList<WeatherDay> Days, DateTimeOffset UpdatedAt);
+public sealed record WeatherSnapshot(string City, double Temperature, double FeelsLike, int Humidity, double Wind, int Code, IReadOnlyList<WeatherHour> Hours, IReadOnlyList<WeatherDay> Days, DateTimeOffset UpdatedAt, string? TimeZoneId = null, TimeSpan? UtcOffset = null);
 public sealed record CodingDay(DateOnly Date, long InputTokens, long OutputTokens, int Sessions);
 public sealed record CodingSnapshot(string Provider, long InputTokens, long OutputTokens, int Sessions, IReadOnlyList<CodingDay> Days, string SourcePath);
 public sealed record AnalyticsSnapshot(string Site, int ActiveUsers, long PageViews, long NewUsers, IReadOnlyList<int> Timeline, IReadOnlyList<KeyValuePair<string, int>> Pages, DateTimeOffset UpdatedAt);
-public sealed record LiveActivity(Guid Id, ActivityKind Kind, string Source, string Title, string? Detail, DateTimeOffset CreatedAt, TimeSpan Duration, string? ActionUri = null);
+public sealed record LiveActivity(Guid Id, ActivityKind Kind, string Source, string Title, string? Detail, DateTimeOffset CreatedAt, TimeSpan Duration, string? ActionUri = null, ModuleId? Destination = null);
 
 public sealed record AppPreferences
 {
@@ -33,6 +33,10 @@ public sealed record AppPreferences
     public int FocusMinutes { get; init; } = 25;
     public int HydrationMinutes { get; init; } = 30;
     public int ActiveMonitor { get; init; }
+    public string? MonitorDeviceId { get; init; }
+    public double HorizontalOffset { get; init; }
+    public double TopOffset { get; init; }
+    public bool HideInFullscreen { get; init; } = true;
     public string WeatherCity { get; init; } = "Bengaluru";
     public string? CalendarPath { get; init; }
     public string? CodingPath { get; init; }
@@ -44,6 +48,8 @@ public sealed record AppPreferences
         FocusMinutes = Math.Clamp(value.FocusMinutes, 1, 180),
         HydrationMinutes = Math.Clamp(value.HydrationMinutes, 5, 180),
         ActiveMonitor = Math.Max(0, value.ActiveMonitor),
+        HorizontalOffset = double.IsFinite(value.HorizontalOffset) ? Math.Clamp(value.HorizontalOffset, -1000, 1000) : 0,
+        TopOffset = double.IsFinite(value.TopOffset) ? Math.Clamp(value.TopOffset, 0, 1000) : 0,
         WeatherCity = string.IsNullOrWhiteSpace(value.WeatherCity) ? "Bengaluru" : value.WeatherCity.Trim()[..Math.Min(80, value.WeatherCity.Trim().Length)],
     };
 }

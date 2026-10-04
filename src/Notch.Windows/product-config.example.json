@@ -1,0 +1,4 @@
+{
+  "billingUrl": "https://billing.your-domain.example/",
+  "entitlementPublicKeyPem": "Replace with the billing service's public RSA verification key. Never include a private key."
+}

@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace Notch.Core.Providers;
 
 /// <summary>Read-only payment reporting. Payment totals are not a recurring-revenue calculation.</summary>
-public sealed class RevenueClient(HttpClient client, ISecretVault vault)
+public sealed class RevenueClient(HttpClient client, ISecretVault vault, TimeProvider? timeProvider = null)
 {
     private static readonly HashSet<string> SupportedCurrencies = new(StringComparer.OrdinalIgnoreCase)
     { "AED", "AFN", "ALL", "AMD", "ANG", "AOA", "ARS", "AUD", "AWG", "AZN", "BAM", "BBD", "BDT", "BGN", "BHD", "BIF", "BMD", "BND", "BOB", "BRL", "BSD", "BWP", "BZD", "CAD", "CDF", "CHF", "CLP", "CNY", "COP", "CRC", "CVE", "CZK", "DJF", "DKK", "DOP", "DZD", "EEK", "EGP", "ETB", "EUR", "FJD", "FKP", "GBP", "GEL", "GIP", "GMD", "GNF", "GTQ", "GYD", "HKD", "HNL", "HRK", "HTG", "HUF", "IDR", "ILS", "INR", "ISK", "JMD", "JOD", "JPY", "KES", "KGS", "KHR", "KMF", "KRW", "KWD", "KYD", "KZT", "LAK", "LBP", "LKR", "LRD", "LSL", "LTL", "LVL", "MAD", "MDL", "MGA", "MKD", "MNT", "MOP", "MRO", "MUR", "MVR", "MWK", "MXN", "MYR", "MZN", "NAD", "NGN", "NIO", "NOK", "NPR", "NZD", "OMR", "PAB", "PEN", "PGK", "PHP", "PKR", "PLN", "PYG", "QAR", "RON", "RSD", "RUB", "RWF", "SAR", "SBD", "SCR", "SEK", "SGD", "SHP", "SLL", "SOS", "SRD", "STD", "SVC", "SZL", "THB", "TJS", "TND", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH", "UGX", "USD", "UYU", "UZS", "VEF", "VND", "VUV", "WST", "XAF", "XCD", "XOF", "XPF", "YER", "ZAR", "ZMW" };
@@ -19,7 +19,7 @@ public sealed class RevenueClient(HttpClient client, ISecretVault vault)
         if (provider != RevenueProvider.Stripe)
             throw new NotSupportedException($"{provider} is not connected: this build has no verified API adapter for that provider. No revenue data has been inferred.");
         var secret = ProviderHttp.RequireSecret(vault, "stripe");
-        var now = DateTimeOffset.UtcNow;
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
         var start = new DateTimeOffset(now.UtcDateTime.Date.AddDays(1 - days), TimeSpan.Zero);
         var payments = new List<RevenuePayment>();
         var daily = new decimal[days];
@@ -35,7 +35,7 @@ public sealed class RevenueClient(HttpClient client, ISecretVault vault)
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", secret);
             using var document = await ProviderHttp.ReadJsonAsync(client, request, cancellationToken).ConfigureAwait(false);
             var root = document.RootElement;
-            if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array || data.GetArrayLength() > 100)
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array || data.GetArrayLength() > 100)
                 throw new InvalidDataException("Stripe returned an invalid charge list.");
             string? lastId = null;
             foreach (var charge in data.EnumerateArray())
@@ -72,7 +72,8 @@ public sealed class RevenueClient(HttpClient client, ISecretVault vault)
             cursor = lastId;
         }
         return new(provider, payments.Sum(payment => payment.Amount), currency ?? string.Empty,
-            payments.OrderByDescending(payment => payment.CreatedAt).ToArray(), daily, now, complete);
+            payments.OrderByDescending(payment => payment.CreatedAt).ToArray(), daily, now, complete,
+            RequestedDays: days, RangeStart: start, RangeEnd: now);
     }
 
     private static bool IsTrue(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;

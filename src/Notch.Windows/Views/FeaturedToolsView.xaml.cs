@@ -10,13 +10,14 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 using Path = Microsoft.UI.Xaml.Shapes.Path;
 using Notch.Core;
+using Notch.Core.Providers;
 using Notch.Windows.ViewModels;
 using Windows.Foundation;
 
 namespace Notch.Windows.Views;
 
-/// <summary>Native, data-driven layouts for the eight tools shown in the reference.</summary>
-public sealed partial class FeaturedToolsView : UserControl
+/// <summary>Native, data-driven layouts for the primary dashboard tools.</summary>
+public sealed partial class FeaturedToolsView : UserControl, IDisposable
 {
     private readonly MainViewModel _viewModel;
     private readonly Dictionary<ModuleId, Grid> _views;
@@ -33,6 +34,16 @@ public sealed partial class FeaturedToolsView : UserControl
     private string? _artworkPath;
     private int _artworkRequest;
     private double? _renderedFocusProgress;
+    private readonly DispatcherTimer _liveTick = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private readonly StackPanel _freeView = new() { Spacing = 14, Padding = new Thickness(16) };
+    private TextBlock? _freeFocusText;
+    private ModuleId? _freeModule;
+    private long _mediaProjectionStart;
+    private MediaSnapshot? _projectionSnapshot;
+    private TimeSpan _projectionPosition;
+    private int _freshnessTicks;
+    public bool IsManipulating => MediaSeekSlider.PointerCaptures.Count > 0 || VolumeSlider.PointerCaptures.Count > 0;
+
 
     public FeaturedToolsView(MainViewModel viewModel)
     {
@@ -45,6 +56,15 @@ public sealed partial class FeaturedToolsView : UserControl
             [ModuleId.Revenue] = RevenueView, [ModuleId.Analytics] = AnalyticsView,
             [ModuleId.Coding] = CodingView, [ModuleId.Calendar] = CalendarView,
             [ModuleId.Weather] = WeatherView, [ModuleId.Focus] = FocusView,
+        };
+        ModuleRoot.Children.Add(_freeView);
+        _liveTick.Tick += (_, _) =>
+        {
+            if (_viewModel.SelectedModule == ModuleId.Media && _viewModel.IsPremium)
+            {
+                _rendering = true; try { RenderMediaPosition(); } finally { _rendering = false; }
+            }
+            if (++_freshnessTicks % 240 == 0 && _viewModel.SelectedModule == ModuleId.Analytics) RenderAnalyticsFreshness();
         };
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -60,6 +80,7 @@ public sealed partial class FeaturedToolsView : UserControl
             _subscribed = true;
         }
         RenderSelected();
+        _liveTick.Start();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -70,6 +91,7 @@ public sealed partial class FeaturedToolsView : UserControl
             _viewModel.Reminders.CollectionChanged -= RemindersChanged;
             _subscribed = false;
         }
+        _liveTick.Stop();
         _seekDelay?.Cancel();
         _volumeDelay?.Cancel();
         _artworkRequest++;
@@ -102,7 +124,7 @@ public sealed partial class FeaturedToolsView : UserControl
             or nameof(MainViewModel.HydrationTime) or nameof(MainViewModel.FocusProgress) or nameof(MainViewModel.FocusRunning)
             or nameof(MainViewModel.StopwatchRunning) or nameof(MainViewModel.StopwatchLaps))
         {
-            if (_viewModel.SelectedModule == ModuleId.Focus) RefreshFocusProperty(property);
+            if (_viewModel.SelectedModule == ModuleId.Focus) { if (_viewModel.IsPremium) RefreshFocusProperty(property); else if (_freeFocusText is not null) _freeFocusText.Text = _viewModel.FocusTime; }
             return;
         }
         if (property is "Status" or "Error")
@@ -110,7 +132,7 @@ public sealed partial class FeaturedToolsView : UserControl
             SetError(_viewModel.Error);
             return;
         }
-        var relevant = property is nameof(MainViewModel.SelectedModule) or nameof(MainViewModel.Preferences) or nameof(MainViewModel.IsReady)
+        var relevant = property is nameof(MainViewModel.SelectedModule) or nameof(MainViewModel.Preferences) or nameof(MainViewModel.IsReady) or nameof(MainViewModel.IsPremium)
             || _viewModel.SelectedModule switch
             {
                 ModuleId.Home => property is nameof(MainViewModel.System) or nameof(MainViewModel.ListeningPorts) or nameof(MainViewModel.Analytics) or nameof(MainViewModel.Revenue) or nameof(MainViewModel.Weather),
@@ -128,8 +150,12 @@ public sealed partial class FeaturedToolsView : UserControl
     private void RenderSelected()
     {
         ModuleRoot.MinHeight = ModuleCatalog.Get(_viewModel.SelectedModule).Height;
+        var free = !_viewModel.IsPremium;
         foreach (var (module, view) in _views)
-            view.Visibility = module == _viewModel.SelectedModule ? Visibility.Visible : Visibility.Collapsed;
+            view.Visibility = !free && module == _viewModel.SelectedModule ? Visibility.Visible : Visibility.Collapsed;
+        _freeView.Visibility = free ? Visibility.Visible : Visibility.Collapsed;
+        if (free) { RenderFree(); SetError(_viewModel.Error); return; }
+        _freeModule = null;
         _rendering = true;
         try
         {
@@ -197,14 +223,19 @@ public sealed partial class FeaturedToolsView : UserControl
         PlayingGlyph.Visibility = media?.IsPlaying == true ? Visibility.Visible : Visibility.Collapsed;
         PlayPauseIcon.Glyph = media?.IsPlaying == true ? "\uE769" : "\uE768";
         AutomationProperties.SetName(PlayPauseButton, media?.IsPlaying == true ? "Pause playback" : "Play playback");
-        PlayPauseButton.IsEnabled = PreviousButton.IsEnabled = NextButton.IsEnabled = media is not null;
+        PlayPauseButton.IsEnabled = media is not null && (media.IsPlaying ? media.CanPause : media.CanPlay);
+        PreviousButton.IsEnabled = media?.CanPrevious == true; NextButton.IsEnabled = media?.CanNext == true;
         MediaSeekSlider.IsEnabled = media is { CanSeek: true } && media.Duration > TimeSpan.Zero && !_viewModel.Preferences.DemoMode;
-        if (_seekDelay is null)
-            MediaSeekSlider.Value = media is not null && media.Duration.TotalSeconds > 0 ? Math.Clamp(media.Position.TotalSeconds / media.Duration.TotalSeconds, 0, 1) : 0;
-        MediaPositionText.Text = media is null ? "0:00" : Clock(media.Position);
+        if (!ReferenceEquals(_projectionSnapshot, media))
+        {
+            _projectionSnapshot = media; _mediaProjectionStart = System.Diagnostics.Stopwatch.GetTimestamp();
+            var age = media?.PositionUpdatedAt is { } updated ? Math.Clamp((DateTimeOffset.UtcNow - updated).TotalSeconds, 0, 60) : 0;
+            _projectionPosition = media is { IsPlaying: true } ? media.Position + TimeSpan.FromSeconds(age * media.PlaybackRate) : media?.Position ?? TimeSpan.Zero;
+        }
+        RenderMediaPosition();
         MediaDurationText.Text = media is null ? "0:00" : Clock(media.Duration);
-        VolumeSlider.IsEnabled = _viewModel.System is not null;
-        if (_volumeDelay is null)
+        VolumeSlider.IsEnabled = _viewModel.System is { OutputDevice: not "Unavailable" and not "No output device" };
+        if (_volumeDelay is null && VolumeSlider.PointerCaptures.Count == 0 && VolumeSlider.FocusState == FocusState.Unfocused)
             VolumeSlider.Value = Math.Clamp(_viewModel.System?.Volume ?? 0, 0, 1);
         OutputDeviceText.Text = _viewModel.System?.OutputDevice ?? "No output device";
         if (_artworkPath != media?.ArtworkPath)
@@ -214,6 +245,49 @@ public sealed partial class FeaturedToolsView : UserControl
         }
     }
 
+    private void RenderMediaPosition()
+    {
+        var media = _viewModel.Media;
+        var position = _projectionPosition;
+        if (media?.IsPlaying == true && _projectionSnapshot == media)
+            position += System.Diagnostics.Stopwatch.GetElapsedTime(_mediaProjectionStart) * media.PlaybackRate;
+        if (media is not null) position = TimeSpan.FromTicks(Math.Clamp(position.Ticks, 0, Math.Max(0, media.Duration.Ticks)));
+        if (_seekDelay is null && MediaSeekSlider.PointerCaptures.Count == 0 && MediaSeekSlider.FocusState == FocusState.Unfocused)
+            MediaSeekSlider.Value = media is not null && media.Duration > TimeSpan.Zero ? Math.Clamp(position.TotalSeconds / media.Duration.TotalSeconds, 0, 1) : 0;
+        MediaPositionText.Text = Clock(position);
+    }
+    private void RenderFree()
+    {
+        if (_freeModule == _viewModel.SelectedModule && _viewModel.SelectedModule == ModuleId.Focus) { if (_freeFocusText is not null) _freeFocusText.Text = _viewModel.FocusTime; return; }
+        _freeModule = _viewModel.SelectedModule; _freeView.Children.Clear();
+        _freeView.Children.Add(new TextBlock { Text = "Notch Free", FontSize = 24, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        Button Action(string text, Func<Task> action) { var button = new Button { Content = text, Style = (Style)Application.Current.Resources["NotchButtonStyle"] }; button.Click += async (_, _) => await SafeAsync(action); return button; }
+        if (_viewModel.SelectedModule == ModuleId.Media)
+        {
+            var media = _viewModel.Media;
+            _freeView.Children.Add(new TextBlock { Text = media?.Title ?? "Nothing playing", FontSize = 18, TextWrapping = TextWrapping.Wrap });
+            _freeView.Children.Add(Caption(media?.Artist ?? "Start playback in a Windows media app"));
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+            var previous = Action("Previous", _viewModel.PreviousAsync); previous.IsEnabled = media?.CanPrevious == true;
+            var play = Action(media?.IsPlaying == true ? "Pause" : "Play", _viewModel.PlayPauseAsync); play.IsEnabled = media is not null && (media.IsPlaying ? media.CanPause : media.CanPlay);
+            var next = Action("Next", _viewModel.NextAsync); next.IsEnabled = media?.CanNext == true;
+            row.Children.Add(previous); row.Children.Add(play); row.Children.Add(next); _freeView.Children.Add(row);
+        }
+        else if (_viewModel.SelectedModule == ModuleId.Focus)
+        {
+            _freeFocusText = new TextBlock { Text = _viewModel.FocusTime, FontSize = 44, FontFamily = new FontFamily("Consolas") };
+            _freeView.Children.Add(_freeFocusText);
+            _freeView.Children.Add(Action("Start / pause Pomodoro", () => { _viewModel.ToggleFocus(); return Task.CompletedTask; }));
+            _freeView.Children.Add(Action("Reset", () => { _viewModel.ResetFocus(); return Task.CompletedTask; }));
+        }
+        else
+        {
+            _freeView.Children.Add(Caption("Quick playback, one Pomodoro and a local scratchpad. No account required.", wrap: true));
+            foreach (var module in new[] { ModuleId.Media, ModuleId.Focus, ModuleId.Scratchpad })
+                _freeView.Children.Add(Action(ModuleCatalog.Get(module).Title, () => { _viewModel.SelectModule(module); return Task.CompletedTask; }));
+        }
+        _freeView.Children.Add(Action("Premium — US$2/month and recovery settings", () => { _viewModel.SelectModule(ModuleId.Settings); return Task.CompletedTask; }));
+    }
     private async Task LoadArtworkAsync(string? path)
     {
         var request = ++_artworkRequest;
@@ -239,7 +313,8 @@ public sealed partial class FeaturedToolsView : UserControl
             SelectButton(button, button.Tag?.ToString() == _provider.ToString());
         foreach (var button in new[] { RevenueTodayButton, RevenueWeekButton, RevenueMonthButton })
             SelectButton(button, button.Tag?.ToString() == _revenueDays.ToString(CultureInfo.InvariantCulture));
-        var revenue = _viewModel.Revenue is { } snapshot && snapshot.Provider == _provider ? snapshot : null;
+        var revenue = _viewModel.Revenue is { } snapshot && snapshot.Provider == _provider && (_viewModel.IsDemo || snapshot.RequestedDays == _revenueDays) ? snapshot : null;
+        foreach (var button in new[] { PolarButton, DodoButton, AdSenseButton }) { button.IsEnabled = false; ToolTipService.SetToolTip(button, "This provider is not integrated yet."); }
         RevenueRangeText.Text = revenue is null ? $"{_provider} · awaiting connection" : $"{_provider} · updated {Relative(revenue.UpdatedAt)}" + DemoSuffix;
         RevenueTotalText.Text = revenue is null ? "—" : Money(revenue.Total, revenue.Currency);
         RevenueOrdersText.Text = revenue is null ? "Real payments, close at hand" : $"{revenue.Payments.Count:N0} loaded payments" + (revenue.Complete ? "" : " · partial response");
@@ -249,7 +324,7 @@ public sealed partial class FeaturedToolsView : UserControl
         PaymentsPanel.Children.Clear();
         if (revenue is null)
         {
-            PaymentsPanel.Children.Add(Caption("No payments loaded. Choose a provider and configure its credentials in Settings.", wrap: true));
+            PaymentsPanel.Children.Add(Caption("No payments loaded for this range. Configure a restricted Stripe read-only credential in Settings, then refresh.", wrap: true));
             return;
         }
         if (revenue.Payments.Count == 0) PaymentsPanel.Children.Add(Caption("No payments in this response.", wrap: true));
@@ -270,12 +345,17 @@ public sealed partial class FeaturedToolsView : UserControl
         }
     }
 
+    private void RenderAnalyticsFreshness()
+    {
+        var analytics = _viewModel.Analytics;
+        AnalyticsLiveText.Text = _viewModel.IsDemo ? "DEMO" : analytics is null ? "NOT CONNECTED" : DateTimeOffset.UtcNow - analytics.UpdatedAt > TimeSpan.FromMinutes(5) ? "STALE" : "SNAPSHOT";
+        AnalyticsUpdatedText.Text = analytics is null ? "Configure an HTTPS endpoint and required bearer credential" : "Updated " + Relative(analytics.UpdatedAt) + " · manual refresh";
+    }
     private void RenderAnalytics()
     {
         var analytics = _viewModel.Analytics;
         AnalyticsSiteText.Text = analytics?.Site ?? "Your website";
-        AnalyticsLiveText.Text = _viewModel.Preferences.DemoMode ? "DEMO" : analytics is null ? "OFFLINE" : "LIVE";
-        AnalyticsUpdatedText.Text = analytics is null ? "Connect a read-only analytics endpoint in Settings" : "Updated " + Relative(analytics.UpdatedAt);
+        RenderAnalyticsFreshness();
         AnalyticsRealtimeText.Text = analytics?.ActiveUsers.ToString("N0") ?? "—";
         AnalyticsUsersText.Text = analytics?.ActiveUsers.ToString("N0") ?? "—";
         AnalyticsViewsText.Text = analytics?.PageViews.ToString("N0") ?? "—";
@@ -369,22 +449,23 @@ public sealed partial class FeaturedToolsView : UserControl
         {
             var date = _calendarMonth.AddDays(number - 1);
             var selected = date.Date == _calendarDate.Date;
-            var button = new Button { Content = number.ToString(CultureInfo.CurrentCulture), Width = 33, Height = 33, CornerRadius = new CornerRadius(17), Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = selected ? Brush("#FFFFFF") : new SolidColorBrush(Colors.Transparent), Foreground = selected ? Brush("#050505") : Brush(date == DateTime.Today ? "#FFFFFF" : "#A8A8A8"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 };
+            var button = new Button { Content = number.ToString(CultureInfo.CurrentCulture), Width = 40, Height = 40, CornerRadius = new CornerRadius(20), Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = selected ? Brush("#FFFFFF") : new SolidColorBrush(Colors.Transparent), Foreground = selected ? Brush("#050505") : Brush(date == DateTime.Today ? "#FFFFFF" : "#A8A8A8"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 };
             AutomationProperties.SetName(button, date.ToString("D", CultureInfo.CurrentCulture));
             button.Click += (_, _) => { _calendarDate = date; RenderCalendar(); };
             Grid.SetColumn(button, (number - 1 + offset) % 7); Grid.SetRow(button, (number - 1 + offset) / 7 + 1); CalendarDaysGrid.Children.Add(button);
         }
-        var events = _viewModel.CalendarEvents.Where(calendarEvent => calendarEvent.Start.LocalDateTime.Date == _calendarDate.Date).OrderBy(calendarEvent => calendarEvent.Start).ToArray();
+        var selectedDay = DateOnly.FromDateTime(_calendarDate);
+        var events = CalendarDay.EventsForDay(_viewModel.CalendarEvents, selectedDay, TimeZoneInfo.Local).ToArray();
         CalendarConnectPanel.Visibility = _viewModel.CalendarEvents.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         CalendarEventsPanel.Children.Clear();
         if (_viewModel.CalendarEvents.Count > 0)
         {
-            CalendarEventsPanel.Children.Add(Caption(events.Length == 0 ? "No events on this day" : "DAY’S EVENTS", 10));
+            CalendarEventsPanel.Children.Add(Caption(events.Length == 0 ? (_viewModel.CalendarRangeLoaded(_calendarDate) || _viewModel.IsDemo ? "No events on this day" : "This date has not been loaded. Navigate or re-import to refresh.") : "DAY’S EVENTS", 10));
             foreach (var calendarEvent in events)
             {
                 var content = new StackPanel { Spacing = 4 };
                 content.Children.Add(new TextBlock { Text = calendarEvent.Title, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-                content.Children.Add(Caption($"{calendarEvent.Start.LocalDateTime:t} — {calendarEvent.End.LocalDateTime:t}", 10));
+                content.Children.Add(Caption(CalendarDay.TimeLabel(calendarEvent, selectedDay, TimeZoneInfo.Local), 10));
                 if (Uri.TryCreate(calendarEvent.MeetingUrl, UriKind.Absolute, out var meeting) && meeting.Scheme is "http" or "https")
                 {
                     var join = new Button { Content = "Open meeting", Style = (Style)Application.Current.Resources["NotchButtonStyle"], HorizontalAlignment = HorizontalAlignment.Left };
@@ -415,6 +496,13 @@ public sealed partial class FeaturedToolsView : UserControl
         }
     }
 
+    private static DateOnly CityToday(WeatherSnapshot weather)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (weather.TimeZoneId is { } zoneId)
+            try { return DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, TimeZoneInfo.FindSystemTimeZoneById(zoneId)).DateTime); } catch (TimeZoneNotFoundException) { } catch (InvalidTimeZoneException) { }
+        return DateOnly.FromDateTime(now.ToOffset(weather.UtcOffset ?? TimeSpan.Zero).DateTime);
+    }
     private void RenderWeather()
     {
         var weather = _viewModel.Weather;
@@ -422,7 +510,7 @@ public sealed partial class FeaturedToolsView : UserControl
         WeatherTemperatureText.Text = weather is null ? "—" : $"{weather.Temperature:0}°C";
         WeatherCurrentIcon.Glyph = WeatherGlyph(weather?.Code ?? -1);
         WeatherConditionText.Text = weather is null ? "Refresh to load the forecast" : $"{weather.City} · {Condition(weather.Code)}";
-        WeatherDetailText.Text = weather is null ? "Public forecast from Open-Meteo" : $"Feels {weather.FeelsLike:0}° · Humidity {weather.Humidity}% · Wind {weather.Wind:0} km/h";
+        WeatherDetailText.Text = weather is null ? "Licensed weather service awaits deployment configuration" : $"Feels {weather.FeelsLike:0}° · Humidity {weather.Humidity}% · Wind {weather.Wind:0} km/h";
         WeatherHoursGrid.Children.Clear(); WeatherHoursGrid.ColumnDefinitions.Clear();
         WeatherDaysGrid.Children.Clear(); WeatherDaysGrid.ColumnDefinitions.Clear();
         if (weather is null)
@@ -438,7 +526,7 @@ public sealed partial class FeaturedToolsView : UserControl
             WeatherHoursGrid.ColumnDefinitions.Add(new ColumnDefinition());
             var hour = hours[index];
             var column = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center };
-            column.Children.Add(Caption(hour.Time.LocalDateTime.ToString("htt", CultureInfo.CurrentCulture), 10));
+            column.Children.Add(Caption(hour.Time.DateTime.ToString("htt", CultureInfo.CurrentCulture), 10));
             column.Children.Add(new FontIcon { Glyph = WeatherGlyph(hour.Code), FontSize = 19 });
             column.Children.Add(new TextBlock { Text = $"{hour.Temperature:0}°", FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
             Grid.SetColumn(column, index); WeatherHoursGrid.Children.Add(column);
@@ -450,7 +538,7 @@ public sealed partial class FeaturedToolsView : UserControl
             WeatherDaysGrid.ColumnDefinitions.Add(new ColumnDefinition());
             var day = days[index];
             var column = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
-            column.Children.Add(Caption(day.Date == DateOnly.FromDateTime(DateTime.Today) ? "Today" : day.Date.ToString("ddd", CultureInfo.CurrentCulture), 10));
+            column.Children.Add(Caption(day.Date == CityToday(weather) ? "Today" : day.Date.ToString("ddd", CultureInfo.CurrentCulture), 10));
             column.Children.Add(new FontIcon { Glyph = WeatherGlyph(day.Code), FontSize = 18 });
             column.Children.Add(new TextBlock { Text = $"{day.Maximum:0}°", FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
             column.Children.Add(new Border { Width = 4, Height = 13 + 14 * Math.Clamp((day.Maximum - day.Minimum) / maximum, 0, 1), CornerRadius = new CornerRadius(2), Background = Brush("#D5D5D5"), HorizontalAlignment = HorizontalAlignment.Center });
@@ -497,7 +585,9 @@ public sealed partial class FeaturedToolsView : UserControl
     {
         var progress = Math.Clamp(_viewModel.FocusProgress, 0, 1);
         if (_renderedFocusProgress == progress) return;
-        FocusArc.Data = ArcGeometry(40.5, 38.5, progress);
+        var dialSize = 81 * Math.Max(1, NativeTheme.TextScaleFactor);
+        FocusDial.Width = FocusDial.Height = dialSize;
+        FocusArc.Data = ArcGeometry(dialSize / 2, dialSize / 2 - 2, progress);
         _renderedFocusProgress = progress;
     }
 
@@ -544,12 +634,8 @@ public sealed partial class FeaturedToolsView : UserControl
         geometry.Figures.Add(figure); return geometry;
     }
 
-    private static TextBlock Caption(string text, double size = 12, bool wrap = false) => new() { Text = text, FontSize = size, Foreground = Brush("#919191"), TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap, TextTrimming = wrap ? TextTrimming.None : TextTrimming.CharacterEllipsis };
-    private static SolidColorBrush Brush(string hex)
-    {
-        var text = hex.TrimStart('#');
-        return new SolidColorBrush(ColorHelper.FromArgb(255, byte.Parse(text[..2], NumberStyles.HexNumber), byte.Parse(text.Substring(2, 2), NumberStyles.HexNumber), byte.Parse(text.Substring(4, 2), NumberStyles.HexNumber)));
-    }
+    private static TextBlock Caption(string text, double size = 12, bool wrap = false) => new() { Text = text, FontSize = Math.Max(12, size), Foreground = Brush("#919191"), TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap, TextTrimming = wrap ? TextTrimming.None : TextTrimming.CharacterEllipsis };
+    private static SolidColorBrush Brush(string hex) => NativeTheme.Brush(hex);
     private static string Clock(TimeSpan duration) => duration.TotalHours >= 1 ? duration.ToString(@"h\:mm\:ss") : duration.ToString(@"m\:ss");
     private static string Compact(long count) => count >= 1_000_000 ? $"{count / 1_000_000d:0.0}M" : count >= 1_000 ? $"{count / 1_000d:0.0}K" : count.ToString("N0");
     private static string Money(decimal value, string currency) => currency.ToUpperInvariant() switch { "USD" => "$" + value.ToString("N2"), "EUR" => "€" + value.ToString("N2"), "GBP" => "£" + value.ToString("N2"), "INR" => "₹" + value.ToString("N2"), _ => $"{currency.ToUpperInvariant()} {value:N2}" };
@@ -621,8 +707,8 @@ public sealed partial class FeaturedToolsView : UserControl
         if (!string.IsNullOrWhiteSpace(path)) await SafeAsync(() => _viewModel.ImportCodingAsync(path));
         else ImportCoding_Click(sender, e);
     }
-    private void PreviousMonth_Click(object sender, RoutedEventArgs e) { _calendarMonth = _calendarMonth.AddMonths(-1); RenderCalendar(); }
-    private void NextMonth_Click(object sender, RoutedEventArgs e) { _calendarMonth = _calendarMonth.AddMonths(1); RenderCalendar(); }
+    private async void PreviousMonth_Click(object sender, RoutedEventArgs e) { _calendarMonth = _calendarMonth.AddMonths(-1); _calendarDate = _calendarMonth; RenderCalendar(); await SafeAsync(() => _viewModel.EnsureCalendarMonthAsync(_calendarMonth)); RenderCalendar(); }
+    private async void NextMonth_Click(object sender, RoutedEventArgs e) { _calendarMonth = _calendarMonth.AddMonths(1); _calendarDate = _calendarMonth; RenderCalendar(); await SafeAsync(() => _viewModel.EnsureCalendarMonthAsync(_calendarMonth)); RenderCalendar(); }
     private void FocusToggle_Click(object sender, RoutedEventArgs e) => _viewModel.ToggleFocus();
     private void FocusReset_Click(object sender, RoutedEventArgs e) => _viewModel.ResetFocus();
     private void Countdown_Click(object sender, RoutedEventArgs e) { if (sender is Button button && int.TryParse(button.Tag?.ToString(), out var minutes)) _viewModel.StartCountdown(minutes); }
@@ -690,5 +776,11 @@ public sealed partial class FeaturedToolsView : UserControl
         try { return await dialog.ShowAsync() == ContentDialogResult.Primary ? input.Text.Trim() : null; }
         catch (Exception exception) { SetError(exception.Message); return null; }
         finally { _dialogOpen = false; }
+    }
+    public void Dispose()
+    {
+        _liveTick.Stop(); _seekDelay?.Cancel(); _volumeDelay?.Cancel();
+        _viewModel.PropertyChanged -= ViewModelChanged; _viewModel.Reminders.CollectionChanged -= RemindersChanged;
+        _seekDelay?.Dispose(); _volumeDelay?.Dispose();
     }
 }
