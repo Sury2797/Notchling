@@ -121,6 +121,7 @@ The approved public name is **Notchling**, with **A — Pixel Dragon** as its se
 | Project/XAML syntax | Parsed successfully |
 | Pixel Dragon assets | Approved A artwork extracted to a 512 × 512 RGBA master; ten ICO frames from 16–256 px; transparency and small-size previews reviewed against light/dark backgrounds |
 | Native icon lifecycle | Explicit window/tray handles, DPI refresh, Explorer recovery, and deterministic cleanup implemented; linked native source compiled; Windows visual qualification pending |
-| Renamed application Windows build/publish | Pending the branding commit's Windows CI run |
+| Renamed application Windows build/publish | Passed the real hosted WinUI Release build and self-contained publish; notices/inventory, ZIP, and artifact upload passed |
+| Hosted cross-platform workflow | Passed on the named branding revision, including Linux and Windows regression jobs |
 
-The successful remediation workflow above records its named source revision, before this branding change. It is not evidence that a pending branding build has run.
+These hosted results are recorded for source commit [`e203c2e`](https://github.com/SuryaK999/Notch-win-linux/commit/e203c2e99baaeca97ace2bf8482df49a8a02534b) in [GitHub Actions run 37185720671](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37185720671). The unsigned evaluation artifact is **`notchling-windows-x64-unpackaged`**. Native launch, perceived icon appearance, mixed-monitor interaction, and Windows 10/11 hardware qualification remain unrecorded.

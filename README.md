@@ -26,7 +26,7 @@ The **Pixel Dragon** is Notchling’s app icon and companion mark. The Windows a
 
 ## Current status
 
-**Active development · evaluation builds available · paid launch pending.** The remediation baseline [builds and publishes in Windows CI](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37180992149). Local regression checks and Windows compilation are recorded in the [validation notes](docs/validation-notes.md). Native desktop qualification, publisher signing, and production commercial configuration remain launch requirements.
+**Active development · evaluation builds available · paid launch pending.** The Notchling branding revision [builds and publishes in Windows CI](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37185720671). Regression checks and Windows compilation are recorded in the [validation notes](docs/validation-notes.md). Native desktop qualification, publisher signing, and production commercial configuration remain launch requirements.
 
 | Area | Available now | Before public release |
 | --- | --- | --- |
@@ -220,7 +220,7 @@ flowchart LR
 
 One desktop process hosts the app; the billing server is deployed separately and never runs inside it. The [architecture guide](docs/architecture.md) explains scheduling, ownership, cancellation, and storage boundaries.
 
-The recorded remediation baseline passed **202 automated checks** and the real Windows WinUI build/publish. The [validation record](docs/validation-notes.md) ties those results to named revisions and explains the simulated checks. The [audit](flaws.md) preserves original findings and records their repairs and remaining acceptance work.
+The recorded remediation baseline passed **202 automated checks**; the Notchling branding revision also passed the cross-platform workflow and real Windows WinUI build/publish. The [validation record](docs/validation-notes.md) ties those results to named revisions and explains the simulated checks. The [audit](flaws.md) preserves original findings and records their repairs and remaining acceptance work.
 
 Before paid distribution, qualify the same signed artifact separately on Windows 10/11, measure modest-hardware responsiveness, verify install/upgrade/update recovery, exercise Stripe/SMTP/weather staging, and approve publisher/support/customer policies. For a basic resource sample:
 
