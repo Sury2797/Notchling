@@ -172,6 +172,10 @@ try {
         throw 'Notchling requires Windows 10 22H2 or Windows 11 on an x64 PC.'
     }
     if (-not [Environment]::Is64BitProcess) { throw 'Setup must run the 64-bit Windows component check. Restart Setup on your x64 PC.' }
+    # A PowerShell 7 parent can pass its module search path into Windows PowerShell.
+    # Import the Windows PowerShell security module explicitly so certificate
+    # verification never resolves an incompatible PowerShell 7 binary module.
+    Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -Force -ErrorAction Stop
     Add-Type -AssemblyName System.Net.Http
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $dotNetReady = Test-DotNetRuntime
