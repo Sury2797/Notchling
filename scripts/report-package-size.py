@@ -61,6 +61,8 @@ def main() -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report, indent=2))
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::notice title=Measured Notchling package::payloadBytes={report['payloadBytes']}; installerBytes={report['installerBytes']}; shared runtimes bundled={bool(report['bundledRuntimeFiles'])}")
         if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
             rows = ["## Notchling package measurements", "", "| Measurement | Actual bytes | MiB |", "| --- | ---: | ---: |",
                     f"| Installed app files | {report['payloadBytes']} | {report['payloadBytes'] / 1048576:.2f} |"]

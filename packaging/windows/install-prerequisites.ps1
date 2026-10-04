@@ -65,6 +65,7 @@ function Test-WindowsAppRuntime {
     $packages = @(Get-AppxPackage -Name '*Win*AppRuntime*' -ErrorAction Stop)
     $frameworkReady = $false; $mainReady = $false; $singletonReady = $false; $ddlmReady = $false
     foreach ($package in $packages) {
+        Write-SetupLog "Observed runtime package: $($package.Name); family=$($package.PackageFamilyName); version=$($package.Version); architecture=$($package.Architecture); status=$($package.Status)."
         if ([string]$package.Architecture -ne 'X64' -or [Version]$package.Version -lt $minimumWindowsAppRuntimeVersion -or
             [string]$package.Status -ne 'Ok') { continue }
         if ($package.PackageFamilyName -eq $windowsAppRuntimeFamily) { $frameworkReady = $true }
@@ -73,6 +74,7 @@ function Test-WindowsAppRuntime {
         elseif ($package.PackageFamilyName -match '^Microsoft\.WinAppRuntime\.DDLM\.8000\.\d+\.\d+\.\d+-x6_8wekyb3d8bbwe$') { $ddlmReady = $true }
     }
     $ready = $frameworkReady -and $mainReady -and $singletonReady -and $ddlmReady
+    Write-SetupLog "Runtime checks: framework=$frameworkReady; main=$mainReady; singleton=$singletonReady; DDLM=$ddlmReady."
     if ($ready) { Write-SetupLog "Windows App Runtime 1.8 framework, Main, Singleton and DDLM are registered for this user (x64, minimum $minimumWindowsAppRuntimeVersion)." }
     return $ready
 }

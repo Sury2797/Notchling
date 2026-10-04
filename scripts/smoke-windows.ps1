@@ -236,6 +236,9 @@ namespace NotchlingSmoke {
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($reportFullPath)) | Out-Null
     $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $reportFullPath -Encoding utf8
     [pscustomobject]$report | Format-List
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        Write-Output "::notice title=Installed Windows smoke result::Succeeded=$($report.Succeeded); StartupMs=$($report.FirstVisibleWindowMilliseconds); ResponsiveSamples=$($report.ResponsiveSamples); WorkingSetMiB=$($report.AverageWorkingSetMiB); PrivateMiB=$($report.AveragePrivateMiB); CpuAllCoresPercent=$($report.CpuPercentAllCores); SamplingSeconds=$($report.MeasurementSeconds)"
+    }
     if ($env:GITHUB_STEP_SUMMARY) {
         @"
 ## Installed Windows application smoke test
