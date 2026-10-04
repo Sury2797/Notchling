@@ -1,7 +1,7 @@
 <Window x:Class="Notch.Windows.MainWindow"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-  Title="Notchling — Desktop companion">
+  Title="Notchling — Desktop notch">
   <Grid x:Name="RootGrid" Background="{ThemeResource NotchBackgroundBrush}" KeyDown="OnKeyDown"
     PointerEntered="OnPointerEntered" PointerExited="OnPointerExited">
     <Grid.RowDefinitions>

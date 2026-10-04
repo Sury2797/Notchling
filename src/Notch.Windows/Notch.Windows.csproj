@@ -26,7 +26,7 @@
     <Title>Notchling</Title>
     <AssemblyTitle>Notchling</AssemblyTitle>
     <Company>SuryaK999</Company>
-    <Description>Notchling — a native desktop companion for Windows.</Description>
+    <Description>Notchling — a native desktop notch for Windows.</Description>
     <Authors>SuryaK999</Authors>
     <Copyright>Copyright © 2026 SuryaK999</Copyright>
   </PropertyGroup>

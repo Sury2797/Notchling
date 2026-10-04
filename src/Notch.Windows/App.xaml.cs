@@ -17,6 +17,7 @@ public partial class App : Application
         {
             var existing = FindWindow(null, ProductIdentity.WindowTitle);
             // An earlier version can still own the stable single-instance mutex during an upgrade.
+            if (existing == 0) existing = FindWindow(null, "Notchling — Desktop companion");
             if (existing == 0) existing = FindWindow(null, "Notch — Desktop companion");
             if (existing != 0) { ShowWindow(existing, 4); PostMessage(existing, 0x8001, 0, 0); }
             Exit(); return;

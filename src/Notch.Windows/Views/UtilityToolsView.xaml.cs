@@ -359,12 +359,12 @@ public sealed partial class UtilityToolsView : UserControl
         var identity = new Grid { ColumnSpacing = 14 };
         identity.ColumnDefinitions.Add(new() { Width = new GridLength(44) });
         identity.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
-        var mascot = new Image { Source = new BitmapImage(new Uri("ms-appx:///Assets/Notchling.png")), Width = 44, Height = 44, Stretch = Stretch.Uniform };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAccessibilityView(mascot, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
-        identity.Children.Add(mascot);
+        var appIcon = new Image { Source = new BitmapImage(new Uri("ms-appx:///Assets/Notchling.png")), Width = 44, Height = 44, Stretch = Stretch.Uniform };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAccessibilityView(appIcon, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+        identity.Children.Add(appIcon);
         var about = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
         about.Children.Add(Text(ProductIdentity.DisplayName, 20));
-        about.Children.Add(Text("Native desktop companion · " + typeof(App).Assembly.GetName().Version?.ToString(3), 12, true));
+        about.Children.Add(Text("Native desktop notch · " + typeof(App).Assembly.GetName().Version?.ToString(3), 12, true));
         Grid.SetColumn(about, 1); identity.Children.Add(about); ContentStack.Children.Add(Card(identity));
         ContentStack.Children.Add(Row(Button("Check for verified updates", _vm.CheckForUpdatesAsync), Button("Release page", () => OpenLink("https://github.com/SuryaK999/Notch-win-linux/releases"))));
         ContentStack.Children.Add(Text("Behavior", 15));

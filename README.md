@@ -4,9 +4,9 @@
 
 <h1 align="center">Notchling</h1>
 
-<p align="center"><strong>Your desktop’s little companion.</strong></p>
+<p align="center"><strong>A dynamic island for your desktop.</strong></p>
 
-<p align="center">Music, focus, notes, and useful controls in a compact native Windows notch.</p>
+<p align="center">A native Windows notch for media, focus, notes, and everyday controls. Linux support is planned.</p>
 
 <p align="center">
   <a href="https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml"><img src="https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml/badge.svg" alt="Windows build and cross-platform checks" /></a>
@@ -20,9 +20,9 @@
   <a href="#documentation">Documentation</a>
 </p>
 
-Notchling keeps everyday tools close without filling your desktop. Its compact strip opens into the panel you need: change a track, start a focus session, capture a thought, reach a file, or check your system. Move between tools with the dock, pin a panel while you work, and let it collapse when you’re finished.
+Notchling is a native desktop notch inspired by Dynamic Island. Its compact strip at the top of your display expands into the panel you need: change a track, start a focus session, capture a thought, reach a file, or check your system. Live activities show timers and reminders. Move between tools with the dock, pin a panel while you work, and let it collapse when you’re finished.
 
-The **Pixel Dragon** is Notchling’s app icon and companion mark. The Windows application uses **C#, WinUI 3, and Windows App SDK**, with native services behind a portable .NET core. Windows 10 and Windows 11 are equal release targets; a Linux desktop application follows later.
+The **Pixel Dragon** is Notchling’s app icon. The Windows application uses **C#, WinUI 3, and Windows App SDK**, with native services behind a portable .NET core. Windows 10 and Windows 11 are equal release targets; a Linux desktop application follows later.
 
 ## Current status
 

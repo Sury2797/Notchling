@@ -4,5 +4,5 @@ namespace Notch.Core;
 public static class ProductIdentity
 {
     public const string DisplayName = "Notchling";
-    public const string WindowTitle = DisplayName + " — Desktop companion";
+    public const string WindowTitle = DisplayName + " — Desktop notch";
 }

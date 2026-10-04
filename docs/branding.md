@@ -2,23 +2,23 @@
 
 **Product name:** Notchling
 
-**Companion mark:** Pixel Dragon
+**App icon:** Pixel Dragon
 
-**Tagline:** Your desktop’s little companion.
+**Tagline:** A dynamic island for your desktop.
 
-Notchling is a native desktop companion for music, focus, capture, and everyday controls. Its identity combines a compact black dragon with expressive mint eyes and a warm, pale icon tile. The approved artwork is **A — Pixel Dragon** from the selected concept sheet.
+Notchling is a native desktop notch inspired by Dynamic Island: a compact top-edge surface that expands into media, focus, capture, and everyday controls, with live activities for timers and reminders. Windows is the first platform; a native Linux application is planned. The product’s visual identity uses a compact black dragon with expressive mint eyes and a warm, pale icon tile. The approved artwork is **A — Pixel Dragon** from the selected concept sheet.
 
 ## Name and artwork
 
-Write **Notchling** as one word, with an initial capital. Use **Notchling Free** and **Notchling Premium** for the product tiers. Pixel Dragon names the mascot; it is not a separate product or subscription.
+Write **Notchling** as one word, with an initial capital. Use **Notchling Free** and **Notchling Premium** for the product tiers. Pixel Dragon names the app artwork. Product copy should lead with the desktop notch, expandable controls, and live activities; the artwork does not imply pet-care features or a virtual-pet product.
 
-The app icon is [Notchling.png](../src/Notch.Windows/Assets/Notchling.png). Its Windows counterpart is [Notchling.ico](../src/Notch.Windows/Assets/Notchling.ico). The icon belongs on the executable, window, taskbar, tray, installer, README, compact launcher, and Settings identity card. Preserve the mascot’s proportions and eye placement. Keep decorative artwork away from editable content and essential controls.
+The app icon is [Notchling.png](../src/Notch.Windows/Assets/Notchling.png). Its Windows counterpart is [Notchling.ico](../src/Notch.Windows/Assets/Notchling.ico). The icon belongs on the executable, window, taskbar, tray, installer, README, compact launcher, and Settings identity card. Preserve the dragon’s proportions and eye placement. Keep decorative artwork away from editable content and essential controls.
 
-The icon’s light tile gives the dark silhouette a clear boundary. Small application controls use the same mascot artwork with accessible labels on their parent controls; the image itself does not add a duplicate screen-reader announcement.
+The icon’s light tile gives the dark silhouette a clear boundary. Small application controls use the same app artwork with accessible labels on their parent controls; the image itself does not add a duplicate screen-reader announcement.
 
 The 512 × 512 RGBA master isolates the approved tile from the concept sheet, preserves the character’s proportions, and has transparent outer corners. The Windows ICO includes 16, 20, 24, 32, 40, 48, 64, 96, 128, and 256 px frames. The window and notification area select native sizes for the current display scale and refresh when DPI changes. Explorer restart recovery keeps the current tray icon.
 
-To regenerate the ICO from the approved PNG, run `python3 scripts/export-app-icon.py` with Pillow installed in the development environment. Pillow is not an application dependency. Review shell-size previews against light and dark backgrounds before replacing the master; do not substitute a different mascot from the concept sheet.
+To regenerate the ICO from the approved PNG, run `python3 scripts/export-app-icon.py` with Pillow installed in the development environment. Pillow is not an application dependency. Review shell-size previews against light and dark backgrounds before replacing the master; do not substitute different artwork from the concept sheet.
 
 ## Product and distribution names
 

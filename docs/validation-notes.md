@@ -110,7 +110,7 @@ The linked native-service tests use platform doubles and the source projection c
 
 ## Notchling branding verification — 4 October 2026
 
-The approved public name is **Notchling**, with **A — Pixel Dragon** as its selected mascot. Source branding, public window/tray labels, application metadata, installer/update filenames, billing mail/return text, README and product documentation were updated together. Existing workspace, credential, entitlement and installer identities remain compatible.
+The approved public name is **Notchling**, with **A — Pixel Dragon** as its selected app icon. Source branding, public window/tray labels, application metadata, installer/update filenames, billing mail/return text, README and product documentation were updated together. Existing workspace, credential, entitlement and installer identities remain compatible.
 
 | Check | Recorded result / limit |
 | --- | --- |
