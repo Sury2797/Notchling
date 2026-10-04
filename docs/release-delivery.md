@@ -1,21 +1,31 @@
 # Notchling signed Windows delivery
 
-The release path targets **Windows 10 22H2/build 19045 x64 and supported Windows 11 x64 releases equally**. Ordinary build CI produces an unsigned evaluation ZIP. The manual [release workflow](../.github/workflows/release.yml) prepares a signed installer, publisher notice bundle, SPDX inventory, checksums and a GitHub **draft** release. No signing credentials, commercial domain or native QA results are supplied by this repository.
+The release path targets **Windows 10 22H2/build 19045 x64 and supported Windows 11 x64 releases equally**. Ordinary build CI produces one unsigned evaluation setup EXE as the normal user download, plus an optional app-only folder artifact for advanced evaluation. GitHub Actions wraps each artifact in a download ZIP; extract the installer artifact once and run Setup. The manual [release workflow](../.github/workflows/release.yml) prepares a signed installer, publisher notice bundle, SPDX inventory, checksums and a GitHub **draft** release. No signing credentials, commercial domain or native QA results are supplied by this repository.
+
+## Shared runtime requirements
+
+Setup detects the [Windows x64 .NET 10 Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) and [Windows x64 Windows App SDK 1.8 runtime](https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads). It reuses compatible installed runtimes, or downloads the official installers and installs the missing prerequisites. Internet access is needed when a runtime is missing; the .NET installer may request administrator approval. The pinned Windows App SDK package is `1.8.260921001`; its required runtime package version is `8000.994.2142.0` or newer in the 1.8 line. Developer SDKs are unnecessary for end users.
+
+The setup EXE contains the application payload without bundling .NET or Windows App SDK runtimes. First-time runtime downloads are additional to the installer’s own download size. Later app installation reuses compatible shared runtimes. Framework-dependent publishing (`SelfContained=false`, `WindowsAppSDKSelfContained=false`) removes repeated runtime copies from the app; it does not remove the runtime dependency.
+
+The optional app-only folder contains the launcher, app assemblies, assets, and dependency notices. Keep them together. This advanced path requires the shared runtimes to be installed already; it does not perform Setup’s prerequisite installation.
+
+CI must record setup EXE/download and extracted application sizes, prove bundled runtime files are absent, and verify the app against the matching installed shared runtimes. Missing-runtime download/install, cancellation, offline errors, and clean-machine launch still require [native qualification](native-qualification.md). The evaluation setup is explicitly unsigned; production signing remains mandatory for public release and updates.
 
 ## Configure signing and prepare a candidate
 
 1. Obtain an appropriate trusted publisher code-signing certificate. Store its PFX as `NOTCH_SIGNING_PFX_BASE64` and password as `NOTCH_SIGNING_PFX_PASSWORD` in the GitHub `production` environment. Restrict that environment and avoid exposing secrets to untrusted contributions.
-2. On Windows with PowerShell 7, .NET 10, Windows SDK and Inno Setup 6, run `./scripts/build-release.ps1 -Version 0.2.0`. The script runs checks, publishes self-contained x64, signs project-owned binaries and installer/uninstaller, verifies signatures and refuses missing credentials. It preserves third-party publisher signatures.
+2. On Windows with PowerShell 7, .NET 10 SDK, Windows SDK and Inno Setup 6, run `./scripts/build-release.ps1 -Version 0.2.0`. The script runs checks, publishes framework-dependent x64 without bundled runtimes, signs project-owned binaries and installer/uninstaller, verifies signatures and refuses missing credentials. It preserves third-party publisher signatures.
 3. `bundle-notices.py --strict` copies the **actual publisher text** from the exact restored dependency/runtime packs. It includes the installed Inno Setup compiler/engine license and provenance too, and produces `ThirdPartyNotices/`, `publish-inventory.json` and `sbom.spdx.json`; missing runtime-candidate documents stop a signed release. The basename mapping is explicitly a candidate mapping and needs distribution review.
 4. Complete [native qualification](native-qualification.md) on both OS targets for this exact installer. Complete commercial setup and approved customer policies. Then publish the reviewed draft as a stable GitHub release with its installer, manifest, checksums and inventory. A draft never updates the stable `/releases/latest` channel.
 
 Use version numbers consistently. The release script validates `major.minor.patch`, applies it to assembly/file metadata, names installer assets and writes the update manifest. Do not reuse an already-published version for different bits.
 
-The desktop entry point is `Notchling.Windows.exe`, and the signed installer is `Notchling-<version>-windows-x64-setup.exe`. Evaluation CI uploads `notchling-windows-x64-unpackaged`; the signed-candidate workflow uploads `notchling-signed-release-candidate`. Repository paths and `NOTCH_*` configuration/secret names remain stable.
+The desktop entry point is `Notchling.Windows.exe`. Evaluation CI uploads `notchling-windows-x64-installer` containing `Notchling-<version>-windows-x64-evaluation-setup.exe`; its optional `notchling-windows-x64-app-only` artifact contains the application folder directly. The signed installer is `Notchling-<version>-windows-x64-setup.exe`, and the signed-candidate workflow uploads `notchling-signed-release-candidate`. Repository paths and `NOTCH_*` configuration/secret names remain stable.
 
 ## Installation, upgrade and rollback
 
-The Inno Setup installer runs per-user without admin rights. Files live under `%LOCALAPPDATA%\Programs\Notch\app\<version>`. Shortcuts point to that version. Setup refuses to install/uninstall while the application mutex is present, rather than forcibly killing unsaved work. The existing version directory stays available for recovery; failed or cancelled installation uses Inno Setup rollback.
+Notchling's app installation is per-user and does not require administrator rights; installing a missing shared .NET runtime can require a separate UAC approval. Files live under `%LOCALAPPDATA%\Programs\Notch\app\<version>`. Shortcuts point to that version. Setup refuses to install/uninstall while the application mutex is present, rather than forcibly killing unsaved work. The existing version directory stays available for recovery; failed or cancelled app installation uses Inno Setup rollback. Installed shared runtimes are independently managed and are not removed by app rollback or uninstall.
 
 The compatible installation folder and AppId are deliberately retained under the Notchling brand. Setup uses Notchling for displayed names and shortcuts; retaining the identity avoids a second unrelated installation during an evaluation-build upgrade.
 

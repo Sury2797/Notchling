@@ -31,7 +31,7 @@ The **Pixel Dragon** is Notchling’s app icon. The Windows application uses **C
 | Area | Available now | Before public release |
 | --- | --- | --- |
 | Desktop | Native Windows app, local tools, optional connections, adaptive panels, reduced motion | Independent Windows 10/11 interaction, accessibility, and hardware profiling |
-| Distribution | Unsigned evaluation ZIP; signed per-user installer and verified-update tooling | Publisher certificate and clean install/upgrade/update qualification |
+| Distribution | Single evaluation setup EXE; shared runtimes installed when missing; signed release and verified-update tooling | Installer acceptance, publisher certificate, and clean install/upgrade/update qualification |
 | Subscription | Release Free/Premium enforcement and configurable billing service | Production domain, Stripe, email delivery, customer policies, and sandbox acceptance |
 | Linux | Portable core and automated checks | Native interface and Linux operating-system adapters |
 
@@ -129,10 +129,14 @@ Workspace limits include a 10 MB serialized file ceiling, bounded text, and up t
 ### Evaluation builds
 
 1. Open [GitHub Actions](https://github.com/SuryaK999/Notch-win-linux/actions/workflows/build.yml) and choose a successful run.
-2. Download **`notchling-windows-x64-unpackaged`**. GitHub may require sign-in.
-3. Extract the complete folder and run **`Notchling.Windows.exe`** on a compatible Windows machine.
+2. Download **`notchling-windows-x64-installer`**. GitHub may require sign-in; extract its download ZIP once.
+3. Run **`Notchling-0.2.0-windows-x64-evaluation-setup.exe`**, then open **Notchling** from the Start menu.
 
-Keep the app and its dependencies together. The publish configuration includes the required runtimes; clean-machine launch remains part of release QA. Unsigned evaluation builds are for review and development under the source license.
+**One installer is the normal download.** Setup installs the app and checks for the shared .NET and Windows App SDK runtimes. If either is missing, Setup downloads its official installer and installs it; an Internet connection is required, and the .NET installer may request administrator approval. Existing compatible runtimes are reused. No SDK, developer tools, or manual DLL copying is required.
+
+The app installer contains application files, assets, and notices rather than repeated copies of those shared runtimes. First-time prerequisite downloads are additional to its size; later app updates reuse the installed runtimes. The new installer’s size and setup behavior require fresh acceptance evidence—earlier CI links describe the previous self-contained builds. This evaluation installer is unsigned and intended for review and development under the source license.
+
+An optional **`notchling-windows-x64-app-only`** artifact provides the extracted application folder for advanced evaluation. It requires the shared runtimes to be installed already; keep its files together and run `Notchling.Windows.exe`. See [Windows support](docs/windows-support.md) for exact prerequisites.
 
 The [signed release workflow](.github/workflows/release.yml) prepares a per-user installer, publisher notices/SBOM, checksums, update manifest, and a reviewable release draft. Stable downloads will appear under [Releases](https://github.com/SuryaK999/Notch-win-linux/releases) after qualification and commercial setup are complete.
 
@@ -166,13 +170,13 @@ dotnet run --project src/Notch.Windows/Notch.Windows.csproj --configuration Debu
 
 Debug exposes labeled development access. Use Release to verify Free defaults and configured signed Premium access.
 
-### Publish a self-contained folder
+### Publish an app-only folder
 
 ```powershell
-dotnet publish src/Notch.Windows/Notch.Windows.csproj --configuration Release --runtime win-x64 --self-contained true -p:Platform=x64 -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:PublishSingleFile=false --output artifacts/notchling-windows-x64
+dotnet publish src/Notch.Windows/Notch.Windows.csproj --configuration Release --runtime win-x64 --self-contained false -p:Platform=x64 -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=false -p:PublishReadyToRun=false -p:PublishSingleFile=false --output artifacts/notchling-windows-x64
 ```
 
-Publish creates a folder, rather than a single executable. The build workflow adds notices/SBOM and packages the folder for evaluation. Production signing and billing activation remain separate.
+Publish creates a framework-dependent application folder using the shared runtimes documented in [Windows support](docs/windows-support.md). CI builds the evaluation setup EXE from this folder and retains an optional app-only folder artifact. The default omits bundled runtimes and ReadyToRun expansion; it does not enable trimming or Native AOT for the WinUI application. Production signing and billing activation remain separate.
 
 ### Run portable checks on Windows or Linux
 

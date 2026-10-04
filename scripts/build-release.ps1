@@ -9,7 +9,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if (-not $IsWindows) { throw 'A signed Windows release must be built on Windows.' }
 $root = Split-Path -Parent $PSScriptRoot
-$publish = Join-Path $root 'artifacts/notchling-windows-x64'
+$publish = Join-Path $root ('artifacts/publish-' + [Guid]::NewGuid().ToString('N'))
 $release = [IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
 $temporaryPfx = Join-Path ([IO.Path]::GetTempPath()) ('notchling-signing-' + [Guid]::NewGuid().ToString('N') + '.pfx')
 $certificate = $null
@@ -47,7 +47,7 @@ try {
     Invoke-Checked 'dotnet' @('run', '--project', (Join-Path $root 'tests/Notch.Commerce.Tests/Notch.Commerce.Tests.csproj'), '--configuration', 'Release')
     Invoke-Checked 'dotnet' @('run', '--project', (Join-Path $root 'tests/Notch.ViewModel.Tests/Notch.ViewModel.Tests.csproj'), '--configuration', 'Debug')
     Invoke-Checked 'dotnet' @('run', '--project', (Join-Path $root 'tests/Notch.ViewModel.Tests/Notch.ViewModel.Tests.csproj'), '--configuration', 'Release')
-    Invoke-Checked 'dotnet' @('publish', (Join-Path $root 'src/Notch.Windows/Notch.Windows.csproj'), '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'true', '-p:Platform=x64', '-p:WindowsPackageType=None', '-p:WindowsAppSDKSelfContained=true', '-p:PublishSingleFile=false', "-p:Version=$Version", "-p:FileVersion=$Version.0", "-p:AssemblyVersion=$Version.0", '--output', $publish)
+    Invoke-Checked 'dotnet' @('publish', (Join-Path $root 'src/Notch.Windows/Notch.Windows.csproj'), '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'false', '-p:Platform=x64', '-p:WindowsPackageType=None', '-p:WindowsAppSDKSelfContained=false', '-p:PublishSingleFile=false', "-p:Version=$Version", "-p:FileVersion=$Version.0", "-p:AssemblyVersion=$Version.0", '--output', $publish)
     # Sign only project-owned binaries; preserve publisher signatures on dependencies.
     foreach ($file in @('Notchling.Windows.exe', 'Notchling.Windows.dll', 'Notch.Core.dll')) {
         $path = Join-Path $publish $file
@@ -58,10 +58,12 @@ try {
     $installerVersion = (Get-Item -LiteralPath $Iscc).VersionInfo.FileVersion
     if (-not (Test-Path $installerLicense)) { throw 'The installed Inno Setup publisher license.txt must be included in release notices.' }
     Invoke-Checked 'python' @((Join-Path $root 'scripts/bundle-notices.py'), '--publish', $publish, '--assets', (Join-Path $root 'src/Notch.Windows/obj/project.assets.json'), '--strict', '--installer-license', $installerLicense, '--installer-version', $installerVersion)
+    Invoke-Checked 'python' @((Join-Path $root 'scripts/report-package-size.py'), '--publish', $publish, '--require-app-only', '--output', (Join-Path $release 'package-size.json'))
     $signCommand = '"' + $signtool + '" sign /s My /sha1 ' + $certificate.Thumbprint + ' /fd SHA256 /tr ' + $TimestampUrl + ' /td SHA256 $f'
     Invoke-Checked $Iscc @("/DAppVersion=$Version", "/DPublishDirectory=$publish", "/DReleaseDirectory=$release", "/Snotch=$signCommand", (Join-Path $root 'packaging/windows/Notch.iss'))
     $installer = Join-Path $release "Notchling-$Version-windows-x64-setup.exe"
     Assert-Signed $installer $certificate.Thumbprint
+    Invoke-Checked 'python' @((Join-Path $root 'scripts/report-package-size.py'), '--publish', $publish, '--require-app-only', '--installer', $installer, '--output', (Join-Path $release 'package-size.json'))
     $publicKeyPin = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($certificate.GetPublicKey())).ToLowerInvariant()
     $manifest = [ordered]@{
         schemaVersion = 1
@@ -86,6 +88,7 @@ try {
     Write-Output "Signed release prepared in $release. Publisher public-key pin: $publicKeyPin"
 }
 finally {
+    Remove-Item -LiteralPath $publish -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $temporaryPfx -Force -ErrorAction SilentlyContinue
     if ($certificate -and $certificate.Thumbprint -notin $previousCertificates) { Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue }
 }

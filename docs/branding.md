@@ -27,10 +27,14 @@ To regenerate the ICO from the approved PNG, run `python3 scripts/export-app-ico
 | App/window and Windows product metadata | Notchling |
 | Windows application files | `Notchling.Windows.exe`, `Notchling.Windows.dll` |
 | Start menu and installed-app listing | Notchling |
-| Evaluation artifact | `notchling-windows-x64-unpackaged` |
+| Normal evaluation artifact | `notchling-windows-x64-installer` |
+| Evaluation installer | `Notchling-<version>-windows-x64-evaluation-setup.exe` |
+| Optional application-folder artifact | `notchling-windows-x64-app-only` |
 | Signed installer | `Notchling-<version>-windows-x64-setup.exe` |
 | Stable update manifest | `notchling-update.json` |
 | Pricing | Free; Premium at US$2/month after commercial activation |
+
+Lead ordinary download instructions with the single setup EXE. Setup handles the shared-runtime check and installation; do not send customers through developer build steps or manual DLL copying. App-only describes the application payload without bundled .NET or Windows App SDK runtimes. It does not eliminate shared runtime dependencies or the initial prerequisite downloads documented in [Windows support](windows-support.md). Historical CI records retain the previous artifact names and distribution mode.
 
 ## Continuity for existing installations
 

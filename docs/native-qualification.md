@@ -6,6 +6,8 @@
 | --- | --- |
 | App version / commit | Pending |
 | Signed installer SHA-256 / workflow URL | Pending |
+| Setup EXE size / download ZIP size / extracted application size | Pending |
+| Installed .NET runtime / Windows App SDK runtime package versions | Pending |
 | OS edition, version and build | Pending |
 | CPU / GPU / driver / RAM | Pending |
 | Monitors / resolutions / refresh rates / DPI | Pending |
@@ -16,7 +18,10 @@ Run every row on Windows 10 22H2 x64 and separately on each Windows 11 release s
 
 | Area | Steps | Expected result | Result / evidence |
 | --- | --- | --- | --- |
-| Clean install | Standard user; no .NET/WinUI developer tools; install, launch, quit, relaunch | Runtimes included; one usable app/tray instance | Pending |
+| Missing prerequisites | Clean standard-user Windows machine; no .NET 10/Windows App SDK 1.8 runtimes; run Setup with Internet | Setup detects missing runtimes, downloads/installs official installers, handles required UAC, and launches one usable app/tray instance without developer tools | Pending |
+| Prerequisite interruption | Missing runtimes; no Internet; cancel download/install; deny UAC; rerun Setup | Useful failure/retry state; no broken Notchling upgrade; installed shared runtimes remain independently managed | Pending |
+| Existing prerequisites | Compatible shared x64 runtimes installed; run Setup, launch, quit, relaunch | No repeated runtime download; one usable app/tray instance; app payload has no bundled runtime files | Pending |
+| Advanced app-only folder | Extract optional app-only artifact with prerequisites installed; repeat on a machine without them | Launches with shared runtimes; missing-runtime state is identifiable when Setup is bypassed | Pending |
 | Branding | Inspect app/taskbar/tray, Start menu, installer and Settings at small/high-DPI sizes | Notchling name and Pixel Dragon icon; readable small icon; no stale displayed product name | Pending |
 | Upgrade | Create notes/scratchpad/reminders; install newer signed candidate | Save/quit prompt; data and credentials preserved | Pending |
 | Interruption | Cancel setup; interrupt download; wrong hash and untrusted certificate | Existing app remains usable; update refused; no data loss | Pending |

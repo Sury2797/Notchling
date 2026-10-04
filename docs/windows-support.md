@@ -11,6 +11,19 @@ Windows 10 and Windows 11 are **equal release targets**. The supported desktop a
 
 The Windows API target and `TargetPlatformMinVersion` remain `10.0.19041` so code compiles against the common Windows 10-era API surface. The supported product baseline is recorded separately as `MinimumSupportedWindowsBuild=19045`, and the installer refuses older builds. An API floor or successful build is not proof of interactive compatibility. A Windows Server GitHub runner is a build host, not a consumer Windows 10/11 test machine.
 
+## Runtime prerequisites
+
+The default Windows download is a single setup EXE. Its application payload is framework-dependent: it excludes bundled .NET and Windows App SDK runtimes and uses these shared system prerequisites:
+
+| Prerequisite | Official installer |
+| --- | --- |
+| .NET 10 Runtime, Windows x64 (`Microsoft.NETCore.App`) | [.NET 10 downloads](https://dotnet.microsoft.com/en-us/download/dotnet/10.0); select **.NET Runtime** |
+| Windows App SDK 1.8 runtime, Windows x64 | [Windows App SDK downloads](https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads); current **1.8 runtime installer** |
+
+The application pins Windows App SDK package `1.8.260921001`, requiring runtime package version `8000.994.2142.0` or newer in the 1.8 line. Setup checks these prerequisites and downloads/installs their official installers only when missing. Internet access is needed for those downloads; the .NET installer may request administrator approval. Existing compatible runtimes are reused by subsequent Notchling installs. No .NET SDK, Visual Studio, or development workload is required to use the app.
+
+First-install prerequisite downloads are additional to the app installer size. Record download, cancellation, offline failure, and successful launch separately on Windows 10 and Windows 11. An advanced app-only folder artifact bypasses Setup and requires the shared runtimes already installed; keep that folder's DLLs, assets, and launcher together.
+
 The overlay, shortcuts, media controls, fonts, accessibility, installation and resource behavior must pass independently on both systems for the **same signed artifact**. Windows 11-only cosmetic APIs must have harmless Windows 10 fallbacks. Use Segoe UI and a guaranteed monospace font rather than relying on developer-installed fonts. No platform may lose basic controls because a cosmetic feature is unavailable.
 
 ## Qualification record
@@ -21,10 +34,10 @@ The cloud execution host is Linux and cannot launch WinUI. Automated source chec
 
 ## Installation and recovery
 
-The release candidate installer is per-user, requires no administrator privileges and installs versioned application files under `%LOCALAPPDATA%\Programs\Notch\app\<version>`. It refuses to continue while Notchling is running, so a user can save and quit normally. It never forcibly terminates a process to replace files.
+Notchling's app installation is per-user, requires no administrator privileges, and installs versioned application files under `%LOCALAPPDATA%\Programs\Notch\app\<version>`. Installing a missing shared .NET runtime can require separate administrator approval. Setup refuses to continue while Notchling is running, so a user can save and quit normally. It never forcibly terminates a process to replace files.
 
 Workspace data stays in `%LOCALAPPDATA%\Notch`; credentials stay in Windows Credential Locker. Upgrade and uninstall retain both. Remove credentials in Settings and export data before an intentional reset. An older installed app directory remains available as a recovery option; restore a workspace backup before reverting if a future release changes its schema. Only use a prior signed installer when its published release notes say the data schema is compatible.
 
 Notchling's executable is `Notchling.Windows.exe`. The legacy installation/data directory names, vault identities and installer AppId remain compatible; they do not indicate a second product or require manual migration.
 
-A failed/cancelled setup uses Inno Setup's install rollback. Clean installation, interruption, rollback, repeat upgrade and uninstall are **required tests**, not verified outcomes yet. Native installers and updates must be signed; the release script refuses unsigned output.
+A failed/cancelled app setup uses Inno Setup's install rollback. Shared prerequisites installed beforehand are independently managed Microsoft runtimes and are not removed when Notchling is cancelled or uninstalled. Clean installation, interruption, rollback, repeat upgrade and uninstall are **required tests**, not verified outcomes yet. Evaluation Setup is explicitly unsigned. Production installers and updates must be signed; the release script refuses unsigned production output.

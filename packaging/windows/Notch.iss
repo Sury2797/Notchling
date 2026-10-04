@@ -31,13 +31,19 @@ UninstallDisplayName=Notchling
 LicenseFile=..\..\docs\product-terms.md
 InfoBeforeFile=..\..\docs\privacy.md
 OutputDir={#ReleaseDirectory}
+#ifdef EvaluationBuild
+OutputBaseFilename=Notchling-{#AppVersion}-windows-x64-evaluation-setup
+#else
 OutputBaseFilename=Notchling-{#AppVersion}-windows-x64-setup
+#endif
 Compression=lzma2
 SolidCompression=yes
 CloseApplications=no
 RestartApplications=no
+#ifndef EvaluationBuild
 SignTool=notch
 SignedUninstaller=yes
+#endif
 Uninstallable=yes
 ; Keep the established installation directory and AppId for upgrade continuity.
 UsePreviousAppDir=yes
@@ -45,6 +51,7 @@ AppMutex=Notch.Desktop.Running
 
 [Files]
 Source: "{#PublishDirectory}\*"; DestDir: "{app}\app\{#AppVersion}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "install-prerequisites.ps1"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\Notchling"; Filename: "{app}\app\{#AppVersion}\Notchling.Windows.exe"; WorkingDir: "{app}\app\{#AppVersion}"
@@ -61,10 +68,41 @@ Filename: "{app}\app\{#AppVersion}\Notchling.Windows.exe"; Description: "Open No
 
 [Code]
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+  ResultFile: String;
+  ResultText: AnsiString;
+  Parameters: String;
 begin
   Result := '';
-  if CheckForMutexes('Notch.Desktop.Running') then
+  if CheckForMutexes('Notch.Desktop.Running') then begin
     Result := 'Save your work and quit Notchling from the tray before installing. Setup does not forcibly terminate Notchling.';
+    Exit;
+  end;
+
+  ExtractTemporaryFile('install-prerequisites.ps1');
+  ResultFile := ExpandConstant('{tmp}\Notchling-prerequisites-result.txt');
+  Parameters := '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\install-prerequisites.ps1') + '" -ResultPath "' + ResultFile + '"';
+  WizardForm.PreparingLabel.Caption := 'Preparing shared Windows components, only if needed. A Microsoft permission prompt may appear.';
+  Log('Checking Notchling shared runtime prerequisites.');
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
+    Result := 'Setup could not start the Windows component check. Restart Windows and try Setup again.';
+    Exit;
+  end;
+  Log('Notchling prerequisite helper returned ' + IntToStr(ResultCode) + '.');
+  if ResultCode = 3010 then begin
+    NeedsRestart := True;
+    Result := 'Restart Windows to finish preparing shared components, then run Notchling Setup again.';
+    Exit;
+  end;
+  if ResultCode <> 0 then begin
+    if LoadStringFromFile(ResultFile, ResultText) then
+      Result := Trim(UTF8ToString(ResultText))
+    else
+      Result := 'Setup could not prepare the shared Windows components. Check your internet connection, then try Setup again. Details are in %LOCALAPPDATA%\Notchling\Setup\Logs\setup-prerequisites.log.';
+  end;
 end;
 
 function InitializeUninstall(): Boolean;

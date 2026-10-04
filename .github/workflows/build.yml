@@ -44,7 +44,7 @@ jobs:
         run: python -m unittest discover -s tests/release -v
 
   windows:
-    name: Windows x64 unpackaged build
+    name: Windows x64 installer and launch smoke
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -57,28 +57,84 @@ jobs:
       - name: Validate Windows release script syntax
         shell: pwsh
         run: |
-          Get-ChildItem scripts/*.ps1 | ForEach-Object {
+          Get-ChildItem -Path scripts,packaging/windows -Filter '*.ps1' | ForEach-Object {
             $parseErrors = $null
             [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$parseErrors) | Out-Null
             if ($parseErrors) { throw ($parseErrors | Out-String) }
           }
       - name: Build native WinUI application
         run: dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=x64
-      - name: Prepare self-contained unpackaged application
+      - name: Publish application without bundled shared runtimes
         run: >-
           dotnet publish src/Notch.Windows/Notch.Windows.csproj
-          --configuration Release --runtime win-x64 --self-contained true
+          --configuration Release --runtime win-x64 --self-contained false
           -p:Platform=x64 -p:WindowsPackageType=None
-          -p:WindowsAppSDKSelfContained=true -p:PublishSingleFile=false
+          -p:WindowsAppSDKSelfContained=false -p:PublishSingleFile=false
           --output artifacts/notchling-windows-x64
-      - name: Bundle publisher notices and release inventory
-        run: python scripts/bundle-notices.py --publish artifacts/notchling-windows-x64 --assets src/Notch.Windows/obj/project.assets.json
-      - name: Archive application
+      - name: Install evaluation installer compiler
+        run: choco install innosetup --version=6.4.3 --yes --no-progress
+      - name: Bundle publisher and installer notices
         shell: pwsh
-        run: Compress-Archive -Path artifacts/notchling-windows-x64/* -DestinationPath artifacts/notchling-windows-x64.zip
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          $license = Join-Path (Split-Path $iscc) 'license.txt'
+          $version = (Get-Item $iscc).VersionInfo.FileVersion
+          python scripts/bundle-notices.py --publish artifacts/notchling-windows-x64 --assets src/Notch.Windows/obj/project.assets.json --installer-license $license --installer-version $version
+          if ($LASTEXITCODE -ne 0) { throw 'Notice generation failed.' }
+      - name: Compile single-file evaluation setup
+        shell: pwsh
+        run: |
+          $version = (dotnet msbuild src/Notch.Windows/Notch.Windows.csproj -getProperty:Version -p:Platform=x64 -verbosity:quiet).Trim()
+          $publish = Join-Path $PWD 'artifacts/notchling-windows-x64'
+          $output = Join-Path $PWD 'artifacts/installer'
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /DEvaluationBuild "/DAppVersion=$version" "/DPublishDirectory=$publish" "/DReleaseDirectory=$output" packaging/windows/Notch.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Evaluation installer compilation failed.' }
+      - name: Measure setup and enforce app-only payload
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem artifacts/installer/*-evaluation-setup.exe | Select-Object -First 1 -ExpandProperty FullName
+          python scripts/report-package-size.py --publish artifacts/notchling-windows-x64 --require-app-only --installer $setup --output artifacts/package-size.json
+          if ($LASTEXITCODE -ne 0) { throw 'App-only package verification failed.' }
+      - name: Install and launch the actual evaluation setup
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem artifacts/installer/*-evaluation-setup.exe | Select-Object -First 1 -ExpandProperty FullName
+          $install = Join-Path $env:RUNNER_TEMP 'Notchling.InstallerSmoke'
+          $log = Join-Path $PWD 'artifacts/installer-smoke.log'
+          $result = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$install`"", "/LOG=`"$log`"") -Wait -PassThru
+          if ($result.ExitCode -ne 0) { throw "Evaluation setup failed: $($result.ExitCode). See installer-smoke.log." }
+          $app = Get-ChildItem (Join-Path $install 'app') -Filter Notchling.Windows.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $app) { throw 'The installer did not create the application.' }
+          try {
+            ./scripts/smoke-windows.ps1 -AppPath $app -ReportPath artifacts/windows-smoke.json
+          } finally {
+            $uninstall = Join-Path $install 'unins000.exe'
+            if (Test-Path $uninstall) {
+              $cleanup = Start-Process -FilePath $uninstall -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
+              if ($cleanup.ExitCode -ne 0) { throw "Smoke-test uninstall failed: $($cleanup.ExitCode)." }
+            }
+          }
       - uses: actions/upload-artifact@v6
         with:
-          name: notchling-windows-x64-unpackaged
-          path: artifacts/notchling-windows-x64.zip
+          name: notchling-windows-x64-installer
+          path: artifacts/installer/*-evaluation-setup.exe
+          compression-level: 0
           if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v6
+        with:
+          name: notchling-windows-x64-app-only
+          path: artifacts/notchling-windows-x64/*
+          compression-level: 9
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: notchling-windows-cloud-test-results
+          path: |
+            artifacts/package-size.json
+            artifacts/windows-smoke.json
+            artifacts/installer-smoke.log
+          if-no-files-found: warn
           retention-days: 14
