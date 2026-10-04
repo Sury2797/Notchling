@@ -71,6 +71,8 @@ jobs:
           -p:Platform=x64 -p:WindowsPackageType=None
           -p:WindowsAppSDKSelfContained=false -p:PublishSingleFile=false
           --output artifacts/notchling-windows-x64
+      - name: Measure published app and reject bundled runtimes
+        run: python scripts/report-package-size.py --publish artifacts/notchling-windows-x64 --require-app-only --output artifacts/package-size.json
       - name: Install evaluation installer compiler
         shell: pwsh
         run: |
@@ -92,11 +94,19 @@ jobs:
       - name: Compile single-file evaluation setup
         shell: pwsh
         run: |
-          $version = (dotnet msbuild src/Notch.Windows/Notch.Windows.csproj -getProperty:Version -p:Platform=x64 -verbosity:quiet).Trim()
+          [xml]$project = Get-Content src/Notch.Windows/Notch.Windows.csproj
+          $version = [string]$project.Project.PropertyGroup.Version
           $publish = Join-Path $PWD 'artifacts/notchling-windows-x64'
           $output = Join-Path $PWD 'artifacts/installer'
-          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /DEvaluationBuild "/DAppVersion=$version" "/DPublishDirectory=$publish" "/DReleaseDirectory=$output" packaging/windows/Notch.iss
-          if ($LASTEXITCODE -ne 0) { throw 'Evaluation installer compilation failed.' }
+          $PSNativeCommandUseErrorActionPreference = $false
+          $compilerOutput = & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /DEvaluationBuild "/DAppVersion=$version" "/DPublishDirectory=$publish" "/DReleaseDirectory=$output" packaging/windows/Notch.iss 2>&1
+          $compilerExit = $LASTEXITCODE
+          $compilerOutput | Write-Output
+          if ($compilerExit -ne 0) {
+            $details = ($compilerOutput | Select-Object -Last 15 | ForEach-Object ToString) -join ' | '
+            Write-Output "::error::Evaluation installer compilation failed: $details"
+            throw 'Evaluation installer compilation failed.'
+          }
       - name: Measure setup and enforce app-only payload
         shell: pwsh
         run: |
@@ -110,7 +120,12 @@ jobs:
           $install = Join-Path $env:RUNNER_TEMP 'Notchling.InstallerSmoke'
           $log = Join-Path $PWD 'artifacts/installer-smoke.log'
           $result = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$install`"", "/LOG=`"$log`"") -Wait -PassThru
-          if ($result.ExitCode -ne 0) { throw "Evaluation setup failed: $($result.ExitCode). See installer-smoke.log." }
+          if ($result.ExitCode -ne 0) {
+            $prerequisiteLog = Join-Path $env:LOCALAPPDATA 'Notchling/Setup/Logs/setup-prerequisites.log'
+            $details = if (Test-Path $prerequisiteLog) { (Get-Content $prerequisiteLog -Tail 12) -join ' | ' } else { (Get-Content $log -Tail 12) -join ' | ' }
+            Write-Output "::error::Evaluation setup failed: $($result.ExitCode). $details"
+            throw 'Evaluation setup failed. See installer-smoke.log.'
+          }
           $app = Get-ChildItem (Join-Path $install 'app') -Filter Notchling.Windows.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
           if (-not $app) { throw 'The installer did not create the application.' }
           try {
