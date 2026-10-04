@@ -12,6 +12,7 @@
 | Calendar and coding imports | Files you choose explicitly; no automatic home-directory scan |
 | System / media data | Windows APIs for current local display; optional services may be unavailable |
 | Subscription entitlement | Locally cached signed entitlement/credential state for the configured billing service; contains no payment-card details |
+| Startup diagnostics | A local, bounded log in `%LOCALAPPDATA%\Notchling\Diagnostics\startup.log` records initialization errors; it is not uploaded automatically |
 
 Notchling does not provide a cloud workspace synchronization service. There is no app analytics/tracking SDK in this checkout. Plaintext files and export backups can contain personal information; secure the device and store backups carefully.
 
@@ -32,5 +33,7 @@ Disable/clear clipboard history, remove provider credentials, disconnect optiona
 Uninstalling the app does not cancel a subscription. Cancel future renewal in the authenticated billing portal. Account deletion, server-side data access/removal and billing-record retention must be offered by the configured service under its published policy; a local file deletion cannot remove a provider's records.
 
 ## Support and diagnostics
+
+Startup diagnostics record exception messages and stack traces to help diagnose a window that fails to open. The log is limited to 256 KiB and can be deleted after quitting the app. Setup keeps separate prerequisite-installation logs in `%LOCALAPPDATA%\Notchling\Setup\Logs`.
 
 Public issue reports are optional. Remove notes, tokens, full file paths, payment/customer identifiers and other personal content before sharing screenshots or logs. Never post credentials or card information. A private commercial support contact is a launch requirement; no fabricated email or controller identity is supplied by this repository.

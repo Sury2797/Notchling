@@ -10,12 +10,15 @@ internal static class StartupDiagnostics
     private static readonly object Sync = new();
     private static readonly Encoding Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
-    public static void Write(string source, Exception? error)
+    public static void Write(string source, Exception? error, string? message = null)
     {
         try
         {
-            var details = error is null ? "No managed exception was supplied." :
+            var details = error is null ? string.Empty :
                 $"Type: {error.GetType().FullName}{Environment.NewLine}HResult: 0x{error.HResult:X8}{Environment.NewLine}{error}";
+            if (!string.IsNullOrWhiteSpace(message))
+                details = $"Native detail: {message}{Environment.NewLine}{details}";
+            if (details.Length == 0) details = "No managed exception was supplied.";
             if (details.Length > MaximumEntryCharacters)
                 details = details[..MaximumEntryCharacters] + Environment.NewLine + "[Exception details truncated]";
             var entry = $"[{DateTimeOffset.UtcNow:O}] {source}{Environment.NewLine}{details}{Environment.NewLine}{Environment.NewLine}";

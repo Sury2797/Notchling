@@ -13,9 +13,10 @@ public partial class App : Application
     public App()
     {
         // Register before loading XAML so resource and constructor failures leave a local diagnostic.
-        UnhandledException += (_, args) => StartupDiagnostics.Write("Application.UnhandledException", args.Exception);
+        UnhandledException += (_, args) => StartupDiagnostics.Write("Application.UnhandledException", args.Exception, args.Message);
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             StartupDiagnostics.Write("AppDomain.UnhandledException", args.ExceptionObject as Exception);
+        StartStartupResourceTracing();
         try
         {
             InitializeComponent();
@@ -23,6 +24,7 @@ public partial class App : Application
         catch (Exception error)
         {
             StartupDiagnostics.Write("App.InitializeComponent", error);
+            StopStartupResourceTracing();
             throw;
         }
     }
@@ -50,7 +52,37 @@ public partial class App : Application
             StartupDiagnostics.Write("App.OnLaunched", error);
             throw;
         }
+        finally
+        {
+            StopStartupResourceTracing();
+        }
     }
+    private void StartStartupResourceTracing()
+    {
+        try
+        {
+            DebugSettings.XamlResourceReferenceFailed += OnStartupResourceReferenceFailed;
+            DebugSettings.IsXamlResourceReferenceTracingEnabled = true;
+        }
+        catch (Exception error)
+        {
+            StartupDiagnostics.Write("App.StartupResourceTracing", error);
+        }
+    }
+    private void StopStartupResourceTracing()
+    {
+        try
+        {
+            DebugSettings.IsXamlResourceReferenceTracingEnabled = false;
+            DebugSettings.XamlResourceReferenceFailed -= OnStartupResourceReferenceFailed;
+        }
+        catch (Exception error)
+        {
+            StartupDiagnostics.Write("App.StopStartupResourceTracing", error);
+        }
+    }
+    private void OnStartupResourceReferenceFailed(DebugSettings sender, XamlResourceReferenceFailedEventArgs args) =>
+        StartupDiagnostics.Write("XAML resource reference", null, args.Message);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint FindWindow(string? className, string windowName);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint hwnd, int command);
     [DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
