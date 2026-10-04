@@ -33,7 +33,64 @@ $report = [ordered]@{
     PeakPrivateMiB = $null
     LastHandleCount = $null
     Teardown = "No app process created."
+    StartupLog = $null
+    CrashEvents = @()
+    DiagnosticsError = $null
     Error = $null
+}
+
+function Read-StartupDiagnostics {
+    # The CI profile is disposable. Read only this app's startup log and matching crash events.
+    $diagnosticErrors = [Collections.Generic.List[string]]::new()
+    $details = [Collections.Generic.List[string]]::new()
+    $startupLog = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "Notchling/Diagnostics/startup.log"
+    if (Test-Path -LiteralPath $startupLog -PathType Leaf) {
+        try {
+            $content = (Get-Content -LiteralPath $startupLog -Tail 100) -join [Environment]::NewLine
+            if ($content.Length -gt 6000) { $content = $content.Substring($content.Length - 6000) }
+            $report.StartupLog = $content
+            if (-not [string]::IsNullOrWhiteSpace($content)) { $details.Add("App startup log: $content") }
+        } catch { $diagnosticErrors.Add("Startup log: $($_.Exception.Message)") }
+    }
+    if ($child) {
+        try {
+            # Event publication can trail the process exit. This bounded delay is diagnostic only.
+            if ($child.HasExited) { Start-Sleep -Milliseconds 300 }
+            $decimalProcessId = [regex]::Escape([string]$child.Id)
+            $hexProcessId = [regex]::Escape(('0x{0:x}' -f $child.Id))
+            $processPattern = "(?i)(?:\b$hexProcessId\b|(?:Process\s+(?:ID|Id)|ProcessId)\s*[:=]?\s*$decimalProcessId\b)"
+            $events = @(Get-WinEvent -FilterHashtable @{
+                LogName = "Application"
+                StartTime = (Get-Date).AddMinutes(-2)
+                Level = 2
+            } -MaxEvents 50 -ErrorAction Stop | Where-Object {
+                $_.ProviderName -in @("Application Error", ".NET Runtime") -and
+                ($_.Message -match '(?i)Notchling\.Windows' -or $_.Message -match $processPattern)
+            } | Select-Object -First 3)
+            foreach ($event in $events) {
+                $message = [string]$event.Message
+                if ($message.Length -gt 4000) { $message = $message.Substring(0, 4000) }
+                $report.CrashEvents += [pscustomobject]@{
+                    Provider = $event.ProviderName
+                    EventId = $event.Id
+                    TimeCreated = $event.TimeCreated.ToUniversalTime().ToString("O")
+                    Message = $message
+                }
+                $details.Add("$($event.ProviderName) event $($event.Id): $message")
+            }
+        } catch {
+            # Missing events are expected for launch failures outside the app; never mask the failure.
+            if ($_.FullyQualifiedErrorId -notlike "NoMatchingEventsFound*") {
+                $diagnosticErrors.Add("Windows crash events: $($_.Exception.Message)")
+            }
+        }
+    }
+    if ($diagnosticErrors.Count -gt 0) { $report.DiagnosticsError = $diagnosticErrors -join "; " }
+    if ($details.Count -gt 0) {
+        $combined = $details -join [Environment]::NewLine
+        if ($combined.Length -gt 10000) { $combined = $combined.Substring(0, 10000) }
+        $report.Error += [Environment]::NewLine + $combined
+    }
 }
 
 function Initialize-TestRuntime {
@@ -211,6 +268,10 @@ namespace NotchlingSmoke {
 } catch {
     $failure = $_
     $report.Error = $_.Exception.Message
+    if ($child) {
+        try { Read-StartupDiagnostics }
+        catch { $report.DiagnosticsError = "Startup diagnostics could not be collected: $($_.Exception.Message)" }
+    }
 } finally {
     if ($child) {
         try {
