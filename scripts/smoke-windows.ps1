@@ -238,6 +238,10 @@ namespace NotchlingSmoke {
     [pscustomobject]$report | Format-List
     if ($env:GITHUB_ACTIONS -eq 'true') {
         Write-Output "::notice title=Installed Windows smoke result::Succeeded=$($report.Succeeded); StartupMs=$($report.FirstVisibleWindowMilliseconds); ResponsiveSamples=$($report.ResponsiveSamples); WorkingSetMiB=$($report.AverageWorkingSetMiB); PrivateMiB=$($report.AveragePrivateMiB); CpuAllCoresPercent=$($report.CpuPercentAllCores); SamplingSeconds=$($report.MeasurementSeconds)"
+        if ($failure) {
+            $message = $report.Error.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Installed Windows launch failure::$message"
+        }
     }
     if ($env:GITHUB_STEP_SUMMARY) {
         @"
