@@ -99,7 +99,7 @@ begin
   end;
   if ResultCode <> 0 then begin
     if LoadStringFromFile(ResultFile, ResultText) then
-      Result := Trim(UTF8ToString(ResultText))
+      Result := Trim(UTF8Decode(ResultText))
     else
       Result := 'Setup could not prepare the shared Windows components. Check your internet connection, then try Setup again. Details are in %LOCALAPPDATA%\Notchling\Setup\Logs\setup-prerequisites.log.';
   end;
