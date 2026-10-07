@@ -196,10 +196,15 @@ function Invoke-RuntimeInstaller([string]$Installer, [string[]]$Arguments, [swit
         throw
     }
     try {
+        # Retain the native handle before waiting: Windows PowerShell 5.1
+        # can otherwise return a null ExitCode after Start-Process exits.
+        $nativeHandle = $process.Handle
         if (-not $process.WaitForExit(600000)) {
             throw 'A shared Windows component installer is still running. Wait for it to finish, then retry Notchling Setup.'
         }
+        $process.Refresh()
         $code = $process.ExitCode
+        if ($null -eq $code) { throw "Windows did not return an exit code for $component. See the component log before retrying Setup." }
         $hex = '0x{0:X8}' -f ([long]$code -band 4294967295L)
         Write-SetupLog "Microsoft prerequisite installer exit code: $code. Component: $component; Windows error: $hex."
         foreach ($outputKey in @('RedirectStandardOutput', 'RedirectStandardError')) {

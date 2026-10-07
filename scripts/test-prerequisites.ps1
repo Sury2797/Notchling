@@ -249,8 +249,9 @@ function Start-Process {
     param([string]$FilePath, [string[]]$ArgumentList, [switch]$PassThru, [string]$Verb,
         [string]$WindowStyle, [string]$RedirectStandardOutput, [string]$RedirectStandardError)
     if ($script:cancelPermission) { throw [ComponentModel.Win32Exception]::new(1223) }
-    $process = [PSCustomObject]@{ ExitCode = $script:installerExitCode; WaitResult = $script:waitResult; Disposed = $false }
+    $process = [PSCustomObject]@{ Handle = [IntPtr]1; ExitCode = $script:installerExitCode; WaitResult = $script:waitResult; Disposed = $false }
     $process | Add-Member ScriptMethod WaitForExit { param([int]$Milliseconds); return $this.WaitResult }
+    $process | Add-Member ScriptMethod Refresh { }
     $process | Add-Member ScriptMethod Dispose { $this.Disposed = $true }
     $script:lastProcess = $process
     return $process
