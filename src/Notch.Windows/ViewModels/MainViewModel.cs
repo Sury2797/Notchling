@@ -200,7 +200,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                     local = await _store.ReadAsync<LocalData>("workspace", _lifetimeToken);
                     if (_disposed) return;
                     if (local is null && existed) throw new InvalidDataException("The saved notebook must contain a workspace object.");
-                    if (local is not null) ValidateWorkspace(local);
+                    if (local is not null) local = NormalizeWorkspace(local);
                 }
                 catch (Exception error) when (Recoverable(error) && error is not OperationCanceledException)
                 {
@@ -209,15 +209,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                     throw new InvalidDataException(WorkspaceRecoveryMessage, error);
                 }
                 if (_disposed || local is null) return;
-                foreach (var item in (local.Notes ?? []).Where(item => item is not null))
-                    Notes.Add(item with { Title = item.Title ?? "Untitled note", Text = item.Text ?? "" });
-                foreach (var item in (local.Reminders ?? []).Where(item => item is not null))
-                    Reminders.Add(item with { Title = item.Title ?? "Reminder" });
-                foreach (var item in (local.Shelf ?? []).Where(item => item is not null))
-                    Shelf.Add(item with { Path = item.Path ?? "" });
-                foreach (var item in (local.Links ?? []).Where(item => item is not null))
-                    Links.Add(item with { Title = item.Title ?? "Saved link", Url = item.Url ?? "" });
-                _scratchpad = local.Scratchpad ?? ""; Notify(nameof(Scratchpad));
+                foreach (var item in local.Notes) Notes.Add(item);
+                foreach (var item in local.Reminders) Reminders.Add(item);
+                foreach (var item in local.Shelf) Shelf.Add(item);
+                foreach (var item in local.Links) Links.Add(item);
+                _scratchpad = local.Scratchpad; Notify(nameof(Scratchpad));
             });
             if (_disposed) return;
             Overlay.Pinned = Preferences.Pinned;
@@ -225,7 +221,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             _focus.Hydration.Reset(TimeSpan.FromMinutes(Preferences.HydrationMinutes));
             if (IsPremium) _focus.Hydration.Start();
             _loaded = true;
-            if (_subscription is not null) await ExecuteAsync(RefreshSubscriptionAsync);
             _tick.Start();
             NotifyTimers();
             if (IsDemo) LoadDemo();
@@ -235,6 +230,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await ExecuteAsync(() => _mediaService.StartAsync(_lifetimeToken));
             if (_disposed) return;
             await ExecuteAsync(RefreshAsync);
+            if (_disposed) return;
+            // Cached entitlement already governs native startup. A remote refresh must
+            // not delay ready local tools, media registration, or initial system readings.
+            if (_subscription is not null) await ExecuteAsync(RefreshSubscriptionAsync);
             if (_disposed) return;
             if (!IsDemo && Preferences.CalendarPath is { } calendar) await ExecuteAsync(() => ImportCalendarAsync(calendar));
             if (_disposed) return;
@@ -295,6 +294,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
         try
         {
+            // Playback is independent of telemetry and listener enumeration. Publish
+            // its current cache before either optional native reader can fail.
+            Media = _mediaService.Current;
             var snapshot = await _systemService.ReadAsync(_lifetimeToken);
             if (!CanPublish(generation)) return;
             System = snapshot;
@@ -338,7 +340,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (old.AnalyticsEndpoint != Preferences.AnalyticsEndpoint || old.AnalyticsSite != Preferences.AnalyticsSite) { Invalidate(_analyticsRequest); if (!IsDemo) Analytics = null; }
         if (old.AdSenseAccount != Preferences.AdSenseAccount) { Invalidate(_revenueRequest); if (!IsDemo) Revenue = null; }
         if (old.CodingPath != Preferences.CodingPath && (origin != _codingRequest || originGeneration != _codingRequest.Generation)) { Invalidate(_codingRequest); if (!IsDemo) Coding = null; }
-        if (old.CalendarPath != Preferences.CalendarPath && (origin != _calendarRequest || originGeneration != _calendarRequest.Generation)) { Invalidate(_calendarRequest); if (!IsDemo) CalendarEvents = []; }
+        if (old.CalendarPath != Preferences.CalendarPath && (origin != _calendarRequest || originGeneration != _calendarRequest.Generation))
+        {
+            Invalidate(_calendarRequest); _calendarSource = null; _calendarRange = null;
+            if (!IsDemo) CalendarEvents = [];
+        }
         Overlay.Pinned = Preferences.Pinned;
         await ExecuteAsync(() => { ClipboardService.SetEnabled(IsPremium && Preferences.CaptureClipboard); return Task.CompletedTask; });
         if (_disposed) return;
@@ -353,6 +359,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             _dataGeneration++;
             InvalidateRequests();
+            _calendarSource = null; _calendarRange = null;
             _volumeDelay?.Cancel(); _volumeDelay?.Dispose(); _volumeDelay = null;
             if (IsDemo && _realAwake)
                 await ExecuteAsync(() => { _systemService.SetAwake(false); _realAwake = false; return Task.CompletedTask; });
@@ -428,7 +435,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (_disposed) return;
         ReconcileEntitlement();
-        Overlay.SetInteractionSuppressed(CanPresentActivity?.Invoke() == false);
+        Overlay.SetInteractionSuppressed(!CanPresentActivities());
         Overlay.Tick();
         if (_focus.Pomodoro.Tick()) Activity(ActivityKind.Focus, "Focus", "Session complete", "Take a breath. You earned it.");
         if (IsPremium && _focus.Countdown.Tick()) Activity(ActivityKind.Focus, "Countdown", "Timer complete", null);
@@ -454,7 +461,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (!_disposed)
         {
-            Overlay.SetInteractionSuppressed(CanPresentActivity?.Invoke() == false);
+            Overlay.SetInteractionSuppressed(!CanPresentActivities());
             var destination = kind is ActivityKind.Focus || source == "Hydration" ? ModuleId.Focus : kind == ActivityKind.Meeting ? ModuleId.Calendar : (ModuleId?)null;
             Overlay.ShowActivity(new(Guid.NewGuid(), kind, source, title, detail, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(8), Destination: destination));
         }
@@ -564,31 +571,42 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
     public void OnSuspending() => _focus.OnSuspending();
     public void OnResumed(TimeSpan duration) { _focus.OnResumed(duration); NotifyTimers(); _ = ExecuteAsync(RetryNativeServicesAsync); }
-    public async Task RetryNativeServicesAsync() { await _mediaService.StartAsync(_lifetimeToken); ClipboardService.SetEnabled(IsPremium && Preferences.CaptureClipboard); await RefreshAsync(); }
+    public async Task RetryNativeServicesAsync()
+    {
+        if (!ReadyForInput()) return;
+        await ExecuteAsync(() => _mediaService.StartAsync(_lifetimeToken));
+        if (_disposed) return;
+        TryOptionalService(() => ClipboardService.SetEnabled(IsPremium && Preferences.CaptureClipboard));
+        await ExecuteAsync(RefreshAsync);
+    }
     public async Task RefreshSubscriptionAsync()
     {
-        if (_subscription is null) return;
+        if (_disposed || _subscription is null) return;
         if (string.IsNullOrWhiteSpace(_subscription.SessionToken)) { ReconcileEntitlement(force: true); return; }
-        try { await _subscription.RefreshAsync(); }
+        try { await _subscription.RefreshAsync(_lifetimeToken); }
         finally { ReconcileEntitlement(force: true); }
     }
     private void ReconcileEntitlement(bool force = false)
     {
+        if (_disposed) return;
         var premium = IsPremium;
         var changed = premium != _lastPremium;
         if (!force && !changed) return;
         _lastPremium = premium;
-        Notify(nameof(IsPremium)); Notify(nameof(PlanStatus)); Notify(nameof(SubscriptionStatus));
+        TryOptionalService(() => Notify(nameof(IsPremium)));
+        TryOptionalService(() => Notify(nameof(PlanStatus)));
+        TryOptionalService(() => Notify(nameof(SubscriptionStatus)));
         if (!changed) return;
         if (premium && _loaded)
         {
-            ClipboardService.SetEnabled(Preferences.CaptureClipboard);
+            TryOptionalService(() => ClipboardService.SetEnabled(Preferences.CaptureClipboard));
             if (!_focus.Hydration.IsRunning) _focus.Hydration.Start();
         }
         if (!premium)
         {
-            ClipboardService.SetEnabled(false); _focus.Hydration.Pause(); _focus.Countdown.Pause(); _focus.Stopwatch.Pause();
-            if (_realAwake) { _systemService.SetAwake(false); _realAwake = false; Awake = false; Notify(nameof(Awake)); }
+            TryOptionalService(() => ClipboardService.SetEnabled(false));
+            _focus.Hydration.Pause(); _focus.Countdown.Pause(); _focus.Stopwatch.Pause(); UpdateStopwatchTick();
+            if (_realAwake) TryOptionalService(() => { _systemService.SetAwake(false); _realAwake = false; Awake = false; Notify(nameof(Awake)); });
             Overlay.ClearActivities(); _queuedReminders.Clear();
         }
         if (!CanAccessModule(SelectedModule)) Overlay.Expand(ModuleId.Settings);
@@ -697,6 +715,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         _ = ExecuteAsync(async () => { await Task.Delay(400, token); await SaveLocalAsync(token); });
     }
     private LocalData LocalSnapshot() => new(Notes.ToArray(), Reminders.ToArray(), Shelf.ToArray(), Links.ToArray(), Scratchpad);
+    private static LocalData NormalizeWorkspace(LocalData data)
+    {
+        ValidateWorkspace(data);
+        return new(
+            (data.Notes ?? []).Select(item => item with { Title = item.Title ?? "Untitled note", Text = item.Text ?? "" }).ToArray(),
+            (data.Reminders ?? []).Select(item => item with { Title = item.Title ?? "Reminder" }).ToArray(),
+            (data.Shelf ?? []).Select(item => item with { Path = item.Path ?? "" }).ToArray(),
+            (data.Links ?? []).Select(item => item with { Title = item.Title ?? "Saved link", Url = item.Url ?? "" }).ToArray(),
+            data.Scratchpad ?? "");
+    }
     private static void ValidateWorkspace(LocalData data)
     {
         if ((data.Notes ?? []).Any(item => item is null) || (data.Reminders ?? []).Any(item => item is null) || (data.Shelf ?? []).Any(item => item is null) || (data.Links ?? []).Any(item => item is null))
@@ -753,9 +781,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         var file = new FileInfo(path);
         if (file.Length > LocalStore.MaximumBytes) throw new InvalidDataException("Notebook import exceeds 10 MB.");
         var data = global::System.Text.Json.JsonSerializer.Deserialize<LocalData>(await File.ReadAllTextAsync(path, _lifetimeToken), new global::System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new InvalidDataException("The export contains no notebook.");
-        ValidateWorkspace(data); WorkspaceLimits.RequireStorageBudget(data);
+        data = NormalizeWorkspace(data); WorkspaceLimits.RequireStorageBudget(data);
         if (!_workspaceReadable) await RecoverWorkspaceAsync();
         await ExportWorkspaceAsync(Path.Combine(_dataDirectory, "workspace-before-import-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + ".json"));
+        _deletedNote = null; Notify(nameof(CanUndoNoteDeletion));
         Notes.Clear(); foreach (var item in data.Notes ?? []) Notes.Add(item);
         Reminders.Clear(); foreach (var item in data.Reminders ?? []) Reminders.Add(item);
         Shelf.Clear(); foreach (var item in data.Shelf ?? []) Shelf.Add(item);
@@ -784,6 +813,27 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         finally { lock (_shutdownGate) _pendingWrites.Remove(write); }
     }
     private static bool Recoverable(Exception error) => error is not OutOfMemoryException and not StackOverflowException;
+    private void TryOptionalService(Action operation)
+    {
+        try { operation(); }
+        catch (Exception error) when (Recoverable(error)) { ReportOptionalFailure(error); }
+    }
+    private void ReportOptionalFailure(Exception error)
+    {
+        StartupDiagnostics.Write("MainViewModel.OptionalService", error);
+        try { ShowError(error.Message); }
+        catch (Exception displayError) when (Recoverable(displayError))
+        {
+            // The error text is retained even when its native view cannot receive it.
+            // Never turn a failed fallback display into a dispatcher exception.
+            StartupDiagnostics.Write("MainViewModel.OptionalErrorDisplay", displayError);
+        }
+    }
+    private bool CanPresentActivities()
+    {
+        try { return CanPresentActivity?.Invoke() != false; }
+        catch (Exception error) when (Recoverable(error)) { ReportOptionalFailure(error); return false; }
+    }
     private bool ReadyForInput()
     {
         if (_disposed) return false;
@@ -872,10 +922,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         // Acquire it once more so the current reader releases it before services are disposed.
         await _refreshLock.WaitAsync();
         try { await Task.WhenAll(pendingWrites); } catch (Exception error) when (Recoverable(error)) { }
-        ClipboardService.Changed -= OnClipboardChanged; ClipboardService.Error -= OnServiceError; ClipboardService.Dispose();
+        ClipboardService.Changed -= OnClipboardChanged; ClipboardService.Error -= OnServiceError;
+        try { ClipboardService.Dispose(); } catch (Exception error) when (Recoverable(error)) { }
         _mediaService.Changed -= OnMediaChanged; _mediaService.Error -= OnServiceError;
         try { await _mediaService.DisposeAsync(); } catch (Exception error) when (Recoverable(error)) { }
-        _systemService.Dispose(); _http.Dispose(); _store.Dispose();
+        try { _systemService.Dispose(); } catch (Exception error) when (Recoverable(error)) { }
+        _http.Dispose(); _store.Dispose();
         _saveDelay?.Dispose(); _volumeDelay?.Dispose(); _lifetime.Dispose(); _refreshLock.Dispose();
     }
     public sealed record LocalData(SavedNote[] Notes, ReminderItem[] Reminders, ShelfItem[] Shelf, SavedLink[] Links, string Scratchpad);

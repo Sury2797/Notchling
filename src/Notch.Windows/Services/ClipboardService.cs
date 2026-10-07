@@ -16,6 +16,7 @@ public sealed class ClipboardService : IDisposable
     private CancellationTokenSource _captureLifetime = new();
     private bool _capturing;
     private bool _enabled;
+    private bool _subscribed;
     private bool _disposed;
     private long _generation;
 
@@ -32,13 +33,22 @@ public sealed class ClipboardService : IDisposable
         {
             if (_disposed) return;
             if (_enabled == enabled) return;
-            _enabled = enabled;
             InvalidateCaptures();
-            if (enabled) Clipboard.ContentChanged += OnContentChanged;
+            if (enabled)
+            {
+                // Do not latch Enabled until Windows accepts registration: a locked or unavailable
+                // clipboard must be recoverable by retrying the opt-in action.
+                if (!_subscribed) { Clipboard.ContentChanged += OnContentChanged; _subscribed = true; }
+                _enabled = true;
+            }
             else
             {
-                Clipboard.ContentChanged -= OnContentChanged;
-                ClearCore();
+                _enabled = false;
+                try
+                {
+                    if (_subscribed) { Clipboard.ContentChanged -= OnContentChanged; _subscribed = false; }
+                }
+                finally { ClearCore(); }
             }
             // Do not inspect the current clipboard upon opt-in: capture new changes only.
         });
@@ -72,7 +82,11 @@ public sealed class ClipboardService : IDisposable
 
     private void OnContentChanged(object? sender, object args)
     {
-        OnDispatcher(CaptureCurrentClipboard);
+        if (_disposed || !_enabled) return;
+        // Windows may deliver the last notification after the UI queue has shut down.
+        // Throwing back through that native callback can terminate the application on exit.
+        if (_dispatcher.HasThreadAccess) CaptureCurrentClipboard();
+        else _dispatcher.TryEnqueue(CaptureCurrentClipboard);
     }
 
     private void CaptureCurrentClipboard()
@@ -183,14 +197,25 @@ public sealed class ClipboardService : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        OnDispatcher(() =>
+        void Cleanup()
         {
-            Clipboard.ContentChanged -= OnContentChanged;
             _enabled = false;
-            InvalidateCaptures();
-            _captureLifetime.Dispose();
-            ClearCore();
-        });
+            try
+            {
+                if (_subscribed) Clipboard.ContentChanged -= OnContentChanged;
+            }
+            catch (Exception error) when (error is System.Runtime.InteropServices.COMException
+                or System.Runtime.InteropServices.InvalidComObjectException or NotSupportedException) { }
+            finally
+            {
+                _subscribed = false;
+                InvalidateCaptures();
+                _captureLifetime.Dispose();
+                ClearCore();
+            }
+        }
+        if (_dispatcher.HasThreadAccess) Cleanup();
+        else if (!_dispatcher.TryEnqueue(Cleanup)) Cleanup();
     }
 
     private sealed record PendingCapture(DataPackageView Content, long Generation, CancellationToken Token, DateTimeOffset CapturedAt);

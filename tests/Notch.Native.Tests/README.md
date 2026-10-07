@@ -1,6 +1,6 @@
 # Native orchestration regression checks
 
-This portable executable compiles the production clipboard and ambient-sound classes against explicit API doubles. It checks their C# ordering, cancellation, bounded work, and optional-component fallback behavior without requiring a Windows desktop.
+This portable executable compiles the production clipboard, Windows media-session, and ambient-sound classes against explicit API doubles. It checks their C# ordering, cancellation, bounded work, registration retries, player switching, control capabilities, and optional-component fallback behavior without requiring a Windows desktop.
 
 Run `dotnet run --project tests/Notch.Native.Tests -c Release`.
 

@@ -64,6 +64,19 @@ internal static class NativeTheme
             return 1;
         }
     }
+    public static bool AnimationsEnabled
+    {
+        get
+        {
+            if (Settings is not null)
+            {
+                try { return Settings.AnimationsEnabled; }
+                catch (Exception error) when (Unsupported(error)) { }
+            }
+            // SPI_GETCLIENTAREAANIMATION works even when optional WinRT settings do not.
+            return SystemParametersInfoBoolean(0x1042, 0, out var enabled, 0) && enabled;
+        }
+    }
     public static SolidColorBrush Foreground => Brush("#FFFFFF");
     public static SolidColorBrush Muted => Brush("#919191");
     public static SolidColorBrush Background => Brush("#050505");
@@ -110,7 +123,7 @@ internal static class NativeTheme
         }
     }
 
-    private static bool Unsupported(Exception error) => error is COMException or PlatformNotSupportedException;
+    private static bool Unsupported(Exception error) => error is COMException or NotSupportedException or NotImplementedException or TypeLoadException or UnauthorizedAccessException;
 
     public static SolidColorBrush Brush(string color)
     {
@@ -168,6 +181,9 @@ internal static class NativeTheme
     [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SystemParametersInfo(uint action, uint parameter, ref HighContrastState state, uint flags);
+    [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfoBoolean(uint action, uint parameter, [MarshalAs(UnmanagedType.Bool)] out bool enabled, uint flags);
     [DllImport("user32.dll")]
     private static extern uint GetSysColor(int index);
 

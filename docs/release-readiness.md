@@ -1,6 +1,6 @@
 # Notchling Windows release readiness
 
-This checklist defines acceptance for a public Windows release and the planned US$2/month Premium subscription. The current framework-dependent evaluation installer passed build, package auditing, actual installation, native launch, Free controls, and uninstall for [`fafa2cc`](https://github.com/SuryaK999/Notch-win-linux/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee) in [CI run 37203173532](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37203173532). Consumer Windows 10/11 native qualification and commercial-release work remain open. Earlier bundled-runtime results remain historical evidence in [validation notes](validation-notes.md).
+This checklist defines acceptance for a public Windows release and the planned US$2/month Premium subscription. The current framework-dependent evaluation installer passed build, package auditing, actual installation, native launch, Free controls, and uninstall for [`fafa2cc`](https://github.com/SuryaK999/Notchling/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee) in [CI run 37203173532](https://github.com/SuryaK999/Notchling/actions/runs/37203173532). Consumer Windows 10/11 native qualification and commercial-release work remain open. Earlier bundled-runtime results remain historical evidence in [validation notes](validation-notes.md).
 
 Record the revision, build URL, OS build, GPU, monitor configuration and observed result for each subsequent validation. A Linux host can test portable logic and inspect source; full WinUI builds and native interaction require Windows.
 

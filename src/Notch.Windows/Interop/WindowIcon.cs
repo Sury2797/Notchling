@@ -1,6 +1,7 @@
 using Microsoft.Win32.SafeHandles;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using Notch.Windows.Services;
 
 namespace Notch.Windows.Interop;
 
@@ -65,7 +66,14 @@ internal sealed class WindowIcon : IDisposable
         {
             var error = Marshal.GetLastWin32Error();
             handle.Dispose();
-            throw new Win32Exception(error, "The Notchling app icon could not be loaded.");
+            StartupDiagnostics.Write("WindowIcon.BrandAsset", new Win32Exception(error, "The Notchling app icon could not be loaded."));
+            // IDI_APPLICATION is shared by Windows; borrow it without destroying the system handle.
+            handle = new IconHandle(NativeMethods.LoadIcon(0, new nint(32512)), ownsHandle: false);
+            if (handle.IsInvalid)
+            {
+                handle.Dispose();
+                throw new Win32Exception(error, "No window icon could be loaded.");
+            }
         }
         return handle;
     }
@@ -86,7 +94,7 @@ internal sealed class WindowIcon : IDisposable
 
     private sealed class IconHandle : SafeHandleZeroOrMinusOneIsInvalid
     {
-        internal IconHandle(nint value) : base(true) { SetHandle(value); }
+        internal IconHandle(nint value, bool ownsHandle = true) : base(ownsHandle) { SetHandle(value); }
         protected override bool ReleaseHandle() => DestroyIcon(handle);
     }
 

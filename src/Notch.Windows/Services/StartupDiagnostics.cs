@@ -1,4 +1,5 @@
 using System.Text;
+using System.Runtime.InteropServices;
 
 namespace Notch.Windows.Services;
 
@@ -9,6 +10,34 @@ internal static class StartupDiagnostics
     private const int MaximumEntryCharacters = 32 * 1024;
     private static readonly object Sync = new();
     private static readonly Encoding Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+    private static int _fatalReported;
+
+    public static string LogPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Notchling", "Diagnostics", "startup.log");
+
+    public static void BeginSession() => Write("App.Starting", null,
+        $"Version: {typeof(StartupDiagnostics).Assembly.GetName().Version}; Windows: {Environment.OSVersion.Version}; " +
+        $"Process: {RuntimeInformation.ProcessArchitecture}; Runtime: {RuntimeInformation.FrameworkDescription}");
+
+    /// <summary>A Win32 dialog remains usable when WinUI itself failed to initialize.</summary>
+    public static void ReportFatal(string source, Exception error, string? message = null)
+    {
+        Write(source, error, message);
+        if (Interlocked.Exchange(ref _fatalReported, 1) != 0) return;
+        try
+        {
+            var cause = error.GetBaseException();
+            var detail = cause.Message;
+            if (detail.Length > 800) detail = detail[..800] + "…";
+            MessageBox(0, "Notchling could not start.\n\n" + detail +
+                $"\n\nError code: 0x{cause.HResult:X8}\nLocal diagnostic file:\n{LogPath}" +
+                "\n\nTry reinstalling the latest Notchling setup. If the problem continues, include this diagnostic file when reporting it.",
+                "Notchling — startup error", 0x0010 | 0x00010000);
+        }
+        catch
+        {
+            // Preserve the original error even if the native desktop is also unavailable.
+        }
+    }
 
     public static void Write(string source, Exception? error, string? message = null)
     {
@@ -22,8 +51,8 @@ internal static class StartupDiagnostics
             if (details.Length > MaximumEntryCharacters)
                 details = details[..MaximumEntryCharacters] + Environment.NewLine + "[Exception details truncated]";
             var entry = $"[{DateTimeOffset.UtcNow:O}] {source}{Environment.NewLine}{details}{Environment.NewLine}{Environment.NewLine}";
-            var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Notchling", "Diagnostics");
-            var path = Path.Combine(directory, "startup.log");
+            var path = LogPath;
+            var directory = Path.GetDirectoryName(path)!;
             lock (Sync)
             {
                 Directory.CreateDirectory(directory);
@@ -37,4 +66,7 @@ internal static class StartupDiagnostics
             // Diagnostics must never replace the original failure or make startup depend on disk access.
         }
     }
+
+    [DllImport("user32.dll", EntryPoint = "MessageBoxW", CharSet = CharSet.Unicode)]
+    private static extern int MessageBox(nint owner, string message, string caption, uint type);
 }

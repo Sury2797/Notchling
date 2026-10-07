@@ -34,6 +34,7 @@ namespace Notch.Windows.Services
         public MediaSnapshot? Current { get; set; }
         public int Starts { get; private set; }
         public bool Disposed { get; private set; }
+        public Exception? DisposalFailure { get; set; }
         public event EventHandler<MediaSnapshot?>? Changed;
         public event EventHandler<string>? Error;
         public void ReportError(string error) => Error?.Invoke(this, error);
@@ -47,7 +48,7 @@ namespace Notch.Windows.Services
         public Task PreviousAsync() => Task.CompletedTask;
         public Task NextAsync() => Task.CompletedTask;
         public Task SeekAsync(TimeSpan position) => Task.CompletedTask;
-        public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
+        public ValueTask DisposeAsync() { Disposed = true; return DisposalFailure is { } failure ? ValueTask.FromException(failure) : ValueTask.CompletedTask; }
     }
     public sealed class WindowsSystemService : ISystemService
     {
@@ -68,6 +69,7 @@ namespace Notch.Windows.Services
         public int Reads { get; private set; }
         public List<bool> AwakeRequests { get; } = [];
         public bool Disposed { get; private set; }
+        public Exception? DisposalFailure { get; set; }
         public Task<SystemSnapshot> ReadAsync(CancellationToken cancellationToken = default)
         {
             if (Disposed) throw new ObjectDisposedException(nameof(WindowsSystemService));
@@ -94,7 +96,7 @@ namespace Notch.Windows.Services
             return Ports.ToArray();
         }
         public void SetAwake(bool awake) { ObjectDisposedException.ThrowIf(Disposed, this); AwakeRequests.Add(awake); }
-        public void Dispose() => Disposed = true;
+        public void Dispose() { Disposed = true; if (DisposalFailure is { } failure) throw failure; }
     }
     public sealed class WindowsSecretVault : ISecretVault
     {
@@ -107,13 +109,15 @@ namespace Notch.Windows.Services
     {
         public bool Enabled { get; private set; }
         public bool Disposed { get; private set; }
+        public Exception? DisposalFailure { get; set; }
+        public Exception? EnableFailure { get; set; }
         public event EventHandler<IReadOnlyList<ClipboardItem>>? Changed;
         public event EventHandler<string>? Error;
-        public void SetEnabled(bool enabled) => Enabled = enabled;
+        public void SetEnabled(bool enabled) { if (EnableFailure is { } failure) throw failure; Enabled = enabled; }
         public void Publish(IReadOnlyList<ClipboardItem> items) => dispatcher.TryEnqueue(() => Changed?.Invoke(this, items));
         public Task CopyAsync(string text) => Task.CompletedTask;
         public void Clear() => Publish([]);
         public void ReportError(string error) => Error?.Invoke(this, error);
-        public void Dispose() { Disposed = true; Clear(); }
+        public void Dispose() { Disposed = true; Clear(); if (DisposalFailure is { } failure) throw failure; }
     }
 }

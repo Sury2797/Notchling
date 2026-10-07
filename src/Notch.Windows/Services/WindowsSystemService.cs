@@ -20,6 +20,7 @@ public sealed class WindowsSystemService : ISystemService
     private bool _hasCpuSample;
     private long _lastScreenSample = Stopwatch.GetTimestamp();
     private TimeSpan _activeScreenTime;
+    private bool _screenSamplingUnavailable;
     private BlockingCollection<AwakeRequest>? _awakeRequests;
     private Thread? _awakeThread;
     private volatile bool _disposed;
@@ -32,7 +33,17 @@ public sealed class WindowsSystemService : ISystemService
         {
             lock (_sampleGate)
             {
-                if (!_disposed) ReadActiveScreenTime();
+                if (_disposed || _screenSamplingUnavailable) return;
+                try { ReadActiveScreenTime(); }
+                catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+                {
+                    // A native timer callback is outside the view model's async error boundary.
+                    // Optional telemetry must never take down the complete desktop app.
+                    _screenSamplingUnavailable = true;
+                    try { _screenSampler?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan); }
+                    catch (ObjectDisposedException) { } // Exit can race this already-running callback.
+                    StartupDiagnostics.Write("System.ScreenSampler", error);
+                }
             }
         }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
@@ -70,14 +81,18 @@ public sealed class WindowsSystemService : ISystemService
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            await Task.Run(() => WithAudioEndpoint((endpoint, _) =>
+            try
             {
-                var context = Guid.Empty;
-                Marshal.ThrowExceptionForHR(endpoint.SetMasterVolumeLevelScalar((float)volume, ref context));
-                if (volume > 0) Marshal.ThrowExceptionForHR(endpoint.SetMute(false, ref context));
-                AudioAvailable = true;
-                return true;
-            })).ConfigureAwait(false);
+                await Task.Run(() => WithAudioEndpoint((endpoint, _) =>
+                {
+                    var context = Guid.Empty;
+                    Marshal.ThrowExceptionForHR(endpoint.SetMasterVolumeLevelScalar((float)volume, ref context));
+                    if (volume > 0) Marshal.ThrowExceptionForHR(endpoint.SetMute(false, ref context));
+                    AudioAvailable = true;
+                    return true;
+                })).ConfigureAwait(false);
+            }
+            catch (Exception error) when (IsUnavailableAudio(error)) { AudioAvailable = false; throw; }
         }
         finally { _volumeGate.Release(); }
     }
@@ -112,6 +127,7 @@ public sealed class WindowsSystemService : ISystemService
 
     private TimeSpan ReadActiveScreenTime()
     {
+        if (_screenSamplingUnavailable) return _activeScreenTime;
         var now = Stopwatch.GetTimestamp();
         var elapsed = Stopwatch.GetElapsedTime(_lastScreenSample, now);
         _lastScreenSample = now;
@@ -139,7 +155,7 @@ public sealed class WindowsSystemService : ISystemService
                 return (muted ? 0 : Math.Clamp((double)scalar, 0, 1), ReadDeviceName(device));
             });
         }
-        catch (COMException)
+        catch (Exception error) when (IsUnavailableAudio(error) || error is ArgumentException)
         {
             AudioAvailable = false;
             return (0, "Audio output unavailable");
@@ -178,6 +194,10 @@ public sealed class WindowsSystemService : ISystemService
             Marshal.ThrowExceptionForHR(properties.GetValue(ref key, out value));
             return value.Type == 31 ? Marshal.PtrToStringUni(value.Pointer) ?? "Default audio output" : "Default audio output";
         }
+        catch (Exception error) when (IsUnavailableAudio(error) || error is ArgumentException)
+        {
+            return "Default audio output"; // Friendly-name metadata is optional; the endpoint still works.
+        }
         finally
         {
             Native.PropVariantClear(ref value);
@@ -187,14 +207,19 @@ public sealed class WindowsSystemService : ISystemService
 
     private static void Release(object? value)
     {
-        if (value is not null && Marshal.IsComObject(value)) Marshal.ReleaseComObject(value);
+        try { if (value is not null && Marshal.IsComObject(value)) Marshal.ReleaseComObject(value); }
+        catch (InvalidComObjectException) { } // A disappearing endpoint may already have disconnected.
     }
+
+    private static bool IsUnavailableAudio(Exception error) => error is COMException
+        or InvalidComObjectException or NotSupportedException or UnauthorizedAccessException or InvalidCastException;
 
     public void SetAwake(bool awake)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         lock (_awakeGate)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             if (_awakeRequests is null)
             {
                 if (!awake) return;
@@ -215,13 +240,25 @@ public sealed class WindowsSystemService : ISystemService
         {
             foreach (var request in requests.GetConsumingEnumerable())
             {
-                var flags = 0x80000000u | (request.Enabled ? 0x00000001u | 0x00000002u : 0u);
-                if (Native.SetThreadExecutionState(flags) == 0)
-                    request.Completion.TrySetException(new Win32Exception(Marshal.GetLastWin32Error()));
-                else request.Completion.TrySetResult();
+                try
+                {
+                    var flags = 0x80000000u | (request.Enabled ? 0x00000001u | 0x00000002u : 0u);
+                    if (Native.SetThreadExecutionState(flags) == 0)
+                        request.Completion.TrySetException(new Win32Exception(Marshal.GetLastWin32Error()));
+                    else request.Completion.TrySetResult();
+                }
+                catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+                {
+                    request.Completion.TrySetException(error);
+                }
             }
         }
-        finally { Native.SetThreadExecutionState(0x80000000); }
+        finally
+        {
+            try { Native.SetThreadExecutionState(0x80000000); }
+            catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+            { StartupDiagnostics.Write("System.PowerRequestCleanup", error); }
+        }
     }
 
     public void Dispose()
@@ -235,6 +272,8 @@ public sealed class WindowsSystemService : ISystemService
             var release = new AwakeRequest(false);
             _awakeRequests.Add(release);
             try { release.Completion.Task.GetAwaiter().GetResult(); }
+            catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+            { StartupDiagnostics.Write("System.PowerRequestRelease", error); }
             finally
             {
                 _awakeRequests.CompleteAdding();

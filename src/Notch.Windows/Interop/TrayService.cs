@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Notch.Core;
+using Notch.Windows.Services;
+using Microsoft.UI.Xaml;
 
 namespace Notch.Windows.Interop;
 
@@ -24,6 +26,8 @@ public sealed class TrayService : IDisposable
     private readonly NativeMethods.SubclassProc _callback;
     private readonly nuint _subclassId;
     private readonly uint _taskbarCreated;
+    private readonly DispatcherTimer _retry = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly bool _subclassAttached;
     private nint _icon;
     private bool _iconAdded;
     private bool _version4;
@@ -50,8 +54,13 @@ public sealed class TrayService : IDisposable
             _icon = NativeMethods.SendMessage(hwnd, NativeMethods.WmGetIcon, 0, 0);
         if (_icon == 0)
             _icon = NativeMethods.LoadIcon(0, new nint(32512)); // Shared IDI_APPLICATION fallback; never destroy it.
-        if (!NativeMethods.SetWindowSubclass(hwnd, _callback, _subclassId, 0))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not attach the notification-area hook.");
+        _subclassAttached = NativeMethods.SetWindowSubclass(hwnd, _callback, _subclassId, 0);
+        if (!_subclassAttached)
+        {
+            StartupDiagnostics.Write("TrayService.Attach", new Win32Exception(Marshal.GetLastWin32Error(), "Could not attach the notification-area hook."));
+            return; // The visible panel and its context menu remain usable without a tray hook.
+        }
+        _retry.Tick += OnRetry;
         AddIcon();
     }
 
@@ -63,7 +72,11 @@ public sealed class TrayService : IDisposable
         if (!_iconAdded) return;
         var iconData = CreateIconData();
         iconData.Flags = 0x0002; // NIF_ICON
-        ShellNotifyIcon(NimModify, ref iconData);
+        if (!ShellNotifyIcon(NimModify, ref iconData))
+        {
+            _iconAdded = false;
+            _retry.Start();
+        }
     }
 
     private void AddIcon()
@@ -71,13 +84,17 @@ public sealed class TrayService : IDisposable
         if (_disposed)
             return;
         var iconData = CreateIconData();
-        _iconAdded = ShellNotifyIcon(NimAdd, ref iconData);
+        _iconAdded = ShellNotifyIcon(NimAdd, ref iconData) || ShellNotifyIcon(NimModify, ref iconData);
         if (_iconAdded)
         {
+            _retry.Stop();
             iconData.TimeoutOrVersion = 4;
             _version4 = ShellNotifyIcon(NimSetVersion, ref iconData);
         }
+        else _retry.Start(); // Explorer may still be starting, or rebuilding its notification area.
     }
+
+    private void OnRetry(object? sender, object args) => AddIcon();
 
     private NotifyIconData CreateIconData() => new()
     {
@@ -119,6 +136,7 @@ public sealed class TrayService : IDisposable
         catch (Exception exception)
         {
             Debug.WriteLine($"Notification-area hook: {exception.Message}");
+            StartupDiagnostics.Write("TrayService.WindowProcedure", exception);
         }
         return NativeMethods.DefSubclassProc(window, message, wParam, lParam);
     }
@@ -158,13 +176,15 @@ public sealed class TrayService : IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        _retry.Stop();
+        _retry.Tick -= OnRetry;
         if (_iconAdded)
         {
             var iconData = CreateIconData();
             ShellNotifyIcon(NimDelete, ref iconData);
             _iconAdded = false;
         }
-        NativeMethods.RemoveWindowSubclass(_handle, _callback, _subclassId);
+        if (_subclassAttached) NativeMethods.RemoveWindowSubclass(_handle, _callback, _subclassId);
         GC.KeepAlive(_callback);
     }
 

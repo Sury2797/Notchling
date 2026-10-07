@@ -26,6 +26,8 @@ $report = [ordered]@{
     WindowIconPresent = $false
     ResponsiveSamples = 0
     FirstVisibleWindowMilliseconds = $null
+    LaunchedWithInvalidDotNetRoot = $false
+    ExistingInstanceReopened = $false
     MeasurementSeconds = $null
     CpuPercentAllCores = $null
     AverageWorkingSetMiB = $null
@@ -230,6 +232,7 @@ namespace NotchlingSmoke {
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int capacity);
         [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+        [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect rect);
         [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wParam, IntPtr lParam, uint flags, uint timeout, out UIntPtr result);
         [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
@@ -248,6 +251,7 @@ namespace NotchlingSmoke {
             return found;
         }
         public static bool Responds(IntPtr window) => SendMessageTimeout(window, 0, UIntPtr.Zero, IntPtr.Zero, 3, 1000, out _) != IntPtr.Zero;
+        public static void Hide(IntPtr window) => ShowWindow(window, 0);
         public static bool HasIcon(IntPtr window) => SendMessageTimeout(window, 0x7f, UIntPtr.Zero, IntPtr.Zero, 3, 1000, out UIntPtr icon) != IntPtr.Zero && icon != UIntPtr.Zero;
         public static int[] Bounds(IntPtr window) {
             if (!GetWindowRect(window, out Rect rect)) throw new InvalidOperationException("Unable to read window bounds.");
@@ -263,6 +267,13 @@ namespace NotchlingSmoke {
     $startInfo = [Diagnostics.ProcessStartInfo]::new($app)
     $startInfo.WorkingDirectory = [IO.Path]::GetDirectoryName($app)
     $startInfo.UseShellExecute = $false
+    # Exercise the consumer failure where a private/old SDK's DOTNET_ROOT
+    # overrides the shared runtime already verified by Setup. This changes only
+    # the owned test child's environment, never the runner's SDK configuration.
+    $invalidDotNetRoot = Join-Path $env:RUNNER_TEMP 'Notchling.EmptyDotNetRoot'
+    New-Item -ItemType Directory -Path $invalidDotNetRoot -Force | Out-Null
+    $startInfo.Environment['DOTNET_ROOT_X64'] = $invalidDotNetRoot
+    $startInfo.Environment['DOTNET_ROOT'] = $invalidDotNetRoot
     $child = [Diagnostics.Process]::Start($startInfo)
     if (-not $child) { throw "Windows did not create the application process." }
     $window = [IntPtr]::Zero
@@ -280,6 +291,7 @@ namespace NotchlingSmoke {
     $report.FirstVisibleWindowMilliseconds = [Math]::Round($launchClock.Elapsed.TotalMilliseconds, 1)
     $report.WindowTitle = $title
     $report.VisibleWindow = $true
+    $report.LaunchedWithInvalidDotNetRoot = $true
     $bounds = [NotchlingSmoke.Native]::Bounds($window)
     $report.WindowBounds = [ordered]@{ Left = $bounds[0]; Top = $bounds[1]; Width = $bounds[2]; Height = $bounds[3] }
     if ($bounds[2] -le 0 -or $bounds[3] -le 0) { throw "The native window has empty bounds." }
@@ -309,6 +321,31 @@ namespace NotchlingSmoke {
     $report.PeakPrivateMiB = [Math]::Round(($privateBytes | Measure-Object -Maximum).Maximum, 2)
     $report.LastHandleCount = $child.HandleCount
     Invoke-FreeTierUiSmoke $child.Id $window
+
+    # Start-menu launches must reopen the existing notch rather than create a
+    # second instance or leave a hidden app unreachable. Both processes belong
+    # to this disposable test; no unrelated user's application is manipulated.
+    [NotchlingSmoke.Native]::Hide($window)
+    if ([NotchlingSmoke.Native]::IsWindowVisible($window)) { throw 'The existing-instance fixture could not hide its owned window.' }
+    $reopenChild = [Diagnostics.Process]::Start($startInfo)
+    if (-not $reopenChild) { throw 'Windows did not create the owned second launch.' }
+    try {
+        if (-not $reopenChild.WaitForExit(10000)) {
+            $reopenChild.Kill()
+            $reopenChild.WaitForExit(5000) | Out-Null
+            throw 'A duplicate launch failed to hand activation to the original instance.'
+        }
+        if ($reopenChild.ExitCode -ne 0) { throw "Duplicate launch failed with exit code $($reopenChild.ExitCode)." }
+        $reopenClock = [Diagnostics.Stopwatch]::StartNew()
+        while (-not [NotchlingSmoke.Native]::IsWindowVisible($window) -and $reopenClock.Elapsed.TotalSeconds -lt 3) {
+            Start-Sleep -Milliseconds 100
+        }
+        $child.Refresh()
+        if ($child.HasExited -or -not [NotchlingSmoke.Native]::IsWindowVisible($window) -or -not [NotchlingSmoke.Native]::Responds($window)) {
+            throw 'The original app did not become visible and responsive after the second launch.'
+        }
+        $report.ExistingInstanceReopened = $true
+    } finally { $reopenChild.Dispose() }
     $report.Succeeded = $true
 } catch {
     $failure = $_
@@ -343,7 +380,7 @@ namespace NotchlingSmoke {
     $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $reportFullPath -Encoding utf8
     [pscustomobject]$report | Format-List
     if ($env:GITHUB_ACTIONS -eq 'true') {
-        Write-Output "::notice title=Installed Windows smoke result::Succeeded=$($report.Succeeded); StartupMs=$($report.FirstVisibleWindowMilliseconds); ResponsiveSamples=$($report.ResponsiveSamples); FreeUiInteractions=$($report.UIInteractions.Succeeded); WorkingSetMiB=$($report.AverageWorkingSetMiB); PrivateMiB=$($report.AveragePrivateMiB); CpuAllCoresPercent=$($report.CpuPercentAllCores); SamplingSeconds=$($report.MeasurementSeconds)"
+        Write-Output "::notice title=Installed Windows smoke result::Succeeded=$($report.Succeeded); StartupMs=$($report.FirstVisibleWindowMilliseconds); ResponsiveSamples=$($report.ResponsiveSamples); FreeUiInteractions=$($report.UIInteractions.Succeeded); InvalidDotNetRoot=$($report.LaunchedWithInvalidDotNetRoot); ReopenedExistingInstance=$($report.ExistingInstanceReopened); WorkingSetMiB=$($report.AverageWorkingSetMiB); PrivateMiB=$($report.AveragePrivateMiB); CpuAllCoresPercent=$($report.CpuPercentAllCores); SamplingSeconds=$($report.MeasurementSeconds)"
         if ($failure) {
             $message = $report.Error.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
             Write-Output "::error title=Installed Windows launch failure::$message"
@@ -360,6 +397,8 @@ namespace NotchlingSmoke {
 | First visible window | $($report.FirstVisibleWindowMilliseconds) ms |
 | Responsive samples | $($report.ResponsiveSamples) |
 | Free media, Pomodoro, and scratchpad UI interaction | $($report.UIInteractions.Succeeded) |
+| Shared-runtime launch despite invalid DOTNET_ROOT | $($report.LaunchedWithInvalidDotNetRoot) |
+| Hidden existing instance reopened by a second launch | $($report.ExistingInstanceReopened) |
 | Average working set | $($report.AverageWorkingSetMiB) MiB |
 | Average private memory | $($report.AveragePrivateMiB) MiB |
 | CPU, normalized across all cores | $($report.CpuPercentAllCores)% |

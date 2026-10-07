@@ -366,7 +366,7 @@ public sealed partial class UtilityToolsView : UserControl
         about.Children.Add(Text(ProductIdentity.DisplayName, 20));
         about.Children.Add(Text("Native desktop notch · " + typeof(App).Assembly.GetName().Version?.ToString(3), 12, true));
         Grid.SetColumn(about, 1); identity.Children.Add(about); ContentStack.Children.Add(Card(identity));
-        ContentStack.Children.Add(Row(Button("Check for verified updates", _vm.CheckForUpdatesAsync), Button("Release page", () => OpenLink("https://github.com/SuryaK999/Notch-win-linux/releases"))));
+        ContentStack.Children.Add(Row(Button("Check for verified updates", _vm.CheckForUpdatesAsync), Button("Release page", () => OpenLink("https://github.com/SuryaK999/Notchling/releases"))));
         ContentStack.Children.Add(Text("Behavior", 15));
         Toggle("Keep Notchling expanded", preferences.Pinned, value => _vm.Preferences with { Pinned = value });
         Toggle("Switch tools on hover", preferences.HoverNavigation, value => _vm.Preferences with { HoverNavigation = value });

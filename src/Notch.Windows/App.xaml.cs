@@ -13,9 +13,14 @@ public partial class App : Application
     public App()
     {
         // Register before loading XAML so resource and constructor failures leave a local diagnostic.
-        UnhandledException += (_, args) => StartupDiagnostics.Write("Application.UnhandledException", args.Exception, args.Message);
+        UnhandledException += (_, args) => StartupDiagnostics.ReportFatal("Application.UnhandledException", args.Exception, args.Message);
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
-            StartupDiagnostics.Write("AppDomain.UnhandledException", args.ExceptionObject as Exception);
+        {
+            if (args.ExceptionObject is Exception error) StartupDiagnostics.ReportFatal("AppDomain.UnhandledException", error);
+            else StartupDiagnostics.Write("AppDomain.UnhandledException", null);
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) => StartupDiagnostics.Write("TaskScheduler.UnobservedTaskException", args.Exception);
+        StartupDiagnostics.BeginSession();
         StartStartupResourceTracing();
         try
         {
@@ -23,34 +28,41 @@ public partial class App : Application
         }
         catch (Exception error)
         {
-            StartupDiagnostics.Write("App.InitializeComponent", error);
+            StartupDiagnostics.ReportFatal("App.InitializeComponent", error);
             StopStartupResourceTracing();
             throw;
         }
     }
-    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
         try
         {
             _instance = new Mutex(true, "Local\\Notch.Desktop." + Environment.UserName, out var ownsInstance);
             if (!ownsInstance)
             {
-                var existing = FindWindow(null, ProductIdentity.WindowTitle);
-                // An earlier version can still own the stable single-instance mutex during an upgrade.
-                if (existing == 0) existing = FindWindow(null, "Notchling — Desktop companion");
-                if (existing == 0) existing = FindWindow(null, "Notch — Desktop companion");
-                if (existing != 0) { ShowWindow(existing, 4); PostMessage(existing, 0x8001, 0, 0); }
+                // A second launch can arrive while the first process is still creating its HWND.
+                // Wait without blocking WinUI rather than silently exiting before it can be reopened.
+                nint existing = 0;
+                for (var attempt = 0; attempt < 40 && existing == 0; attempt++)
+                {
+                    existing = FindWindow(null, ProductIdentity.WindowTitle);
+                    // Older versions retain the stable mutex during an upgrade.
+                    if (existing == 0) existing = FindWindow(null, "Notchling — Desktop companion");
+                    if (existing == 0) existing = FindWindow(null, "Notch — Desktop companion");
+                    if (existing == 0) await Task.Delay(50);
+                }
+                if (existing == 0 || !PostMessage(existing, 0x8001, 0, 0))
+                    throw new InvalidOperationException("Notchling is already running but its window could not be reopened. Close Notchling in Task Manager, then launch it again.");
                 Exit(); return;
             }
             _installerMutex = new Mutex(false, "Notch.Desktop.Running");
             _window = new MainWindow();
-            _window.Activate();
             _window.Start();
         }
         catch (Exception error)
         {
-            StartupDiagnostics.Write("App.OnLaunched", error);
-            throw;
+            StartupDiagnostics.ReportFatal("App.OnLaunched", error);
+            Exit();
         }
         finally
         {
@@ -84,6 +96,5 @@ public partial class App : Application
     private void OnStartupResourceReferenceFailed(DebugSettings sender, XamlResourceReferenceFailedEventArgs args) =>
         StartupDiagnostics.Write("XAML resource reference", null, args.Message);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint FindWindow(string? className, string windowName);
-    [DllImport("user32.dll")] private static extern bool ShowWindow(nint hwnd, int command);
     [DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
 }

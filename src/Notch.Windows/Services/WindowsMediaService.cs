@@ -1,4 +1,5 @@
 using Notch.Core;
+using System.Runtime.InteropServices;
 using Windows.Media.Control;
 using Windows.Storage.Streams;
 
@@ -44,8 +45,8 @@ public sealed class WindowsMediaService : IMediaService
                 {
                     if (_disposed) return;
                     _manager = manager;
-                    manager.CurrentSessionChanged += OnCurrentSessionChanged;
-                    manager.SessionsChanged += OnSessionsChanged;
+                    TrySessionEvent(() => manager.CurrentSessionChanged += OnCurrentSessionChanged);
+                    TrySessionEvent(() => manager.SessionsChanged += OnSessionsChanged);
                 }
             }
             // Repeated Start is a real recoverable refresh, including after a transient media error.
@@ -160,7 +161,7 @@ public sealed class WindowsMediaService : IMediaService
         try
         {
             token.ThrowIfCancellationRequested();
-            var session = _manager?.GetCurrentSession();
+            var session = FindSession();
             lock (_gate)
             {
                 if (_disposed) return;
@@ -172,9 +173,9 @@ public sealed class WindowsMediaService : IMediaService
                     _artworkPath = null;
                     if (session is not null)
                     {
-                        session.MediaPropertiesChanged += OnPropertiesChanged;
-                        session.PlaybackInfoChanged += OnPlaybackChanged;
-                        session.TimelinePropertiesChanged += OnTimelineChanged;
+                        TrySessionEvent(() => session.MediaPropertiesChanged += OnPropertiesChanged);
+                        TrySessionEvent(() => session.PlaybackInfoChanged += OnPlaybackChanged);
+                        TrySessionEvent(() => session.TimelinePropertiesChanged += OnTimelineChanged);
                     }
                 }
             }
@@ -188,15 +189,20 @@ public sealed class WindowsMediaService : IMediaService
                 .WaitAsync(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
             var playback = session.GetPlaybackInfo();
-            var timeline = session.GetTimelineProperties();
-            var duration = timeline.EndTime > timeline.StartTime ? timeline.EndTime - timeline.StartTime : TimeSpan.Zero;
-            var position = timeline.Position - timeline.StartTime;
+            // Live streams and some otherwise valid players expose no timeline. Their transport
+            // controls must remain usable even when the optional seek metadata is unavailable.
+            GlobalSystemMediaTransportControlsSessionTimelineProperties? timeline = null;
+            try { timeline = session.GetTimelineProperties(); }
+            catch (Exception error) when (IsUnavailableSession(error)) { }
+            var duration = timeline is not null && timeline.EndTime > timeline.StartTime
+                ? timeline.EndTime - timeline.StartTime : TimeSpan.Zero;
+            var position = timeline is null ? TimeSpan.Zero : timeline.Position - timeline.StartTime;
             var playing = playback.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
             var playbackRate = playback.PlaybackRate ?? 1;
             if (!double.IsFinite(playbackRate)) playbackRate = 1;
             playbackRate = Math.Clamp(playbackRate, -16, 16);
             var positionUpdatedAt = DateTimeOffset.UtcNow;
-            if (playing && timeline.LastUpdatedTime > DateTimeOffset.MinValue)
+            if (playing && timeline is not null && timeline.LastUpdatedTime > DateTimeOffset.MinValue)
             {
                 var elapsed = positionUpdatedAt - timeline.LastUpdatedTime;
                 if (elapsed > TimeSpan.Zero && elapsed < TimeSpan.FromDays(1))
@@ -270,7 +276,8 @@ public sealed class WindowsMediaService : IMediaService
             }
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or TimeoutException or System.Runtime.InteropServices.COMException)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or TimeoutException
+            or ArgumentException or System.Security.SecurityException || IsUnavailableSession(error))
         {
             return null; // A missing artwork preview must not hide a valid playback session.
         }
@@ -295,11 +302,44 @@ public sealed class WindowsMediaService : IMediaService
 
     private void UnsubscribeSession()
     {
-        if (_session is null) return;
-        _session.MediaPropertiesChanged -= OnPropertiesChanged;
-        _session.PlaybackInfoChanged -= OnPlaybackChanged;
-        _session.TimelinePropertiesChanged -= OnTimelineChanged;
+        var session = _session;
+        if (session is null) return;
         _session = null;
+        // A player can close while its COM event registration is being revoked.
+        TrySessionEvent(() => session.MediaPropertiesChanged -= OnPropertiesChanged);
+        TrySessionEvent(() => session.PlaybackInfoChanged -= OnPlaybackChanged);
+        TrySessionEvent(() => session.TimelinePropertiesChanged -= OnTimelineChanged);
+    }
+
+    private GlobalSystemMediaTransportControlsSession? FindSession()
+    {
+        GlobalSystemMediaTransportControlsSession? current = null;
+        try { current = _manager?.GetCurrentSession(); }
+        catch (Exception error) when (IsUnavailableSession(error)) { }
+        if (current is not null || _manager is null) return current;
+        // Windows can have a playing session without designating a current one, particularly
+        // immediately after a player starts. Prefer playback and then a paused session.
+        GlobalSystemMediaTransportControlsSession? paused = null;
+        foreach (var candidate in _manager.GetSessions())
+        {
+            try
+            {
+                var status = candidate.GetPlaybackInfo().PlaybackStatus;
+                if (status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) return candidate;
+                if (status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused) paused ??= candidate;
+            }
+            catch (Exception error) when (IsUnavailableSession(error)) { }
+        }
+        return paused;
+    }
+
+    private static bool IsUnavailableSession(Exception error) => error is COMException
+        or InvalidComObjectException or NotSupportedException or UnauthorizedAccessException;
+
+    private static void TrySessionEvent(Action operation)
+    {
+        try { operation(); }
+        catch (Exception error) when (IsUnavailableSession(error)) { }
     }
 
     public async ValueTask DisposeAsync()
@@ -312,8 +352,8 @@ public sealed class WindowsMediaService : IMediaService
             _debounce?.Cancel();
             if (_manager is not null)
             {
-                _manager.CurrentSessionChanged -= OnCurrentSessionChanged;
-                _manager.SessionsChanged -= OnSessionsChanged;
+                TrySessionEvent(() => _manager.CurrentSessionChanged -= OnCurrentSessionChanged);
+                TrySessionEvent(() => _manager.SessionsChanged -= OnSessionsChanged);
             }
             UnsubscribeSession();
         }

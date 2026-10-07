@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.UI.Xaml;
 using Notch.Core;
+using Notch.Windows.Services;
 
 namespace Notch.Windows.Interop;
 
@@ -155,6 +156,7 @@ public sealed class OverlayHost : IDisposable
             StopResizeAnimation();
             // Keep the previous usable geometry while the display driver changes topology.
             Debug.WriteLine($"Overlay display update: {exception.Message}");
+            StartupDiagnostics.Write("OverlayHost.Display", exception);
             if (_retryCount < 3)
             {
                 _displayRetry.Interval = TimeSpan.FromMilliseconds(200 * (1 << _retryCount++));
@@ -412,6 +414,7 @@ public sealed class OverlayHost : IDisposable
         {
             // Exceptions must never cross the unmanaged subclass callback boundary.
             Debug.WriteLine($"Overlay window hook: {exception.Message}");
+            StartupDiagnostics.Write("OverlayHost.WindowProcedure", exception);
         }
         return NativeMethods.DefSubclassProc(window, message, wParam, lParam);
     }

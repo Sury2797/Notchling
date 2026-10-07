@@ -70,6 +70,18 @@ await Case("Release starts Free and refuses extended tools and direct commands",
     await vm.SetPreferencesAsync(vm.Preferences with { DemoMode = true });
     Assert(!vm.IsPremium, "Demo mode granted paid access.");
 });
+await Case("Release Free essentials remain usable after system and media failures", async () =>
+{
+    WindowsMediaService.StartFailure = new IOException("Media unavailable on this computer");
+    WindowsSystemService.ReadFailure = new IOException("System telemetry unavailable on this computer");
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    Assert(vm.IsReady && !vm.IsPremium, "Missing optional integrations prevented a usable Free startup.");
+    vm.SelectModule(ModuleId.Scratchpad); vm.Scratchpad = "Works offline with no player"; vm.ToggleFocus();
+    Assert(vm.SelectedModule == ModuleId.Scratchpad && vm.Scratchpad == "Works offline with no player" && vm.FocusRunning,
+        "The public Release could not use its Free essentials after optional native failures.");
+    Assert(await vm.SaveBeforeExitAsync(), "Free scratchpad could not save after optional native failures.");
+});
 Console.WriteLine($"{passed + failures.Count} Release plan scenarios executed, {passed} passed, {failures.Count} failed.");
 foreach (var failure in failures) Console.Error.WriteLine(failure);
 try { Directory.Delete(data, true); } catch (IOException) { }
@@ -665,6 +677,183 @@ await Case("Stopwatch fast ticks notify time only while real lap changes still n
     vm.ToggleStopwatch();
     vm.SelectModule(ModuleId.Media);
     Assert(!fastTick.IsEnabled, "Navigating away kept the 10 Hz stopwatch UI timer running.");
+});
+await Case("Notebook restore normalizes legacy null fields before publishing or saving", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    var now = DateTimeOffset.UtcNow;
+    var restored = new MainViewModel.LocalData([new(Guid.NewGuid(), null!, null!, now)], [new(Guid.NewGuid(), null!, now, false)],
+        [new(Guid.NewGuid(), null!, now)], [new(Guid.NewGuid(), null!, null!)], null!);
+    var path = Path.Combine(data, "legacy-export.json");
+    await File.WriteAllTextAsync(path, JsonSerializer.Serialize(restored));
+    await vm.RestoreWorkspaceAsync(path);
+    Assert(vm.Notes.Single().Title == "Untitled note" && vm.Notes[0].Text == "" && vm.Reminders.Single().Title == "Reminder",
+        "Restore published null note or reminder strings to native views.");
+    Assert(vm.Shelf.Single().Path == "" && vm.Links.Single().Title == "Saved link" && vm.Links[0].Url == "" && vm.Scratchpad == "",
+        "Restore published null shortcut or scratchpad fields.");
+    var shelfFile = Path.Combine(data, "new-file.txt");
+    await File.WriteAllTextAsync(shelfFile, "fixture");
+    vm.AddShelf(shelfFile);
+    Assert(vm.Shelf.Count == 2, "A normalized legacy shelf prevented new files from being added.");
+});
+await Case("Replacing a notebook clears undo from the previous notebook", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    vm.AddNote("Previous notebook", "Do not inject this into an imported notebook");
+    vm.RemoveNote(vm.Notes.Single().Id);
+    Assert(vm.CanUndoNoteDeletion, "Fixture failed to retain deleted note undo.");
+    var path = Path.Combine(data, "replacement-export.json");
+    await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new MainViewModel.LocalData([], [], [], [], "Imported scratchpad")));
+    await vm.RestoreWorkspaceAsync(path);
+    Assert(!vm.CanUndoNoteDeletion, "Imported notebook exposed undo from the previous notebook.");
+    vm.UndoNoteDeletion();
+    Assert(vm.Notes.Count == 0 && vm.Scratchpad == "Imported scratchpad", "Undo inserted unrelated data into the imported notebook.");
+});
+await Case("Changing the calendar source prevents old cached months from returning", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    var path = Path.Combine(data, "original.ics");
+    var start = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 15, 12, 0, 0, DateTimeKind.Utc);
+    await File.WriteAllTextAsync(path, $"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:original\r\nDTSTART:{start:yyyyMMddTHHmmss}Z\r\nDTEND:{start.AddHours(1):yyyyMMddTHHmmss}Z\r\nSUMMARY:Original calendar\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+    await vm.ImportCalendarAsync(path);
+    Assert(vm.CalendarEvents.Count == 1 && vm.CalendarRangeLoaded(DateTime.Today), "Fixture calendar did not load.");
+    await vm.SetPreferencesAsync(vm.Preferences with { CalendarPath = Path.Combine(data, "new-unavailable.ics") });
+    Assert(vm.CalendarEvents.Count == 0 && !vm.CalendarRangeLoaded(DateTime.Today), "Changing source retained an obsolete loaded-month cache.");
+    await vm.EnsureCalendarMonthAsync(DateTime.Today);
+    Assert(vm.CalendarEvents.Count == 0, "Month navigation republished the previous calendar after its source changed.");
+});
+await Case("Media remains available when machine telemetry cannot be read", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    var snapshot = new MediaSnapshot("Active player", "Native source", null, true, TimeSpan.Zero, TimeSpan.FromMinutes(3), "Test player", false);
+    WindowsMediaService.Latest.Current = snapshot;
+    WindowsSystemService.ReadFailure = new IOException("Machine telemetry unavailable");
+    await vm.ExecuteAsync(vm.RefreshAsync);
+    Assert(vm.Media == snapshot && vm.Error.Contains("telemetry unavailable"), "An unavailable system reading hid usable media playback.");
+    vm.ToggleFocus(); vm.Scratchpad = "Local tools still work";
+    Assert(vm.FocusRunning && vm.Scratchpad == "Local tools still work", "Optional telemetry failure disabled local essentials.");
+});
+await Case("Listener scan failure does not prevent media refresh", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    SelectWithoutAutomaticRefresh(vm, ModuleId.Home);
+    var snapshot = new MediaSnapshot("Active player", "Native source", null, false, TimeSpan.Zero, TimeSpan.FromMinutes(3), "Test player", false);
+    WindowsMediaService.Latest.Current = snapshot;
+    WindowsSystemService.Latest.PortsFailure = new IOException("TCP listeners unavailable");
+    await vm.ExecuteAsync(vm.RefreshAsync);
+    Assert(vm.Media == snapshot && vm.Error.Contains("listeners unavailable"), "An unavailable listener scan hid usable media playback.");
+});
+await Case("Retry continues to clipboard and telemetry after unavailable media restart", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    await vm.SetPreferencesAsync(vm.Preferences with { CaptureClipboard = true });
+    vm.ClipboardService.SetEnabled(false);
+    WindowsMediaService.StartFailure = new IOException("Media restart unavailable");
+    var reads = WindowsSystemService.Latest.Reads;
+    await vm.ExecuteAsync(vm.RetryNativeServicesAsync);
+    Assert(vm.ClipboardService.Enabled && WindowsSystemService.Latest.Reads == reads + 1,
+        "Failed media retry prevented the remaining independent integrations from recovering.");
+    Assert(vm.Error.Contains("Media restart unavailable"), "Unavailable media retry did not report its failure.");
+});
+await Case("Optional service shutdown errors still release every remaining resource", async () =>
+{
+    var store = new FaultingStore(data);
+    var vm = new MainViewModel(new DispatcherQueue(), dataDirectory: data, store: store);
+    await vm.InitializeAsync();
+    vm.Scratchpad = "Saved before optional cleanup failures";
+    vm.ClipboardService.DisposalFailure = new IOException("Clipboard shutdown unavailable");
+    WindowsMediaService.Latest.DisposalFailure = new IOException("Media shutdown unavailable");
+    WindowsSystemService.Latest.DisposalFailure = new IOException("System shutdown unavailable");
+    await vm.DisposeAsync();
+    Assert(!vm.IsReady && vm.ClipboardService.Disposed && WindowsMediaService.Latest.Disposed && WindowsSystemService.Latest.Disposed && store.Disposed,
+        "An optional shutdown exception left later resources alive.");
+    var saved = JsonSerializer.Deserialize<MainViewModel.LocalData>(await File.ReadAllTextAsync(Path.Combine(data, "workspace.json")));
+    Assert(saved?.Scratchpad == "Saved before optional cleanup failures", "Cleanup handling lost accepted edits.");
+});
+await Case("Transient clipboard enrollment cannot escape the UI dispatcher timer", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    await vm.SetPreferencesAsync(vm.Preferences with { CaptureClipboard = true });
+    vm.ClipboardService.EnableFailure = new IOException("Clipboard service temporarily unavailable");
+    Tick().Fire();
+    Assert(vm.IsReady && Tick().IsEnabled && vm.Error.Contains("temporarily unavailable"), "Clipboard enrollment failure terminated the periodic UI path.");
+    vm.ToggleFocus();
+    Assert(vm.FocusRunning, "Clipboard enrollment failure disabled the local focus timer.");
+    vm.ClipboardService.EnableFailure = null;
+    await vm.RetryNativeServicesAsync();
+    Assert(vm.ClipboardService.Enabled, "Clipboard enrollment could not recover after the transient error cleared.");
+});
+await Case("Transient native visibility errors defer activities without crashing local timers", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    vm.CanPresentActivity = () => throw new IOException("Native visibility temporarily unavailable");
+    Tick().Fire();
+    vm.Activity(ActivityKind.Information, "Local activity", "Keep this activity", null);
+    Assert(vm.IsReady && vm.Overlay.Activity is null && vm.NotificationHistory.Count == 0 && vm.Error.Contains("visibility temporarily unavailable"),
+        "A visibility read error escaped the dispatcher or falsely acknowledged presentation.");
+    vm.ToggleFocus();
+    Assert(vm.FocusRunning, "Native visibility failure disabled the local focus timer.");
+    vm.CanPresentActivity = null;
+    Tick().Fire();
+    Assert(vm.Overlay.Activity?.Title == "Keep this activity" && vm.NotificationHistory.Count == 1,
+        "Deferred activity did not resume after native visibility recovered.");
+});
+await Case("Slow entitlement refresh does not delay local readiness and is cancelled on exit", async () =>
+{
+    using var handler = new PausedBillingHandler();
+    using var http = new HttpClient(handler);
+    using var signingKey = global::System.Security.Cryptography.RSA.Create(2048);
+    var vault = new WindowsSecretVault();
+    vault.Save("notch-billing-session", "Fixture session");
+    var subscription = new SubscriptionService(http, vault, new Uri("https://billing.example.invalid/"), signingKey.ExportSubjectPublicKeyInfoPem());
+    var vm = ViewModel();
+    // Supply an already configured optional integration without making a real network request.
+    typeof(MainViewModel).GetField("_subscription", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(vm, subscription);
+    var initializing = vm.InitializeAsync();
+    try
+    {
+        await handler.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert(!initializing.IsCompleted && vm.IsReady && Tick().IsEnabled, "An optional entitlement request held local ready notification or timer startup.");
+        Assert(WindowsMediaService.Latest.Starts == 1 && WindowsSystemService.Latest.Reads == 1 && vm.System is not null,
+            "The optional entitlement request held native media or initial telemetry startup.");
+        vm.Scratchpad = "Local work while billing is unavailable"; vm.ToggleFocus();
+        Assert(vm.FocusRunning && vm.Scratchpad == "Local work while billing is unavailable", "Pending entitlement refresh blocked local essentials.");
+        var postExitNotifications = 0;
+        vm.PropertyChanged += (_, args) => { if (!vm.IsReady && args.PropertyName != nameof(vm.IsReady)) postExitNotifications++; };
+        await vm.DisposeAsync();
+        await initializing.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert(handler.Cancelled && postExitNotifications == 0, "Exit left billing refresh alive or published entitlement state after releasing native services.");
+    }
+    finally
+    {
+        handler.Release.TrySetResult();
+        await initializing;
+        await vm.DisposeAsync();
+    }
+});
+await Case("Entitlement notification failures do not escape the periodic UI path", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    var remainingPlanNotifications = 0;
+    vm.PropertyChanged += (_, args) =>
+    {
+        if (args.PropertyName is nameof(vm.IsPremium) or nameof(vm.Error)) throw new IOException("Native plan view temporarily unavailable");
+        if (args.PropertyName is nameof(vm.PlanStatus) or nameof(vm.SubscriptionStatus)) remainingPlanNotifications++;
+    };
+    Tick().Fire();
+    Assert(vm.IsReady && Tick().IsEnabled && vm.Error.Contains("plan view temporarily unavailable") && remainingPlanNotifications == 2,
+        "An entitlement or error view callback escaped the dispatcher or stopped remaining plan state publication.");
+    vm.ToggleFocus();
+    Assert(vm.FocusRunning, "Entitlement view failure disabled the local focus timer.");
 });
 Console.WriteLine($"{passed + failures.Count} viewmodel behavioral scenarios executed, {passed} passed, {failures.Count} failed.");
 foreach (var failure in failures) Console.Error.WriteLine(failure);

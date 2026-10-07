@@ -13,9 +13,9 @@ AppId={{53529908-CB73-4B48-936A-74B9A6D47B81}
 AppName=Notchling
 AppVersion={#AppVersion}
 AppPublisher=SuryaK999
-AppPublisherURL=https://github.com/SuryaK999/Notch-win-linux
-AppSupportURL=https://github.com/SuryaK999/Notch-win-linux/issues
-AppUpdatesURL=https://github.com/SuryaK999/Notch-win-linux/releases
+AppPublisherURL=https://github.com/SuryaK999/Notchling
+AppSupportURL=https://github.com/SuryaK999/Notchling/issues
+AppUpdatesURL=https://github.com/SuryaK999/Notchling/releases
 DefaultDirName={localappdata}\Programs\Notch
 DefaultGroupName=Notchling
 UsePreviousGroup=no
@@ -64,7 +64,7 @@ Type: files; Name: "{userprograms}\Notch\Uninstall Notch.lnk"
 Type: dirifempty; Name: "{userprograms}\Notch"
 
 [Run]
-Filename: "{app}\app\{#AppVersion}\Notchling.Windows.exe"; Description: "Open Notchling"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\app\{#AppVersion}\Notchling.Windows.exe"; WorkingDir: "{app}\app\{#AppVersion}"; Description: "Open Notchling"; Flags: nowait postinstall skipifsilent
 
 [Code]
 function PrepareToInstall(var NeedsRestart: Boolean): String;

@@ -32,6 +32,6 @@ Features depend on compatible Windows APIs, external services and explicitly imp
 
 ## Support and required publisher information
 
-Development issue reports use [GitHub Issues](https://github.com/SuryaK999/Notch-win-linux/issues). Commercial support is subject to [the support policy](support.md). Required release fields remain: publisher legal name/address, private contact, jurisdiction and required consumer disclosures, tax handling, account/device/offline rules, refund process, and the live authenticated billing portal. The owner must complete and approve them before charging.
+Development issue reports use [GitHub Issues](https://github.com/SuryaK999/Notchling/issues). Commercial support is subject to [the support policy](support.md). Required release fields remain: publisher legal name/address, private contact, jurisdiction and required consumer disclosures, tax handling, account/device/offline rules, refund process, and the live authenticated billing portal. The owner must complete and approve them before charging.
 
 The source license's warranty limitations remain subject to mandatory consumer rights. No term excludes liability or rights that applicable law does not permit the publisher to exclude.

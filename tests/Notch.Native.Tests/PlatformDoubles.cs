@@ -45,10 +45,136 @@ namespace Windows.ApplicationModel.DataTransfer
     public static class Clipboard
     {
         private static DataPackageView _content = new(Task.FromResult(string.Empty));
-        public static event EventHandler<object>? ContentChanged;
+        private static EventHandler<object>? _contentChanged;
+        public static Exception? RegistrationFailure { get; set; }
+        public static Exception? RevocationFailure { get; set; }
+        public static event EventHandler<object>? ContentChanged
+        {
+            add { if (RegistrationFailure is not null) throw RegistrationFailure; _contentChanged += value; }
+            remove { if (RevocationFailure is not null) throw RevocationFailure; _contentChanged -= value; }
+        }
         public static DataPackageView GetContent() => _content;
         public static void SetContent(DataPackage package) => Publish(new(Task.FromResult(package.Text)));
-        public static void Publish(DataPackageView content) { _content = content; ContentChanged?.Invoke(null, new()); }
+        public static void Publish(DataPackageView content) { _content = content; _contentChanged?.Invoke(null, new()); }
+    }
+}
+namespace Windows.Media.Control
+{
+    public sealed class CurrentSessionChangedEventArgs;
+    public sealed class SessionsChangedEventArgs;
+    public sealed class MediaPropertiesChangedEventArgs;
+    public sealed class PlaybackInfoChangedEventArgs;
+    public sealed class TimelinePropertiesChangedEventArgs;
+    public enum GlobalSystemMediaTransportControlsSessionPlaybackStatus { Closed, Opened, Changing, Stopped, Playing, Paused }
+    public sealed class GlobalSystemMediaTransportControlsSessionPlaybackControls
+    {
+        public bool IsPlaybackPositionEnabled { get; set; } = true;
+        public bool IsPlayEnabled { get; set; } = true;
+        public bool IsPauseEnabled { get; set; } = true;
+        public bool IsPreviousEnabled { get; set; } = true;
+        public bool IsNextEnabled { get; set; } = true;
+    }
+    public sealed class GlobalSystemMediaTransportControlsSessionPlaybackInfo
+    {
+        public GlobalSystemMediaTransportControlsSessionPlaybackStatus PlaybackStatus { get; set; } = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+        public GlobalSystemMediaTransportControlsSessionPlaybackControls Controls { get; } = new();
+        public double? PlaybackRate { get; set; }
+    }
+    public sealed class GlobalSystemMediaTransportControlsSessionTimelineProperties
+    {
+        public TimeSpan StartTime { get; set; }
+        public TimeSpan EndTime { get; set; } = TimeSpan.FromMinutes(3);
+        public TimeSpan Position { get; set; } = TimeSpan.FromSeconds(20);
+        public DateTimeOffset LastUpdatedTime { get; set; } = DateTimeOffset.MinValue;
+    }
+    public sealed class GlobalSystemMediaTransportControlsSessionMediaProperties
+    {
+        public string Title { get; set; } = "Real player title";
+        public string Artist { get; set; } = "Real player artist";
+        public string AlbumTitle { get; set; } = string.Empty;
+        public Windows.Storage.Streams.IRandomAccessStreamReference? Thumbnail { get; set; }
+    }
+    public sealed class GlobalSystemMediaTransportControlsSession
+    {
+        private Action<GlobalSystemMediaTransportControlsSession, MediaPropertiesChangedEventArgs>? _propertiesChanged;
+        private Action<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs>? _playbackChanged;
+        private Action<GlobalSystemMediaTransportControlsSession, TimelinePropertiesChangedEventArgs>? _timelineChanged;
+        public GlobalSystemMediaTransportControlsSessionMediaProperties Properties { get; } = new();
+        public GlobalSystemMediaTransportControlsSessionPlaybackInfo Playback { get; } = new();
+        public GlobalSystemMediaTransportControlsSessionTimelineProperties Timeline { get; } = new();
+        public Exception? PlaybackFailure { get; set; }
+        public Exception? TimelineFailure { get; set; }
+        public Exception? EventFailure { get; set; }
+        public string SourceAppUserModelId { get; set; } = "Test.player";
+        public int PlayCalls { get; private set; }
+        public int PauseCalls { get; private set; }
+        public long? SeekTicks { get; private set; }
+        public bool AcceptControl { get; set; } = true;
+        public Task<GlobalSystemMediaTransportControlsSessionMediaProperties> TryGetMediaPropertiesAsync() => Task.FromResult(Properties);
+        public GlobalSystemMediaTransportControlsSessionPlaybackInfo GetPlaybackInfo() => PlaybackFailure is null ? Playback : throw PlaybackFailure;
+        public GlobalSystemMediaTransportControlsSessionTimelineProperties GetTimelineProperties() => TimelineFailure is null ? Timeline : throw TimelineFailure;
+        public Task<bool> TryPauseAsync() { PauseCalls++; return Task.FromResult(AcceptControl); }
+        public Task<bool> TryPlayAsync() { PlayCalls++; return Task.FromResult(AcceptControl); }
+        public Task<bool> TrySkipPreviousAsync() => Task.FromResult(AcceptControl);
+        public Task<bool> TrySkipNextAsync() => Task.FromResult(AcceptControl);
+        public Task<bool> TryChangePlaybackPositionAsync(long ticks) { SeekTicks = ticks; return Task.FromResult(AcceptControl); }
+        public event Action<GlobalSystemMediaTransportControlsSession, MediaPropertiesChangedEventArgs> MediaPropertiesChanged
+        {
+            add { if (EventFailure is not null) throw EventFailure; _propertiesChanged += value; }
+            remove { if (EventFailure is not null) throw EventFailure; _propertiesChanged -= value; }
+        }
+        public event Action<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs> PlaybackInfoChanged
+        {
+            add { if (EventFailure is not null) throw EventFailure; _playbackChanged += value; }
+            remove { if (EventFailure is not null) throw EventFailure; _playbackChanged -= value; }
+        }
+        public event Action<GlobalSystemMediaTransportControlsSession, TimelinePropertiesChangedEventArgs> TimelinePropertiesChanged
+        {
+            add { if (EventFailure is not null) throw EventFailure; _timelineChanged += value; }
+            remove { if (EventFailure is not null) throw EventFailure; _timelineChanged -= value; }
+        }
+        public void NotifyPlayback() => _playbackChanged?.Invoke(this, new());
+    }
+    public sealed class GlobalSystemMediaTransportControlsSessionManager
+    {
+        private Action<GlobalSystemMediaTransportControlsSessionManager, CurrentSessionChangedEventArgs>? _currentChanged;
+        private Action<GlobalSystemMediaTransportControlsSessionManager, SessionsChangedEventArgs>? _sessionsChanged;
+        public static GlobalSystemMediaTransportControlsSessionManager Available { get; set; } = new();
+        public GlobalSystemMediaTransportControlsSession? Current { get; set; }
+        public List<GlobalSystemMediaTransportControlsSession> Sessions { get; } = [];
+        public Exception? EventFailure { get; set; }
+        public static Task<GlobalSystemMediaTransportControlsSessionManager> RequestAsync() => Task.FromResult(Available);
+        public GlobalSystemMediaTransportControlsSession? GetCurrentSession() => Current;
+        public IReadOnlyList<GlobalSystemMediaTransportControlsSession> GetSessions() => Sessions;
+        public event Action<GlobalSystemMediaTransportControlsSessionManager, CurrentSessionChangedEventArgs> CurrentSessionChanged
+        {
+            add { if (EventFailure is not null) throw EventFailure; _currentChanged += value; }
+            remove { if (EventFailure is not null) throw EventFailure; _currentChanged -= value; }
+        }
+        public event Action<GlobalSystemMediaTransportControlsSessionManager, SessionsChangedEventArgs> SessionsChanged
+        {
+            add { if (EventFailure is not null) throw EventFailure; _sessionsChanged += value; }
+            remove { if (EventFailure is not null) throw EventFailure; _sessionsChanged -= value; }
+        }
+        public void NotifyCurrent() => _currentChanged?.Invoke(this, new());
+    }
+}
+namespace Windows.Storage.Streams
+{
+    public interface IRandomAccessStreamReference
+    {
+        Task<RandomAccessStream> OpenReadAsync();
+    }
+    public sealed class RandomAccessStream(Stream stream, string contentType) : IDisposable
+    {
+        public ulong Size => (ulong)stream.Length;
+        public string ContentType { get; } = contentType;
+        public Stream AsStreamForRead() => stream;
+        public void Dispose() => stream.Dispose();
+    }
+    public sealed class FailingArtwork(Exception error) : IRandomAccessStreamReference
+    {
+        public Task<RandomAccessStream> OpenReadAsync() => Task.FromException<RandomAccessStream>(error);
     }
 }
 namespace Windows.Storage

@@ -70,7 +70,7 @@ try {
         version = $Version
         minimumWindowsBuild = 19045
         architecture = 'x64'
-        installerUrl = "https://github.com/SuryaK999/Notch-win-linux/releases/download/v$Version/Notchling-$Version-windows-x64-setup.exe"
+        installerUrl = "https://github.com/SuryaK999/Notchling/releases/download/v$Version/Notchling-$Version-windows-x64-setup.exe"
         sha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
         signerPublicKeySha256 = $publicKeyPin
         sizeBytes = (Get-Item $installer).Length

@@ -235,7 +235,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         }
         RenderMediaPosition();
         MediaDurationText.Text = media is null ? "0:00" : Clock(media.Duration);
-        VolumeSlider.IsEnabled = _viewModel.System is { OutputDevice: not "Unavailable" and not "No output device" };
+        VolumeSlider.IsEnabled = _viewModel.System is { OutputDevice: not "Unavailable" and not "No output device" and not "Audio output unavailable" };
         if (_volumeDelay is null && (VolumeSlider.PointerCaptures?.Count ?? 0) == 0 && VolumeSlider.FocusState == FocusState.Unfocused)
             VolumeSlider.Value = Math.Clamp(_viewModel.System?.Volume ?? 0, 0, 1);
         OutputDeviceText.Text = _viewModel.System?.OutputDevice ?? "No output device";

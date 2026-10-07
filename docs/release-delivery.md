@@ -12,7 +12,7 @@ The optional app-only folder contains the launcher, app assemblies, assets, and 
 
 CI records setup EXE and extracted application sizes, rejects bundled runtime files, and verifies the app against installed shared runtimes. It exercises Setup's missing Windows App Runtime path on a hosted Windows Server desktop. The runner already has .NET 10 through `setup-dotnet`, so missing-.NET installation, denied UAC, cancellation, offline errors, and consumer Windows 10/11 clean-machine acceptance still require [native qualification](native-qualification.md). The evaluation setup is explicitly unsigned; production signing remains mandatory for public release and updates.
 
-Package/prerequisite measurements from passing [CI run 37203173532](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37203173532), source revision [`fafa2cc`](https://github.com/SuryaK999/Notch-win-linux/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee), on 4 October 2026 UTC:
+Package/prerequisite measurements from passing [CI run 37203173532](https://github.com/SuryaK999/Notchling/actions/runs/37203173532), source revision [`fafa2cc`](https://github.com/SuryaK999/Notchling/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee), on 4 October 2026 UTC:
 
 | Component | Actual or estimated bytes | Scope |
 | --- | ---: | --- |
@@ -30,9 +30,9 @@ A machine missing both shared runtimes therefore needs roughly **147 MB** of fir
 
 The Windows build job compiles the evaluation setup, installs it into a disposable directory, and launches the **installed** `Notchling.Windows.exe`. Setup's prerequisite log shows runtime reuse or downloads and verifies the x64 framework, Main, Singleton, and DDLM packages for Windows App Runtime 1.8. Reports and logs are uploaded in `notchling-windows-cloud-test-results`, including package sizes, setup/prerequisite logs, and native/UI smoke JSON. Results are tied to their source revisions in [validation notes](validation-notes.md).
 
-The [tested evaluation installer](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37203173532#artifacts) is available as a GitHub Actions artifact subject to sign-in and the workflow's 14-day retention. Extract its download ZIP once and run `Notchling-0.2.0-windows-x64-evaluation-setup.exe`.
+The [tested evaluation installer](https://github.com/SuryaK999/Notchling/actions/runs/37203173532#artifacts) is available as a GitHub Actions artifact subject to sign-in and the workflow's 14-day retention. Extract its download ZIP once and run `Notchling-0.2.0-windows-x64-evaluation-setup.exe`.
 
-For users, [the evaluation release download](https://github.com/SuryaK999/Notch-win-linux/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe) provides the setup EXE directly, without sign-in, ZIP extraction, or artifact expiry. Pushing a `notchling-evaluation-<version>` tag runs the full build/installed-app checks first; only after all jobs pass does CI publish that one setup EXE as an explicitly unsigned GitHub prerelease. The tag must match the project's version. This channel does not publish a stable update manifest or replace signed production releases.
+For users, [the evaluation release download](https://github.com/SuryaK999/Notchling/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe) provides the setup EXE directly, without sign-in, ZIP extraction, or artifact expiry. Pushing a `notchling-evaluation-<version>` tag runs the full build/installed-app checks first; only after all jobs pass does CI publish that one setup EXE as an explicitly unsigned GitHub prerelease. The tag must match the project's version. This channel does not publish a stable update manifest or replace signed production releases.
 
 Before installation, `report-package-size.py --require-app-only` requires the app assemblies, bootstrapper files, and nonempty `resources.pri`, and refuses bundled CoreCLR, Windows App Runtime, ONNX, or DirectML payload. The project enables the current SDK PRI pipeline so compiled XAML is published correctly; hand-copying resources from an older SDK layout is not the publishing contract.
 
@@ -65,7 +65,7 @@ Preserve exports before downgrade. Only revert to a prior signed version with a 
 
 ## Verified updates
 
-The stable manifest is `https://github.com/SuryaK999/Notch-win-linux/releases/latest/download/notchling-update.json`. `install-update.ps1` accepts only that channel and the exact versioned official installer asset. It bounds installer size, verifies SHA-256 and a valid trusted Authenticode signature, and checks the publisher key against a pin already trusted by the installed release. The remote manifest never supplies its own trust anchor.
+The stable manifest is `https://github.com/SuryaK999/Notchling/releases/latest/download/notchling-update.json`. `install-update.ps1` accepts only that channel and the exact versioned official installer asset. It bounds installer size, verifies SHA-256 and a valid trusted Authenticode signature, and checks the publisher key against a pin already trusted by the installed release. The remote manifest never supplies its own trust anchor.
 
 Settings also exposes an explicit update action through `WindowsUpdateService`. Its trust anchor requires matching valid Windows-trusted signatures on the installed executable and application assembly; a signed `dotnet.exe` alone cannot authorize an unsigned app DLL. Certificate checks run off the UI thread; the service streams bounded downloads, rechecks the hash/signature before opening Setup and refuses unsigned evaluation builds. It does not force the running app to close.
 

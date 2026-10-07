@@ -3,7 +3,9 @@ using Notch.Windows.Services;
 using Notch.Windows.Views;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Media.Playback;
+using Windows.Media.Control;
 using Windows.Storage;
+using System.Runtime.InteropServices;
 
 // Production C# implementations, platform APIs doubled; see README for verification limits.
 using var dispatcher = new DispatcherQueue();
@@ -30,6 +32,30 @@ Task<string> Text(string value) => Task.FromResult(value);
     await WaitFor(() => dispatcher.InvokeAsync(() => service.Items.Count == 3));
     Check(await dispatcher.InvokeAsync(() => service.Items.Select(item => item.Text).SequenceEqual(new[] { "C", "B", "A" })), "Clipboard captures lost or reordered delayed entries.");
     await FinishAsync(service); passed++;
+}
+{
+    var service = await dispatcher.InvokeAsync(() => new ClipboardService(dispatcher));
+    Clipboard.RegistrationFailure = new COMException("Clipboard service is temporarily unavailable.");
+    var failed = false;
+    try { await dispatcher.InvokeAsync(() => service.SetEnabled(true)); }
+    catch (COMException) { failed = true; }
+    Check(failed && !service.Enabled, "Clipboard registration failure left capture enabled and blocked retries.");
+    Clipboard.RegistrationFailure = null;
+    await dispatcher.InvokeAsync(() => { service.SetEnabled(true); Clipboard.Publish(new(Text("retry-captured"))); });
+    await WaitFor(() => dispatcher.InvokeAsync(() => service.Items.Count == 1));
+    await FinishAsync(service); passed++;
+}
+{
+    var service = await ClipboardAsync();
+    await dispatcher.InvokeAsync(() => Clipboard.Publish(new(Text("private-entry"))));
+    await WaitFor(() => dispatcher.InvokeAsync(() => service.Items.Count == 1));
+    Clipboard.RevocationFailure = new COMException("The clipboard component disconnected.");
+    await FinishAsync(service);
+    Check(!service.Enabled && service.Items.Count == 0, "Clipboard disposal failed to clear private history after event revocation failure.");
+    Clipboard.RevocationFailure = null;
+    // The native component may retain its callback after failed revocation; it must now be inert.
+    await dispatcher.InvokeAsync(() => Clipboard.Publish(new(Text("after-exit"))));
+    Check(service.Items.Count == 0, "A retained clipboard notification revived disposed capture."); passed++;
 }
 {
     var service = await ClipboardAsync();
@@ -122,6 +148,79 @@ Task<string> Text(string value) => Task.FromResult(value);
     var warnings = 0; sound.Error += (_, _) => warnings++;
     MediaPlayer.Latest!.Fail();
     Check(!sound.IsAvailable && warnings == 1, "Asynchronous media failure was not exposed."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession { TimelineFailure = new COMException("Live stream exposes no timeline.") };
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService();
+    await media.StartAsync();
+    Check(media.Current is { Title: "Real player title", CanSeek: false, CanPause: true }, "Unsupported timeline hid working live media controls.");
+    await media.PlayPauseAsync();
+    Check(session.PauseCalls == 1, "A live player without timeline could not be paused."); passed++;
+}
+{
+    var manager = new GlobalSystemMediaTransportControlsSessionManager();
+    manager.Sessions.Add(new() { PlaybackFailure = new COMException("Player disconnected.") });
+    var paused = new GlobalSystemMediaTransportControlsSession(); paused.Playback.PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused;
+    paused.Properties.Title = "Paused player"; manager.Sessions.Add(paused);
+    var playing = new GlobalSystemMediaTransportControlsSession(); playing.Properties.Title = "Playing player"; manager.Sessions.Add(playing);
+    GlobalSystemMediaTransportControlsSessionManager.Available = manager;
+    await using var media = new WindowsMediaService();
+    await media.StartAsync();
+    Check(media.Current?.Title == "Playing player", "An active player was missed when Windows had no designated current session."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    session.Playback.PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped;
+    var manager = new GlobalSystemMediaTransportControlsSessionManager(); manager.Sessions.Add(session);
+    GlobalSystemMediaTransportControlsSessionManager.Available = manager;
+    await using var media = new WindowsMediaService();
+    await media.StartAsync();
+    Check(media.Current is null, "A stopped fallback player was incorrectly presented as active.");
+    var failed = false; try { await media.PlayPauseAsync(); } catch (InvalidOperationException) { failed = true; }
+    Check(failed && session.PlayCalls == 0, "The service accepted playback control without an active session."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    session.Timeline.StartTime = TimeSpan.FromSeconds(10); session.Timeline.EndTime = TimeSpan.FromSeconds(40);
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService(); await media.StartAsync();
+    await media.SeekAsync(TimeSpan.FromMinutes(5));
+    Check(session.SeekTicks == TimeSpan.FromSeconds(40).Ticks, "Seeking past the track did not clamp to its absolute timeline end.");
+    await media.SeekAsync(TimeSpan.FromSeconds(-5));
+    Check(session.SeekTicks == TimeSpan.FromSeconds(10).Ticks, "Negative seeking did not clamp to its absolute timeline start.");
+    session.Playback.Controls.IsPauseEnabled = false;
+    var failed = false; try { await media.PlayPauseAsync(); } catch (InvalidOperationException) { failed = true; }
+    Check(failed && session.PauseCalls == 0, "An unsupported pause operation was sent to the player."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    session.Properties.Thumbnail = new Windows.Storage.Streams.FailingArtwork(new ArgumentException("The player provided an invalid thumbnail."));
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService(); await media.StartAsync();
+    Check(media.Current is { Title: "Real player title", ArtworkPath: null, CanPause: true }, "Invalid optional artwork hid the active media session."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    var manager = new GlobalSystemMediaTransportControlsSessionManager { Current = session };
+    GlobalSystemMediaTransportControlsSessionManager.Available = manager;
+    var media = new WindowsMediaService(); await media.StartAsync();
+    session.EventFailure = new COMException("The old player disconnected before event revocation.");
+    manager.Current = new() { EventFailure = new COMException("Events unavailable on new player.") };
+    manager.Current.Properties.Title = "Replacement player";
+    await media.StartAsync();
+    Check(media.Current?.Title == "Replacement player", "Revoking a disconnected player's events prevented player switching.");
+    manager.EventFailure = new COMException("Manager disconnected at shutdown.");
+    await media.DisposeAsync(); passed++;
+}
+{
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = new() };
+    await using var media = new WindowsMediaService();
+    using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
+    var canceled = false; try { await media.StartAsync(cancellation.Token); } catch (OperationCanceledException) { canceled = true; }
+    Check(canceled, "Canceled media startup did not honor its caller's cancellation.");
+    await media.StartAsync();
+    Check(media.Current is not null, "Cancellation poisoned a subsequent media startup retry."); passed++;
 }
 Console.WriteLine($"PASS: {passed} native orchestration regression cases (explicit API doubles; native Windows runtime unverified).");
 if (Directory.Exists(soundCache)) Directory.Delete(soundCache, recursive: true);

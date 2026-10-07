@@ -12,7 +12,7 @@ public sealed record PreparedUpdate(string Version, string InstallerPath, string
 /// <summary>Explicit stable-channel updates anchored to the installed application's trusted signer.</summary>
 public sealed class WindowsUpdateService(HttpClient http)
 {
-    private const string Channel = "https://github.com/SuryaK999/Notch-win-linux/releases/latest/download/notchling-update.json";
+    private const string Channel = "https://github.com/SuryaK999/Notchling/releases/latest/download/notchling-update.json";
     private const long MaximumInstallerBytes = 256 * 1024 * 1024;
     private readonly HttpClient _http = http;
 
@@ -96,7 +96,7 @@ public sealed class WindowsUpdateService(HttpClient http)
     {
         if (!Version.TryParse(update.Version, out var version) || version.Revision >= 0 || version.Build < 0
             || update.Version != $"{version.Major}.{version.Minor}.{version.Build}"
-            || update.InstallerUrl != $"https://github.com/SuryaK999/Notch-win-linux/releases/download/v{update.Version}/Notchling-{update.Version}-windows-x64-setup.exe"
+            || update.InstallerUrl != $"https://github.com/SuryaK999/Notchling/releases/download/v{update.Version}/Notchling-{update.Version}-windows-x64-setup.exe"
             || update.Sha256.Length != 64 || !update.Sha256.All(Uri.IsHexDigit)
             || update.SizeBytes <= 0 || update.SizeBytes > MaximumInstallerBytes || update.MinimumWindowsBuild < 19045)
             throw new InvalidDataException("Invalid update asset or integrity information.");

@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Notch.Core/Notch.Core.csproj" />
     <Compile Include="../../src/Notch.Windows/Services/ClipboardService.cs" Link="UnderTest/ClipboardService.cs" />
+    <Compile Include="../../src/Notch.Windows/Services/WindowsMediaService.cs" Link="UnderTest/WindowsMediaService.cs" />
     <Compile Include="../../src/Notch.Windows/Views/AmbientSound.cs" Link="UnderTest/AmbientSound.cs" />
   </ItemGroup>
 </Project>

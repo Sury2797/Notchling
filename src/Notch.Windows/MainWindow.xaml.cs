@@ -9,10 +9,10 @@ using Notch.Core;
 using Notch.Windows.Interop;
 using Notch.Windows.ViewModels;
 using Notch.Windows.Views;
+using Notch.Windows.Services;
 using System.ComponentModel;
 using System.Numerics;
 using Windows.System;
-using Windows.UI.ViewManagement;
 
 namespace Notch.Windows;
 
@@ -28,7 +28,6 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _openDelay = new() { Interval = TimeSpan.FromMilliseconds(180) };
     private readonly DispatcherTimer _closeDelay = new() { Interval = TimeSpan.FromMilliseconds(700) };
     private readonly DispatcherTimer _switchDelay = new() { Interval = TimeSpan.FromMilliseconds(100) };
-    private readonly UISettings _systemUi = new();
     private ModuleId? _pendingModule;
     private bool _quitting;
     private bool _started;
@@ -43,11 +42,16 @@ public sealed partial class MainWindow : Window
         _vm = new(DispatcherQueue) { WindowHandle = _host.Handle };
         Title = ProductIdentity.WindowTitle;
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Notchling.ico");
-        AppWindow.SetIcon(iconPath);
+        try { AppWindow.SetIcon(iconPath); }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+        {
+            // A damaged optional shell asset must not prevent reaching repair/settings controls.
+            StartupDiagnostics.Write("MainWindow.AppWindowIcon", error);
+        }
         _windowIcon = new(_host.Handle, iconPath);
         _tray = new(_host.Handle, () => { Open(); Activate(); }, OpenSettings, () => _ = QuitAsync(), _windowIcon.SmallIcon);
         _host.ToggleRequested += (_, _) => Toggle();
-        _host.ShowRequested += (_, _) => Open();
+        _host.ShowRequested += (_, _) => { Open(); Activate(); };
         _host.DisplayChanged += OnDisplayChanged;
         _host.Error += (_, message) => _vm.ShowError(message);
         _host.PowerStateChanged += (_, transition) => { if (transition.Suspended) _vm.OnSuspending(); else _vm.OnResumed(transition.SuspendedFor); };
@@ -55,7 +59,14 @@ public sealed partial class MainWindow : Window
         NativeTheme.Changed += OnThemeChanged;
         _vm.Overlay.Changed += (_, _) => RenderShell(true);
         _vm.PropertyChanged += OnViewModelChanged;
-        AppWindow.Closing += (_, args) => { if (!_quitting && _tray.IsAvailable) { args.Cancel = true; _host.Hide(); } };
+        AppWindow.Closing += (window, args) =>
+        {
+            if (_quitting) return;
+            args.Cancel = true;
+            if (_closingAttempt) return;
+            if (_tray.IsAvailable) _host.Hide();
+            else _ = QuitAsync(); // Keep the HWND alive for save/export recovery when no tray is available.
+        };
         Activated += (_, args) =>
         {
             _active = args.WindowActivationState != WindowActivationState.Deactivated;
@@ -75,9 +86,22 @@ public sealed partial class MainWindow : Window
     public async void Start()
     {
         if (_started) return; _started = true;
-        await _vm.InitializeAsync(); RenderShell(false);
-        if (!_host.HotkeyRegistered) _vm.ShowError($"Ctrl+Shift+Space is already registered by another app. Open {ProductIdentity.DisplayName} from the tray.");
-        if (!_tray.IsAvailable) { _vm.ShowError($"The tray icon is unavailable. Right-click {ProductIdentity.DisplayName} for Settings or Quit."); _vm.Overlay.Expand(ModuleId.Home); }
+        try
+        {
+            // Launch is an explicit request: remain reachable even when another app is fullscreen.
+            // Capture that foreground app before Activate changes it, as the tray Open path does.
+            _host.Show();
+            Activate();
+            await _vm.InitializeAsync(); RenderShell(false);
+            if (!_host.HotkeyRegistered) _vm.ShowError($"Ctrl+Shift+Space is already registered by another app. Open {ProductIdentity.DisplayName} from the tray.");
+            if (!_tray.IsAvailable) { _vm.ShowError($"The tray icon is unavailable. Right-click {ProductIdentity.DisplayName} for Settings or Quit."); _vm.Overlay.Expand(ModuleId.Home); }
+            StartupDiagnostics.Write("MainWindow.Ready", null, $"Visible: {_host.IsVisible}; tray: {_tray.IsAvailable}; hotkey: {_host.HotkeyRegistered}");
+        }
+        catch (Exception error)
+        {
+            StartupDiagnostics.ReportFatal("MainWindow.Start", error);
+            Application.Current.Exit();
+        }
     }
     private MenuFlyout MakeContextMenu()
     {
@@ -135,7 +159,7 @@ public sealed partial class MainWindow : Window
             _host.ResizeAndPlace(requestedWidth, requestedHeight, expanded || activity, _vm.Preferences.Pinned, _vm.Preferences.ActiveMonitor,
                 showToolbar: expanded, monitorDeviceId: _vm.Preferences.MonitorDeviceId, horizontalOffset: _vm.Preferences.HorizontalOffset,
                 topOffset: _vm.Preferences.TopOffset, suppressInFullscreen: _vm.Preferences.HideInFullscreen,
-                animate: animate && !_vm.Preferences.ReducedMotion && _systemUi.AnimationsEnabled, geometryChanged: UpdateShellGeometry);
+                animate: animate && !_vm.Preferences.ReducedMotion && NativeTheme.AnimationsEnabled, geometryChanged: UpdateShellGeometry);
         BodyRow.Height = new(_host.LogicalPanelHeight);
         GapRow.Height = new(expanded ? 10 : 0); ToolbarRow.Height = new(expanded ? 48 : 0); TailRow.Height = new(expanded ? 12 : 0);
         PanelSurface.Width = _host.LogicalWidth;
@@ -169,8 +193,8 @@ public sealed partial class MainWindow : Window
             ActivitySource.Text = notification.Source.ToUpperInvariant(); ActivityTitle.Text = notification.Title; ActivityDetail.Text = notification.Detail ?? "";
             ActivityGlyph.Glyph = notification.Kind switch { ActivityKind.Focus => "\uE916", ActivityKind.Meeting => "\uE787", ActivityKind.Sale => "\uE8C7", _ => "\uE8EA" };
         }
-        if (animate && expanded && !_vm.Preferences.ReducedMotion && _systemUi.AnimationsEnabled) AnimateContent();
-        _host.Show(userRequested: false);
+        if (animate && expanded && !_vm.Preferences.ReducedMotion && NativeTheme.AnimationsEnabled) AnimateContent();
+        if (_started) _host.Show(userRequested: false);
         if (_vm.IsReady && _vm.Preferences.MonitorDeviceId is null && _host.ActiveMonitorDeviceId is { } deviceId)
             _ = _vm.ExecuteAsync(() => _vm.SetPreferencesAsync(_vm.Preferences with { MonitorDeviceId = deviceId }));
     }

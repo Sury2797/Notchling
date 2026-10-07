@@ -10,5 +10,6 @@
     <Compile Include="../../src/Notch.Windows/Services/SubscriptionService.cs" Link="SubscriptionService.cs" />
     <Compile Include="../../src/Notch.Windows/Services/ProductConfiguration.cs" Link="ProductConfiguration.cs" />
     <Compile Include="../../src/Notch.Windows/Services/WindowsUpdateService.cs" Link="WindowsUpdateService.cs" />
+    <Compile Include="../../src/Notch.Windows/Services/StartupDiagnostics.cs" Link="StartupDiagnostics.cs" />
   </ItemGroup>
 </Project>

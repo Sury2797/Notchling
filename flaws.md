@@ -8,7 +8,7 @@
 
 The source defects have been repaired, and the billing client/service, release tooling, recovery flows, contrast resources, and Windows 10/11 support contract are implemented. The application is **not yet a qualified paid public release**: the owner has confirmed that production accounts, domain, commercial weather access, and signing setup are not ready. Native Windows 10/11 interaction and performance evidence remains required.
 
-The original static audit covered the working tree based on commit [131b597](https://github.com/SuryaK999/Notch-win-linux/commit/131b597f6e2e8cdb084d633db8cd7836ad698a68). Original line references below describe that historical snapshot; they have moved after repair. The status table here supersedes the original proposed actions. Prior documentation and licensing edits were preserved and completed alongside these repairs.
+The original static audit covered the working tree based on commit [131b597](https://github.com/SuryaK999/Notchling/commit/131b597f6e2e8cdb084d633db8cd7836ad698a68). Original line references below describe that historical snapshot; they have moved after repair. The status table here supersedes the original proposed actions. Prior documentation and licensing edits were preserved and completed alongside these repairs.
 
 
 ## Implementation status — 4 October 2026
@@ -59,14 +59,14 @@ The smaller defects are also repaired: redirected Downloads uses Known Folders; 
 | Linked native orchestration | 10 cases passed using explicit Windows API doubles; these do not execute the native desktop. |
 | View-model | 36 Debug behavioral scenarios passed, plus one Release Free-enforcement fixture, including hydration-setting enforcement and corrupt-file recovery. |
 | Notice generation | Five fixtures passed, including missing-license/dependency refusal and actual installer-engine terms. |
-| Native source / Windows CI | Linked-source compilation passed; [run 37180992149](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37180992149) also passed the real WinUI XAML build, self-contained publish, notice bundle and artifact upload for source commit `7e88a82`. Both platform regression jobs passed. |
+| Native source / Windows CI | Linked-source compilation passed; [run 37180992149](https://github.com/SuryaK999/Notchling/actions/runs/37180992149) also passed the real WinUI XAML build, self-contained publish, notice bundle and artifact upload for source commit `7e88a82`. Both platform regression jobs passed. |
 | Production configuration | Missing defaults refuse live billing/weather. No production credentials or signing certificate supplied. |
 
 See [validation notes](docs/validation-notes.md), [Windows support](docs/windows-support.md), [native qualification](docs/native-qualification.md), [billing setup](docs/billing.md), and [release delivery](docs/release-delivery.md). Every unchecked native scenario below remains a release requirement.
 
 ## Installed-app findings and repairs — 4 October 2026 UTC
 
-Actual installation and UI Automation uncovered failures beyond the original source audit. These repairs passed on [`fafa2cc`](https://github.com/SuryaK999/Notch-win-linux/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee) in [Windows cloud run 37203173532](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37203173532):
+Actual installation and UI Automation uncovered failures beyond the original source audit. These repairs passed on [`fafa2cc`](https://github.com/SuryaK999/Notchling/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee) in [Windows cloud run 37203173532](https://github.com/SuryaK999/Notchling/actions/runs/37203173532):
 
 | Observed defect | Repair and evidence |
 | --- | --- |
@@ -78,6 +78,24 @@ Actual installation and UI Automation uncovered failures beyond the original sou
 The setup EXE is **8,875,854 bytes** and its application payload is **40,648,773 bytes**, without bundled .NET or Windows App Runtime files. Setup's missing Windows App Runtime transfer was **106,879,800 bytes**; .NET was already present. Both missing runtimes require roughly **147 MB total** first-install downloads at current versions, including the app and estimated .NET transfer. A small app installer does not eliminate those shared dependencies.
 
 Installed launch, native icon/message response, Free media empty state, Pomodoro start/pause/reset, scratchpad durable save/navigation/clear, and uninstall passed on the hosted Windows desktop. Full Windows 10/11 hardware qualification, real media/providers, signed releases, and production billing remain open. Exact measurements and limits are in [validation notes](docs/validation-notes.md).
+
+## Windows 10 installer report and reliability repairs — 7 October 2026
+
+The owner's Windows 10 Pro 22H2 machine (build **19045.7725**) reproduced an evaluation **0.2.0** setup failure. Its log confirms .NET 10.0.12 was present, Microsoft's 106,879,800-byte runtime download passed Authenticode verification, and the native Windows App Runtime installer returned **0x8007007E** (module not found). The required 1.8 framework/Main/DDLM registrations were missing or below the SDK minimum; the newer shared Singleton was healthy. This was an installation failure, not evidence that the notch's managed UI had launched and crashed. The older cloud result did not cover this device configuration.
+
+The **0.2.1** candidate repairs the following confirmed issues:
+
+| Finding | Repair and coverage |
+| --- | --- |
+| Native runtime installer cannot load a module | Targeted recovery reads the already verified Microsoft's four x64 MSIX resources as data, checks every manifest before deployment, and lets Windows verify the package signatures. Framework dependencies install first; healthy newer Singleton registrations are reused. Other installer errors do not trigger this fallback. |
+| Setup hides the failing component and shows a blank console | Capture installer output; record component, hexadecimal error and phase; explain cancelled permission/restarts and genuine Windows package-deployment failures. |
+| Setup does not launch the app by default | The normal post-install Open action is selected; silent installs still do not launch it. |
+| Private `DOTNET_ROOT` overrides the shared runtime verified by Setup | Published apphost uses global runtime discovery; installed-app CI supplies intentionally invalid overrides. |
+| Startup/Explorer/fullscreen recovery leaves the app unreachable | Explicit first launch and existing-instance activation, optional theme/icon fallbacks, tray-registration retries, native fatal diagnostics, and save recovery before closing without a tray. |
+| Native service failures remove working controls or escape shutdown callbacks | Preserve valid media without timelines, select an active player when the current session is absent, isolate optional audio metadata, retry clipboard enrollment, and contain background telemetry/power/cleanup exceptions. |
+| Core presentation and persistence failures | Normalize imported notebook fields, reset deletion undo and obsolete calendar caches, publish media independently of telemetry, retry native integrations independently, and keep timers/local services usable while optional billing is delayed. |
+
+Local verification passed **228 checks**: 92 core, 58 commerce, 47 Debug view-model, two Release Free, 19 native-service doubles, and 10 Python release cases. Actual native source/XAML projections compiled with zero warnings/errors. Windows PowerShell 5.1 installer fixtures and real Windows installed-app execution are separate checks in the expanded workflow; their release results belong in the [validation record](docs/validation-notes.md). No result here claims every possible crash is eliminated or substitutes for running the repaired installer on the reporting laptop. See [troubleshooting](docs/troubleshooting.md).
 
 ## Original audit findings
 
@@ -389,7 +407,7 @@ Each record should name the commit and artifact hash, OS edition/build, architec
 
 ## Evidence already available
 
-The historical [CI run 37098620398](https://github.com/SuryaK999/Notch-win-linux/actions/runs/37098620398) passed the baseline Windows native build/publish and Windows/Linux core checks. The existing [validation record](docs/validation-notes.md) reports 58 core cases and 31 temporary simulated view-model scenarios. These results were not rerun during this audit and do not certify the pending working-tree changes, native desktop behavior, live integrations, or subscription readiness.
+The historical [CI run 37098620398](https://github.com/SuryaK999/Notchling/actions/runs/37098620398) passed the baseline Windows native build/publish and Windows/Linux core checks. The existing [validation record](docs/validation-notes.md) reports 58 core cases and 31 temporary simulated view-model scenarios. These results were not rerun during this audit and do not certify the pending working-tree changes, native desktop behavior, live integrations, or subscription readiness.
 
 The existing separation of portable core and native services, atomic storage replacement, bounded provider responses, opt-in memory-only clipboard capture, explicit demo labels, credential-vault use, and reduced-motion checks are useful foundations. They should be preserved while repairing the specific failure paths. No full rewrite is justified by the evidence collected here.
 

@@ -48,8 +48,12 @@ jobs:
         run: python -m unittest discover -s tests/release -v
 
   windows:
-    name: Windows x64 installer and launch smoke
-    runs-on: windows-latest
+    name: Windows x64 installer and launch (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-2022]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v6
@@ -66,6 +70,24 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$parseErrors) | Out-Null
             if ($parseErrors) { throw ($parseErrors | Out-String) }
           }
+      - name: Exercise prerequisite handling in Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          $desktopPowerShell = Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          & $desktopPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-prerequisites.ps1 -Mode Unit -OutputDirectory artifacts/prerequisite-tests
+          if ($LASTEXITCODE -ne 0) { throw 'Prerequisite regression fixtures failed.' }
+      - name: Exercise Windows App Runtime module-not-found recovery
+        shell: pwsh
+        run: |
+          $desktopPowerShell = Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          & $desktopPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-prerequisites.ps1 -Mode RuntimeFallback -OutputDirectory artifacts/prerequisite-tests
+          if ($LASTEXITCODE -ne 0) { throw 'Signed Windows App Runtime package recovery failed.' }
+      - name: Exercise the missing-dotnet download and installer path
+        shell: pwsh
+        run: |
+          $desktopPowerShell = Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          & $desktopPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-prerequisites.ps1 -Mode Integration -OutputDirectory artifacts/prerequisite-tests
+          if ($LASTEXITCODE -ne 0) { throw 'The production .NET download/install branch failed.' }
       - name: Build native WinUI application
         run: dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=x64
       - name: Publish application without bundled shared runtimes
@@ -169,14 +191,14 @@ jobs:
           }
       - uses: actions/upload-artifact@v6
         with:
-          name: notchling-windows-x64-installer
+          name: ${{ matrix.os == 'windows-latest' && 'notchling-windows-x64-installer' || 'notchling-windows-x64-installer-windows-2022' }}
           path: artifacts/installer/*-evaluation-setup.exe
           compression-level: 0
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v6
         with:
-          name: notchling-windows-x64-app-only
+          name: ${{ matrix.os == 'windows-latest' && 'notchling-windows-x64-app-only' || 'notchling-windows-x64-app-only-windows-2022' }}
           path: artifacts/notchling-windows-x64/*
           compression-level: 9
           if-no-files-found: error
@@ -184,13 +206,14 @@ jobs:
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: notchling-windows-cloud-test-results
+          name: ${{ matrix.os == 'windows-latest' && 'notchling-windows-cloud-test-results' || 'notchling-windows-cloud-test-results-windows-2022' }}
           path: |
             artifacts/package-size.json
             artifacts/windows-smoke.json
             artifacts/windows-ui-smoke.json
             artifacts/installer-smoke.log
             artifacts/setup-prerequisites.log
+            artifacts/prerequisite-tests/
           if-no-files-found: warn
           retention-days: 14
 
