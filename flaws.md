@@ -102,7 +102,7 @@ Local verification passed **228 checks**: 92 core, 58 commerce, 47 Debug view-mo
 
 The supplied PDF shows evaluation **0.2.5** running on the reporting Windows laptop. The screenshots confirm sparse Free layouts, persistent sample-mode labeling/music, Settings horizontal overflow, an overcrowded dock and a Premium-access message styled as an error. The reported lag, sticking and unexpected closing require the forthcoming live video to distinguish collapse/fullscreen suppression from a process exit. No video was attached with this PDF.
 
-The **0.2.9** candidate addresses these findings:
+The **0.2.9** evaluation release addresses these findings:
 
 | Finding | Repair |
 | --- | --- |
@@ -115,7 +115,7 @@ The **0.2.9** candidate addresses these findings:
 | Placement exceeds a small or scaled display | Pixel-clamped work-area geometry handles fractional DPI, mixed monitor coordinates and extreme saved offsets; an unusably short work area omits the dock. |
 | Awake toggle/shutdown can wait on a worker indefinitely | Native disposable Windows power-request handles replace blocking worker handshakes and joins. Windows API failure closes partial requests cleanly. Actual Premium Awake hardware qualification remains open. |
 
-Local checks passed **246 scenarios**: 103 core (including 11 geometry cases), 58 commerce, 53 Debug view-model, three Release Free, 19 native-service doubles, and 10 release cases. Native source/XAML projections compiled with zero warnings/errors. The expanded Windows UI check exercises real pointer movements, dock bounds, active Settings retention, horizontal containment, preference scrolling/drafts and preview exit, in addition to playback empty state, Pomodoro and scratchpad. Candidate Windows execution is pending; this report does not claim the forthcoming video's failures have already been reproduced.
+Local checks passed **246 scenarios**: 103 core (including 11 geometry cases), 58 commerce, 53 Debug view-model, three Release Free, 19 native-service doubles, and 10 release cases. Native source/XAML projections compiled with zero warnings/errors. The expanded Windows UI check exercises real pointer movements, dock bounds, active Settings retention, horizontal containment, preference scrolling/drafts and preview exit, in addition to playback empty state, Pomodoro and scratchpad. All jobs passed in [run 37669754772](https://github.com/Sury2797/Notchling/actions/runs/37669754772), including actual installation, the expanded UI assertions, reopening and uninstall on both Windows hosts. The public 8,889,407-byte EXE download and release checksum were verified. The repository links and exact trusted update URLs now use GitHub's confirmed `Sury2797/Notchling` location. No live video has arrived; this report does not claim its reported freezes or process exits have already been reproduced. Hardware qualification and native Premium Awake testing remain open.
 
 ## Original audit findings
 

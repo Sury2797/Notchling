@@ -172,3 +172,25 @@ Source [`a327486`](https://github.com/Sury2797/Notchling/commit/a32748649c2d0544
 The earlier qualification candidates were withheld: PowerShell 5.1 compression assembly loading, null native-installer exit codes, and a three-second cold-start pin-persistence timeout failed checks. Explicit compression loading, retained process handles/refreshed exit state, and a bounded ten-second persistence check with detailed failure diagnostics cleared the final run.
 
 The owner must still retest this EXE on the reporting laptop. Hosted Windows runners do not qualify consumer Windows 10/11 hardware, mixed DPI, Narrator, high contrast, real playback/audio, sustained performance, denied UAC/offline installation, signed production updates or live billing. The native Linux desktop remains planned.
+
+
+## Responsive native UI qualification — 8 October 2026
+
+Source [`42dbdcd`](https://github.com/Sury2797/Notchling/commit/42dbdcdee797f98db9a4d3f68b89ec68b3a3c8bd) passed every job in [run 37669754772](https://github.com/Sury2797/Notchling/actions/runs/37669754772). [Download v0.2.9 Setup](https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.2.9/Notchling-0.2.9-windows-x64-evaluation-setup.exe). GitHub confirmed the repository moved to `Sury2797/Notchling`; source and helper update allowlists, installer links, release scripts and documentation use that exact canonical address. Signer and integrity requirements were retained.
+
+| Check | Result and scope |
+| --- | --- |
+| Portable checks | **246 scenarios per host**: 103 core, 58 commerce, 53 Debug view-model, three Release Free, 19 native-service doubles, 10 Python release cases. Native source/XAML projections compiled. |
+| Geometry and state regressions | Eleven linked geometry cases cover fractional DPI, small work areas, negative monitor coordinates, offsets and pixel containment. Preview migration/exit, slow refreshes, durable preference saves and unchanged-timer notification cases passed. These are functional fixtures, not physical display tests. |
+| Prerequisites/native delivery | Existing Windows PowerShell 5.1 unit/integration/signed-resource recovery checks passed on both `windows-latest` and `windows-2022`; real WinUI/XAML build, publish, setup and uninstall passed. Final app Setup reused the runtimes prepared by integration fixtures. |
+| Dock and collapse behavior | Actual DPI-aware pointer moves inside the panel/dock gap kept an unpinned panel expanded. Active unpinned Settings stayed expanded with the pointer outside. Every enabled Free dock control stayed within the window/work area. |
+| Settings layout and editing | Vertical scrolling exposed controls; all visible elements stayed horizontally contained at eleven scroll positions. A Reduce motion toggle retained scroll position. An unapplied Pomodoro number draft survived Home/Settings navigation. |
+| Real data and preview | Startup had no automatic sample label/music/preview strip. The test explicitly enabled sample mode, checked its label, exited it, and verified return to a real no-player state. |
+| Free controls | Native no-player media controls were disabled; Pomodoro start/pause/reset and scratchpad editing, durable saves, navigation and clear passed. |
+| Runtime and window recovery | Deliberately invalid child-process .NET environment overrides did not prevent launch. Launching another instance reopened the original responding window and exited the duplicate process. |
+| Hosted startup observations | First window: **796.1 ms / 2,440.5 ms**. Five responsiveness samples each. Working set **108.50 / 111.39 MiB**; private memory **31.70 / 33.91 MiB**; CPU across all cores **0.622% / 0.851%** over roughly five seconds. These are cold/startup observations, not settled-idle or animation benchmarks. |
+| Public delivery | Unauthenticated EXE download succeeded; valid Windows PE header; **8,889,407 bytes**. Published payload **40,692,808 bytes**, shared runtimes excluded. SHA-256 matched the release: `93854ce331aa863a4d35005efd166a051ebeefdf835bc58b32117c5413d044cd`. |
+
+The initial UI candidates were withheld while the test harness was corrected: pattern-aware selection now chooses actual switches/inputs instead of identically named text labels, and the PowerShell 5.1 preview assertion constructs its middle-dot character without relying on UTF-8-without-BOM decoding. The complete interaction suite passed after these corrections; functional assertions were retained.
+
+No live recording was supplied for this repair round. The PDF-visible issues are addressed and cloud checks passed, but the owner's actual freezes/process exits, consumer Windows 10/11 hardware, fullscreen behavior, mixed-monitor transitions, Narrator/high contrast, actual media/audio, Premium Awake, sustained performance, production signing and live billing still require their stated qualification. Linux native desktop remains planned.
