@@ -293,6 +293,7 @@ function New-ManifestArchive {
         [string]$Architecture = 'x64',
         [string]$Publisher = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US',
         [bool]$IncludeSignature = $true)
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $path = Join-Path $OutputDirectory $FileName
     if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }

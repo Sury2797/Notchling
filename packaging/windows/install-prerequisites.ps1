@@ -223,6 +223,7 @@ function Invoke-RuntimeInstaller([string]$Installer, [string[]]$Arguments, [swit
 }
 
 function Get-WindowsAppRuntimePackageIdentity([string]$Package, [string]$ExpectedName) {
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($Package)
     $reader = $null; $stream = $null
