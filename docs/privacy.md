@@ -1,6 +1,6 @@
 # Notchling privacy and data handling
 
-**Development privacy notice — 4 October 2026.** The project's maintainer is [SuryaK999](https://github.com/SuryaK999). Before operating a paid service, publish the actual controller identity, private contact, hosting/subprocessor details, retention schedule and applicable regional rights. Unconfigured services make no billing requests.
+**Development privacy notice — 4 October 2026.** Contact the project maintainer through [GitHub Issues](https://github.com/Sury2797/Notchling/issues). Before operating a paid service, publish the actual controller identity, private contact, hosting/subprocessor details, retention schedule and applicable regional rights. Unconfigured services make no billing requests.
 
 ## Data on your device
 

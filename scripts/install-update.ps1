@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$TrustedPublisherPublicKeySha256,
     [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$CurrentVersion,
-    [string]$ManifestUrl = 'https://github.com/SuryaK999/Notchling/releases/latest/download/notchling-update.json'
+    [string]$ManifestUrl = 'https://github.com/Sury2797/Notchling/releases/latest/download/notchling-update.json'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -10,7 +10,7 @@ Add-Type -AssemblyName System.Net.Http
 # Trust is supplied by the installed/signed release, never taken from the remote
 # manifest. The default GitHub stable channel is the only permitted source.
 $manifestUri = [Uri]$ManifestUrl
-if ($manifestUri.AbsoluteUri -ne 'https://github.com/SuryaK999/Notchling/releases/latest/download/notchling-update.json') {
+if ($manifestUri.AbsoluteUri -ne 'https://github.com/Sury2797/Notchling/releases/latest/download/notchling-update.json') {
     throw 'Only the official stable update manifest is accepted.'
 }
 if ([Environment]::OSVersion.Version.Build -lt 19045 -or -not [Environment]::Is64BitOperatingSystem) { throw 'Updates require Windows 10 22H2/build 19045 or Windows 11, x64.' }
@@ -40,7 +40,7 @@ try {
     if ([Version]$manifest.version -le [Version]$CurrentVersion) { Write-Output 'Notchling is current.'; return }
     if ([Environment]::OSVersion.Version.Build -lt $manifest.minimumWindowsBuild) { throw 'This update requires a newer Windows build.' }
     if ($manifest.sha256 -notmatch '^[0-9a-fA-F]{64}$' -or $manifest.sizeBytes -le 0 -or $manifest.sizeBytes -gt 268435456) { throw 'Invalid installer integrity information.' }
-    $expectedUrl = "https://github.com/SuryaK999/Notchling/releases/download/v$($manifest.version)/Notchling-$($manifest.version)-windows-x64-setup.exe"
+    $expectedUrl = "https://github.com/Sury2797/Notchling/releases/download/v$($manifest.version)/Notchling-$($manifest.version)-windows-x64-setup.exe"
     if ($manifest.installerUrl -ne $expectedUrl) { throw 'Installer must be an exact official release asset.' }
     $installer = Join-Path $work 'Notchling-setup.exe'
     # Use streaming HttpClient with an enforced upper bound, rather than trusting

@@ -1,6 +1,6 @@
 # Notchling support, cancellation and refunds
 
-**Development support:** [GitHub Issues](https://github.com/SuryaK999/Notchling/issues). Include the app version/commit, Windows edition/build, affected tool, expected behavior and minimal reproduction steps. Remove personal data and secrets. The public issue tracker is not a channel for credentials, card data or private billing records.
+**Development support:** [GitHub Issues](https://github.com/Sury2797/Notchling/issues). Include the app version/commit, Windows edition/build, affected tool, expected behavior and minimal reproduction steps. Remove personal data and secrets. The public issue tracker is not a channel for credentials, card data or private billing records.
 
 **Premium price:** US$2/month, billed monthly once the configured service launches. Both Windows 10 22H2 x64 and supported Windows 11 x64 releases are equal qualification targets. Linux desktop support is not part of the current subscription promise.
 

@@ -11,7 +11,7 @@ Debug exposes the broader development catalog; Release enforces the feature spli
 | Native Windows application | C#/WinUI 3 with Windows App SDK; tray, global shortcut, native overlay placement and local tools implemented |
 | Portable core | Timers, state machine, local storage, conversions and provider/import adapters; checks run on Windows and Linux |
 | Connected data | Read-only Stripe reporting, configured HTTPS analytics, Open-Meteo development weather and explicit calendar/coding imports |
-| Build and packaging | Windows x64 Release build and self-contained unpackaged publish verified by [CI](https://github.com/SuryaK999/Notchling/actions/runs/37098620398) |
+| Build and packaging | Windows x64 Release build and self-contained unpackaged publish verified by [CI](https://github.com/Sury2797/Notchling/actions/runs/37098620398) |
 | Interactive release QA | Windows launch, accessibility, monitor behavior, live service checks and performance measurement remain required |
 | Subscriptions | Free/Premium product policy documented; Release enforcement and configurable secure service implemented; production activation and live sandbox validation pending |
 | Linux desktop | Planned; the core is portable, while the UI and operating-system services are Windows-specific |

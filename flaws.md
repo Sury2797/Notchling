@@ -8,7 +8,7 @@
 
 The source defects have been repaired, and the billing client/service, release tooling, recovery flows, contrast resources, and Windows 10/11 support contract are implemented. The application is **not yet a qualified paid public release**: the owner has confirmed that production accounts, domain, commercial weather access, and signing setup are not ready. Native Windows 10/11 interaction and performance evidence remains required.
 
-The original static audit covered the working tree based on commit [131b597](https://github.com/SuryaK999/Notchling/commit/131b597f6e2e8cdb084d633db8cd7836ad698a68). Original line references below describe that historical snapshot; they have moved after repair. The status table here supersedes the original proposed actions. Prior documentation and licensing edits were preserved and completed alongside these repairs.
+The original static audit covered the working tree based on commit [131b597](https://github.com/Sury2797/Notchling/commit/131b597f6e2e8cdb084d633db8cd7836ad698a68). Original line references below describe that historical snapshot; they have moved after repair. The status table here supersedes the original proposed actions. Prior documentation and licensing edits were preserved and completed alongside these repairs.
 
 
 ## Implementation status — 4 October 2026
@@ -59,14 +59,14 @@ The smaller defects are also repaired: redirected Downloads uses Known Folders; 
 | Linked native orchestration | 10 cases passed using explicit Windows API doubles; these do not execute the native desktop. |
 | View-model | 36 Debug behavioral scenarios passed, plus one Release Free-enforcement fixture, including hydration-setting enforcement and corrupt-file recovery. |
 | Notice generation | Five fixtures passed, including missing-license/dependency refusal and actual installer-engine terms. |
-| Native source / Windows CI | Linked-source compilation passed; [run 37180992149](https://github.com/SuryaK999/Notchling/actions/runs/37180992149) also passed the real WinUI XAML build, self-contained publish, notice bundle and artifact upload for source commit `7e88a82`. Both platform regression jobs passed. |
+| Native source / Windows CI | Linked-source compilation passed; [run 37180992149](https://github.com/Sury2797/Notchling/actions/runs/37180992149) also passed the real WinUI XAML build, self-contained publish, notice bundle and artifact upload for source commit `7e88a82`. Both platform regression jobs passed. |
 | Production configuration | Missing defaults refuse live billing/weather. No production credentials or signing certificate supplied. |
 
 See [validation notes](docs/validation-notes.md), [Windows support](docs/windows-support.md), [native qualification](docs/native-qualification.md), [billing setup](docs/billing.md), and [release delivery](docs/release-delivery.md). Every unchecked native scenario below remains a release requirement.
 
 ## Installed-app findings and repairs — 4 October 2026 UTC
 
-Actual installation and UI Automation uncovered failures beyond the original source audit. These repairs passed on [`fafa2cc`](https://github.com/SuryaK999/Notchling/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee) in [Windows cloud run 37203173532](https://github.com/SuryaK999/Notchling/actions/runs/37203173532):
+Actual installation and UI Automation uncovered failures beyond the original source audit. These repairs passed on [`fafa2cc`](https://github.com/Sury2797/Notchling/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee) in [Windows cloud run 37203173532](https://github.com/Sury2797/Notchling/actions/runs/37203173532):
 
 | Observed defect | Repair and evidence |
 | --- | --- |
@@ -96,13 +96,13 @@ The **0.2.5** evaluation release repairs the following confirmed issues:
 | Native service failures remove working controls or escape shutdown callbacks | Preserve valid media without timelines, select an active player when the current session is absent, isolate optional audio metadata, retry clipboard enrollment, and contain background telemetry/power/cleanup exceptions. |
 | Core presentation and persistence failures | Normalize imported notebook fields, reset deletion undo and obsolete calendar caches, publish media independently of telemetry, retry native integrations independently, and keep timers/local services usable while optional billing is delayed. |
 
-Local verification passed **228 checks**: 92 core, 58 commerce, 47 Debug view-model, two Release Free, 19 native-service doubles, and 10 Python release cases. Actual native source/XAML projections compiled with zero warnings/errors. Windows PowerShell 5.1 prerequisite fixtures, actual Microsoft runtime integration/recovery, native build/publish, and installed-app controls/reopening/uninstall also passed on both `windows-latest` and `windows-2022` in [run 37608970728](https://github.com/SuryaK999/Notchling/actions/runs/37608970728). The published installer is 8,881,476 bytes. Exact results are in the [validation record](docs/validation-notes.md). No result here claims every possible crash is eliminated or substitutes for running the repaired installer on the reporting laptop. See [troubleshooting](docs/troubleshooting.md).
+Local verification passed **228 checks**: 92 core, 58 commerce, 47 Debug view-model, two Release Free, 19 native-service doubles, and 10 Python release cases. Actual native source/XAML projections compiled with zero warnings/errors. Windows PowerShell 5.1 prerequisite fixtures, actual Microsoft runtime integration/recovery, native build/publish, and installed-app controls/reopening/uninstall also passed on both `windows-latest` and `windows-2022` in [run 37608970728](https://github.com/Sury2797/Notchling/actions/runs/37608970728). The published installer is 8,881,476 bytes. Exact results are in the [validation record](docs/validation-notes.md). No result here claims every possible crash is eliminated or substitutes for running the repaired installer on the reporting laptop. See [troubleshooting](docs/troubleshooting.md).
 
 ## Live UI report and refinement — 7 October 2026
 
 The supplied PDF shows evaluation **0.2.5** running on the reporting Windows laptop. The screenshots confirm sparse Free layouts, persistent sample-mode labeling/music, Settings horizontal overflow, an overcrowded dock and a Premium-access message styled as an error. The reported lag, sticking and unexpected closing require the forthcoming live video to distinguish collapse/fullscreen suppression from a process exit. No video was attached with this PDF.
 
-The **0.2.8** candidate addresses these findings:
+The **0.2.9** candidate addresses these findings:
 
 | Finding | Repair |
 | --- | --- |
@@ -427,7 +427,7 @@ Each record should name the commit and artifact hash, OS edition/build, architec
 
 ## Evidence already available
 
-The historical [CI run 37098620398](https://github.com/SuryaK999/Notchling/actions/runs/37098620398) passed the baseline Windows native build/publish and Windows/Linux core checks. The existing [validation record](docs/validation-notes.md) reports 58 core cases and 31 temporary simulated view-model scenarios. These results were not rerun during this audit and do not certify the pending working-tree changes, native desktop behavior, live integrations, or subscription readiness.
+The historical [CI run 37098620398](https://github.com/Sury2797/Notchling/actions/runs/37098620398) passed the baseline Windows native build/publish and Windows/Linux core checks. The existing [validation record](docs/validation-notes.md) reports 58 core cases and 31 temporary simulated view-model scenarios. These results were not rerun during this audit and do not certify the pending working-tree changes, native desktop behavior, live integrations, or subscription readiness.
 
 The existing separation of portable core and native services, atomic storage replacement, bounded provider responses, opt-in memory-only clipboard capture, explicit demo labels, credential-vault use, and reduced-motion checks are useful foundations. They should be preserved while repairing the specific failure paths. No full rewrite is justified by the evidence collected here.
 

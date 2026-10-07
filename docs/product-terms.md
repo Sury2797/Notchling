@@ -2,7 +2,7 @@
 
 **Draft policy — 4 October 2026. Billing is disabled until the publisher completes the commercial configuration and publishes these terms with its legal identity and required consumer disclosures.** This document provides reviewable product policy; it is not an active checkout or a claim that a legal review has occurred.
 
-The project maintainer is [SuryaK999](https://github.com/SuryaK999). The source is governed separately by [LICENSE](../LICENSE). Official application usage follows the applicable product terms; a subscription does not transfer source ownership, permit resale or grant redistribution rights.
+Contact the project maintainer through [GitHub Issues](https://github.com/Sury2797/Notchling/issues). The source is governed separately by [LICENSE](../LICENSE). Official application usage follows the applicable product terms; a subscription does not transfer source ownership, permit resale or grant redistribution rights.
 
 ## Free and Premium
 
@@ -32,6 +32,6 @@ Features depend on compatible Windows APIs, external services and explicitly imp
 
 ## Support and required publisher information
 
-Development issue reports use [GitHub Issues](https://github.com/SuryaK999/Notchling/issues). Commercial support is subject to [the support policy](support.md). Required release fields remain: publisher legal name/address, private contact, jurisdiction and required consumer disclosures, tax handling, account/device/offline rules, refund process, and the live authenticated billing portal. The owner must complete and approve them before charging.
+Development issue reports use [GitHub Issues](https://github.com/Sury2797/Notchling/issues). Commercial support is subject to [the support policy](support.md). Required release fields remain: publisher legal name/address, private contact, jurisdiction and required consumer disclosures, tax handling, account/device/offline rules, refund process, and the live authenticated billing portal. The owner must complete and approve them before charging.
 
 The source license's warranty limitations remain subject to mandatory consumer rights. No term excludes liability or rights that applicable law does not permit the publisher to exclude.

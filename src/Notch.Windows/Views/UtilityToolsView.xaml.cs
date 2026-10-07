@@ -547,10 +547,10 @@ public sealed partial class UtilityToolsView : UserControl
             Row(endpoint, Button("Save endpoint", () => _vm.SetPreferencesAsync(_vm.Preferences with { AnalyticsEndpoint = endpoint.Text }))),
             Text("Provider credentials are stored using Windows protection. Coding and calendar accept imported files in their tools. Weather requires a configured licensed service.", 12, true)));
 
-        ContentStack.Children.Add(SettingsDetails("preview", "Sample-data preview", "Preview connected layouts without configuring a provider.",
+        ContentStack.Children.Add(SettingsDetails("preview", "Sample-data preview", "See labeled sample states without connecting an account.",
             Toggle("Preview sample data for this session", "Samples are labeled. This does not start music or control your real player.", preferences.DemoMode, value => _vm.Preferences with { DemoMode = value })));
         ContentStack.Children.Add(SettingsDetails("support", "Updates and troubleshooting", "Get updates or reconnect optional Windows services.",
-            Row(Button("Check for verified updates", _vm.CheckForUpdatesAsync), Button("Release page", () => OpenLink("https://github.com/SuryaK999/Notchling/releases"))),
+            Row(Button("Check for verified updates", _vm.CheckForUpdatesAsync), Button("Release page", () => OpenLink("https://github.com/Sury2797/Notchling/releases"))),
             Button("Retry media and clipboard services", _vm.RetryNativeServicesAsync),
             Text("Ctrl + Shift + Space opens Notchling. Esc collapses the panel. You can also reopen it from the Windows tray.", 12, true)));
         var notifications = _vm.NotificationHistory.Take(10).Select(activity => (UIElement)Text(activity.Source + ": " + activity.Title, 12, true)).ToArray();

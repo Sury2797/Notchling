@@ -1,6 +1,6 @@
 # Validation evidence
 
-Historical baseline recorded on **3 October 2026**; remediation checks recorded on **4 October 2026** (Asia/Kolkata). The verified baseline is commit [`131b597`](https://github.com/SuryaK999/Notchling/commit/131b597f6e2e8cdb084d633db8cd7836ad698a68). Later changes require their own checks; this record does not certify a future release.
+Historical baseline recorded on **3 October 2026**; remediation checks recorded on **4 October 2026** (Asia/Kolkata). The verified baseline is commit [`131b597`](https://github.com/Sury2797/Notchling/commit/131b597f6e2e8cdb084d633db8cd7836ad698a68). Later changes require their own checks; this record does not certify a future release.
 
 ## Verified baseline
 
@@ -16,7 +16,7 @@ Historical baseline recorded on **3 October 2026**; remediation checks recorded 
 | Subscription billing and enforcement | Not implemented |
 | Linux desktop UI | Not implemented |
 
-The Windows and Linux jobs are recorded in [GitHub Actions run 37098620398](https://github.com/SuryaK999/Notchling/actions/runs/37098620398). The repository's CI badge reports the current workflow status; this table records the named baseline.
+The Windows and Linux jobs are recorded in [GitHub Actions run 37098620398](https://github.com/Sury2797/Notchling/actions/runs/37098620398). The repository's CI badge reports the current workflow status; this table records the named baseline.
 
 ## Core test coverage
 
@@ -91,7 +91,7 @@ The custom runner exits with failure when a case fails, times out or no cases ar
 | Release Free-plan fixture | One executed, one passed; unconfigured Release remained Free and direct paid commands were gated |
 | XAML source generator | Five source XAML documents parsed and regenerated; full linked native C#/WinUI member projections compiled with zero C# errors. Windows UI was not executed. |
 | Publisher notice/SBOM fixtures | Five passed: exact text/hash preservation, build-only scope, missing dependency/runtime-notice refusal, and installer-engine license/provenance inclusion |
-| Hosted Windows WinUI build/publish | Passed for [`7e88a82`](https://github.com/SuryaK999/Notchling/commit/7e88a82139d560d453ec1db999f3f5015c4c4f40) in [run 37180992149](https://github.com/SuryaK999/Notchling/actions/runs/37180992149); real XAML build, self-contained publish, release-script syntax, notice bundle and evaluation ZIP upload succeeded |
+| Hosted Windows WinUI build/publish | Passed for [`7e88a82`](https://github.com/Sury2797/Notchling/commit/7e88a82139d560d453ec1db999f3f5015c4c4f40) in [run 37180992149](https://github.com/Sury2797/Notchling/actions/runs/37180992149); real XAML build, self-contained publish, release-script syntax, notice bundle and evaluation ZIP upload succeeded |
 | Hosted Windows/Linux regression jobs | Both passed for the same source commit, including billing, core, Debug/Release view-model, linked native services, source projections and notice fixtures |
 | Actual Windows release / installer / update | Not executed; publisher signing credentials and native Windows machines unavailable |
 
@@ -124,11 +124,11 @@ The approved public name is **Notchling**, with **A — Pixel Dragon** as its se
 | Renamed application Windows build/publish | Passed the real hosted WinUI Release build and self-contained publish; notices/inventory, ZIP, and artifact upload passed |
 | Hosted cross-platform workflow | Passed on the named branding revision, including Linux and Windows regression jobs |
 
-These hosted results are recorded for source commit [`e203c2e`](https://github.com/SuryaK999/Notchling/commit/e203c2e99baaeca97ace2bf8482df49a8a02534b) in [GitHub Actions run 37185720671](https://github.com/SuryaK999/Notchling/actions/runs/37185720671). The unsigned evaluation artifact is **`notchling-windows-x64-unpackaged`**. Native launch, perceived icon appearance, mixed-monitor interaction, and Windows 10/11 hardware qualification remain unrecorded.
+These hosted results are recorded for source commit [`e203c2e`](https://github.com/Sury2797/Notchling/commit/e203c2e99baaeca97ace2bf8482df49a8a02534b) in [GitHub Actions run 37185720671](https://github.com/Sury2797/Notchling/actions/runs/37185720671). The unsigned evaluation artifact is **`notchling-windows-x64-unpackaged`**. Native launch, perceived icon appearance, mixed-monitor interaction, and Windows 10/11 hardware qualification remain unrecorded.
 
 ## Installed Windows app verification — 4 October 2026 UTC
 
-Source [`fafa2cc`](https://github.com/SuryaK999/Notchling/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee) passed every job in [CI run 37203173532](https://github.com/SuryaK999/Notchling/actions/runs/37203173532), including publication of the `notchling-evaluation-0.2.0` prerelease. The Windows job tested the actual evaluation setup and the executable installed by it, rather than launching from the build directory. [Download the tested Setup EXE](https://github.com/SuryaK999/Notchling/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe) directly; release downloads require no sign-in or ZIP extraction and do not expire with CI artifacts.
+Source [`fafa2cc`](https://github.com/Sury2797/Notchling/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee) passed every job in [CI run 37203173532](https://github.com/Sury2797/Notchling/actions/runs/37203173532), including publication of the `notchling-evaluation-0.2.0` prerelease. The Windows job tested the actual evaluation setup and the executable installed by it, rather than launching from the build directory. [Download the tested Setup EXE](https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.2.0/Notchling-0.2.0-windows-x64-evaluation-setup.exe) directly; release downloads require no sign-in or ZIP extraction and do not expire with CI artifacts.
 
 | Check | Actual result / scope |
 | --- | --- |
@@ -144,7 +144,7 @@ Source [`fafa2cc`](https://github.com/SuryaK999/Notchling/commit/fafa2ccac2c34e6
 | Cleanup and uninstall | Bounded cleanup of the owned test process and actual silent uninstaller completed; graceful save-on-Quit and upgrade/rollback were not tested |
 | Public release download | Downloaded the actual published EXE without authentication; Windows PE header, **8,875,854-byte** size, and release SHA-256 matched |
 
-The public installer SHA-256 is `2cde22306bbb0f67f7c18aa1168c1e1068f03f61ddf3bfe0761af6fd6c467ab6`. The separate [main-branch run 37203173413](https://github.com/SuryaK999/Notchling/actions/runs/37203173413) also passed the same checks. Installer compression/build metadata can produce different bytes between runs; the checksum above identifies the released tag-run EXE.
+The public installer SHA-256 is `2cde22306bbb0f67f7c18aa1168c1e1068f03f61ddf3bfe0761af6fd6c467ab6`. The separate [main-branch run 37203173413](https://github.com/Sury2797/Notchling/actions/runs/37203173413) also passed the same checks. Installer compression/build metadata can produce different bytes between runs; the checksum above identifies the released tag-run EXE.
 
 The diagnostics artifact, `notchling-windows-cloud-test-results`, contains `package-size.json`, `windows-smoke.json`, `windows-ui-smoke.json`, `installer-smoke.log`, and `setup-prerequisites.log`. The native report records OS/version, window bounds, runtime identities, process measurements, and interaction results. The artifact digest identifies GitHub's downloaded archive; it must not be represented as the enclosed setup EXE's SHA-256.
 
@@ -155,7 +155,7 @@ This hosted Windows desktop result does **not** qualify consumer Windows 10/11 h
 
 ## Windows runtime recovery and reliability — 7 October 2026
 
-Source [`a327486`](https://github.com/SuryaK999/Notchling/commit/a32748649c2d05442e513a8bbb1ba230f284070d) passed every job in [run 37608970728](https://github.com/SuryaK999/Notchling/actions/runs/37608970728). [Download v0.2.5 Setup](https://github.com/SuryaK999/Notchling/releases/download/notchling-evaluation-0.2.5/Notchling-0.2.5-windows-x64-evaluation-setup.exe). It replaces the recommended 0.2.0 download after the owner's Windows 10 19045.7725 prerequisite failure.
+Source [`a327486`](https://github.com/Sury2797/Notchling/commit/a32748649c2d05442e513a8bbb1ba230f284070d) passed every job in [run 37608970728](https://github.com/Sury2797/Notchling/actions/runs/37608970728). [Download v0.2.5 Setup](https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.2.5/Notchling-0.2.5-windows-x64-evaluation-setup.exe). It replaces the recommended 0.2.0 download after the owner's Windows 10 19045.7725 prerequisite failure.
 
 | Check | Result and limits |
 | --- | --- |

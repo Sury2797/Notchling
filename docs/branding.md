@@ -40,6 +40,6 @@ Lead ordinary download instructions with the single setup EXE. Setup handles the
 
 The displayed brand is separate from stored identity. Existing data remains under `%LOCALAPPDATA%\Notch`, and the installer retains `%LOCALAPPDATA%\Programs\Notch` and its established AppId. Credential Locker resource names, subscription-cache keys, device identity, entitlement issuer/audience, and application mutexes remain compatible. The existing-instance lookup recognizes an older running window too.
 
-The repository uses the product name: [SuryaK999/Notchling](https://github.com/SuryaK999/Notchling). GitHub redirects the previous repository URL after the rename. The `Notch.*` source/project namespaces remain compatible and do not determine the displayed product name. Previous audit text and named CI snapshots retain their historical context.
+The repository uses the product name: [Sury2797/Notchling](https://github.com/Sury2797/Notchling). GitHub redirects the previous repository URL after the rename. The `Notch.*` source/project namespaces remain compatible and do not determine the displayed product name. Previous audit text and named CI snapshots retain their historical context.
 
 The rebrand does not activate billing, publish a signed release, change the subscription price, or establish native Windows qualification. Those requirements remain in [release readiness](release-readiness.md) and [validation notes](validation-notes.md).
