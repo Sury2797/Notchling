@@ -14,6 +14,9 @@ $failure = $null
 $report = [ordered]@{
     Succeeded = $false
     Scope = "Free-tier UI Automation on a disposable CI desktop; no external player, account, or payment."
+    Stage = "Initialize owned UI Automation client"
+    Operation = $null
+    PatternRejections = @()
     Actions = @()
     MediaNoPlayerControlsDisabled = $false
     NoAutomaticSampleData = $false
@@ -32,6 +35,7 @@ $report = [ordered]@{
     ScratchpadSaved = $false
     ScratchpadCleared = $false
     ElapsedSeconds = $null
+    ScriptStackTrace = $null
     Error = $null
 }
 
@@ -41,7 +45,7 @@ function Assert-Budget {
     if ($process.HasExited) { throw "The owned app exited during UI interaction." }
 }
 
-function Find-Control([string]$Name, $ControlType, [bool]$RequireEnabled = $true) {
+function Find-Control([string]$Name, $ControlType, [bool]$RequireEnabled = $true, $Pattern = $null) {
     Assert-Budget
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $Name)
     if ($null -ne $ControlType) {
@@ -53,25 +57,40 @@ function Find-Control([string]$Name, $ControlType, [bool]$RequireEnabled = $true
         try {
             $current = $candidate.Current
             if ($current.IsOffscreen -or $current.BoundingRectangle.IsEmpty) { continue }
-            if (-not $RequireEnabled -or $current.IsEnabled) { return $candidate }
+            if ($RequireEnabled -and -not $current.IsEnabled) { continue }
+            # Settings intentionally exposes both descriptive text and its input
+            # with the same name. Only the input can satisfy the required action.
+            if ($null -ne $Pattern) {
+                $provider = $null
+                if (-not $candidate.TryGetCurrentPattern($Pattern, [ref]$provider)) {
+                    $description = "'$Name': class=$($current.ClassName), type=$($current.ControlType.ProgrammaticName), required=$($Pattern.ProgrammaticName)"
+                    if ($report.PatternRejections -notcontains $description) {
+                        $report.PatternRejections = @($report.PatternRejections + $description | Select-Object -Last 12)
+                    }
+                    continue
+                }
+            }
+            return $candidate
         } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
     }
     return $null
 }
 
-function Wait-Control([string]$Name, $ControlType, [bool]$RequireEnabled = $true) {
+function Wait-Control([string]$Name, $ControlType, [bool]$RequireEnabled = $true, $Pattern = $null) {
+    $report.Operation = "Wait for '$Name' ($ControlType; required pattern: $Pattern)"
     $wait = [Diagnostics.Stopwatch]::StartNew()
     do {
-        $control = Find-Control $Name $ControlType $RequireEnabled
+        $control = Find-Control $Name $ControlType $RequireEnabled $Pattern
         if ($control) { return $control }
         Start-Sleep -Milliseconds 100
     } while ($wait.Elapsed.TotalSeconds -lt 10)
-    throw "An accessible usable control did not appear: $Name ($ControlType)."
+    throw "An accessible usable control did not appear: $Name ($ControlType; required pattern: $Pattern)."
 }
 
 function Invoke-Button([string]$Name) {
-    $button = Wait-Control $Name ([System.Windows.Automation.ControlType]::Button)
+    $button = Wait-Control $Name ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern)
     $pattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $report.Operation = "Invoke button '$Name'"
     $pattern.Invoke()
     $report.Actions += "Invoke: $Name"
 }
@@ -94,14 +113,15 @@ function Assert-NoAutomaticSampleData {
 }
 
 function Set-Toggle([string]$Name, [bool]$On) {
-    $control = Wait-Control $Name $null
+    $control = Wait-Control $Name $null $true ([System.Windows.Automation.TogglePattern]::Pattern)
     $pattern = $control.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
     $expected = if ($On) { [System.Windows.Automation.ToggleState]::On } else { [System.Windows.Automation.ToggleState]::Off }
+    $report.Operation = "Set toggle '$Name' to $expected"
     if ($pattern.Current.ToggleState -ne $expected) { $pattern.Toggle() }
     $wait = [Diagnostics.Stopwatch]::StartNew()
     do {
         Assert-Budget
-        $control = Find-Control $Name $null
+        $control = Find-Control $Name $null $true ([System.Windows.Automation.TogglePattern]::Pattern)
         if ($control) {
             $pattern = $control.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
             if ($pattern.Current.ToggleState -eq $expected) { return }
@@ -121,7 +141,7 @@ function Move-Cursor([int]$X, [int]$Y) {
 }
 
 function Get-SettingsScroll {
-    $content = Wait-Control "Notchling settings content" $null
+    $content = Wait-Control "Notchling settings content" $null $true ([System.Windows.Automation.ScrollPattern]::Pattern)
     return $content.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
 }
 
@@ -134,15 +154,16 @@ function Scroll-Settings([double]$Percent) {
     }
 }
 
-function Scroll-ToSetting([string]$Name, $ControlType) {
-    $control = Find-Control $Name $ControlType
+function Scroll-ToSetting([string]$Name, $ControlType, $Pattern = $null) {
+    $report.Operation = "Scroll to '$Name' ($ControlType; required pattern: $Pattern)"
+    $control = Find-Control $Name $ControlType $true $Pattern
     if ($control) { return $control }
     for ($percent = 0; $percent -le 100; $percent += 10) {
         Scroll-Settings $percent
-        $control = Find-Control $Name $ControlType
+        $control = Find-Control $Name $ControlType $true $Pattern
         if ($control) { return $control }
     }
-    throw "A Settings control could not be reached by vertical scrolling: $Name."
+    throw "A Settings control could not be reached by vertical scrolling: $Name (required pattern: $Pattern)."
 }
 
 function Assert-HorizontalBounds {
@@ -273,9 +294,10 @@ namespace NotchlingUiSmoke {
     $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($WindowHandle))
     if (-not $root -or $root.Current.ProcessId -ne $AppProcessId) { throw "The supplied native window is not owned by the test app." }
 
+    $report.Stage = "Open and pin the native notch"
     Invoke-Button "Open Notchling"
     # Match the unique accessible name, then require its actual Toggle pattern.
-    $pin = Wait-Control "Keep Notchling expanded" $null
+    $pin = Wait-Control "Keep Notchling expanded" $null $true ([System.Windows.Automation.TogglePattern]::Pattern)
     $toggle = $pin.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
     if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On) { $toggle.Toggle() }
     $pinWait = [Diagnostics.Stopwatch]::StartNew()
@@ -294,14 +316,17 @@ namespace NotchlingUiSmoke {
         Start-Sleep -Milliseconds 100
     }
     $report.Actions += "Pinned expanded notch"
+    $report.Stage = "Verify startup uses real data and the Free dock fits"
     Wait-Control "Notchling Free" ([System.Windows.Automation.ControlType]::Text) | Out-Null
     Assert-NoAutomaticSampleData
     $report.NoAutomaticSampleData = $true
     Assert-DockBounds
     $report.DockWithinWorkArea = $true
+    $report.Actions += "Verified real-data startup and in-bounds Free dock"
 
     # Unpinned navigation must stay expanded while the cursor crosses children and
     # the native gap above the dock. Neither point is outside the owned HWND.
+    $report.Stage = "Unpinned pointer movement inside the native surface"
     Set-Toggle "Keep Notchling expanded" $false
     $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
     $insideX = [int](($bounds.Left + $bounds.Right) / 2)
@@ -313,7 +338,9 @@ namespace NotchlingUiSmoke {
     Start-Sleep -Milliseconds 1600
     Wait-Control "Notchling Free" ([System.Windows.Automation.ControlType]::Text) | Out-Null
     $report.PointerInsidePreservesExpanded = $true
+    $report.Actions += "Verified pointer inside the native dock gap preserves expansion"
 
+    $report.Stage = "Active unpinned Settings preserves expansion with pointer outside"
     Invoke-Button "Settings"
     Get-SettingsScroll | Out-Null
     [NotchlingUiSmoke.Native]::SetForegroundWindow([IntPtr]::new($WindowHandle)) | Out-Null
@@ -334,20 +361,24 @@ namespace NotchlingUiSmoke {
     Start-Sleep -Milliseconds 1600
     Get-SettingsScroll | Out-Null
     $report.ActiveSettingsPreservesExpanded = $true
+    $report.Actions += "Verified active Settings preserves expansion with pointer outside"
     Set-Toggle "Keep Notchling expanded" $true
 
     # Check each vertical section: disabled horizontal scrolling alone would not
     # detect oversized controls in the old infinitely measured row layout.
+    $report.Stage = "Settings vertical layout and horizontal overflow"
     for ($percent = 0; $percent -le 100; $percent += 10) {
         Scroll-Settings $percent
         Assert-HorizontalBounds
     }
     $report.SettingsNoHorizontalOverflow = $true
-    $number = Scroll-ToSetting "Pomodoro length (minutes)" $null
+    $report.Actions += "Verified Settings has no horizontal overflow at eleven vertical positions"
+    $report.Stage = "Settings toggle retains scroll and unapplied number draft"
+    $number = Scroll-ToSetting "Pomodoro length (minutes)" $null ([System.Windows.Automation.RangeValuePattern]::Pattern)
     $numberValue = $number.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
     $initialMinutes = $numberValue.Current.Value
     $numberValue.SetValue(37)
-    $motion = Scroll-ToSetting "Reduce motion" $null
+    $motion = Scroll-ToSetting "Reduce motion" $null ([System.Windows.Automation.TogglePattern]::Pattern)
     $motionValue = $motion.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
     $initialMotion = $motionValue.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On
     $scrollBefore = (Get-SettingsScroll).Current.VerticalScrollPercent
@@ -357,18 +388,21 @@ namespace NotchlingUiSmoke {
     if ([Math]::Abs($scrollAfter - $scrollBefore) -gt 1) { throw "Changing a Settings toggle reset the vertical scroll position." }
     Set-Toggle "Reduce motion" $initialMotion
     $report.SettingsTogglePreservesScroll = $true
+    $report.Actions += "Verified Settings toggle preserves vertical scroll position"
     Invoke-Button "Home"
     Invoke-Button "Settings"
-    $number = Scroll-ToSetting "Pomodoro length (minutes)" $null
+    $number = Scroll-ToSetting "Pomodoro length (minutes)" $null ([System.Windows.Automation.RangeValuePattern]::Pattern)
     $numberValue = $number.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
     if ($numberValue.Current.Value -ne 37) { throw "An unapplied Settings draft was lost when navigating away and back." }
     $numberValue.SetValue($initialMinutes)
     $report.SettingsDraftPreserved = $true
+    $report.Actions += "Verified unapplied Settings number draft survives navigation"
 
-    $preview = Scroll-ToSetting "Sample-data preview" $null
+    $report.Stage = "Explicit sample-data preview and exit to real data"
+    $preview = Scroll-ToSetting "Sample-data preview" $null ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
     $expander = $preview.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
     $expander.Expand()
-    Scroll-ToSetting "Preview sample data for this session" $null | Out-Null
+    Scroll-ToSetting "Preview sample data for this session" $null ([System.Windows.Automation.TogglePattern]::Pattern) | Out-Null
     Set-Toggle "Preview sample data for this session" $true
     Wait-Control "Preview · sample data" ([System.Windows.Automation.ControlType]::Text) | Out-Null
     Invoke-Button "Exit sample data preview"
@@ -382,6 +416,7 @@ namespace NotchlingUiSmoke {
     $report.ExplicitSamplePreviewExited = $true
     $report.Actions += "Verified active Settings, work-area dock bounds, vertical layout, toggle scroll position, unapplied draft retention, and explicit preview exit"
 
+    $report.Stage = "Genuine no-player media state"
     Invoke-Button "Media"
     Wait-Control "Nothing playing" ([System.Windows.Automation.ControlType]::Text) | Out-Null
     foreach ($name in @("Previous", "Play", "Next")) {
@@ -391,6 +426,7 @@ namespace NotchlingUiSmoke {
     $report.MediaNoPlayerControlsDisabled = $true
     $report.Actions += "Verified genuine no-player media state"
 
+    $report.Stage = "Pomodoro start pause and reset"
     Invoke-Button "Focus"
     Wait-Control "Start / pause Pomodoro" ([System.Windows.Automation.ControlType]::Button) | Out-Null
     $report.FocusInitial = Wait-FocusClock "25:00"
@@ -406,9 +442,10 @@ namespace NotchlingUiSmoke {
     $report.FocusAfterReset = Wait-FocusClock $report.FocusInitial
     $report.Actions += "Verified Pomodoro start, pause, and reset"
 
+    $report.Stage = "Free scratchpad editing persistence and navigation"
     Invoke-Button "Home"
     Invoke-Button "Scratchpad"
-    $editor = Wait-Control "Scratchpad" ([System.Windows.Automation.ControlType]::Edit)
+    $editor = Wait-Control "Scratchpad" ([System.Windows.Automation.ControlType]::Edit) $true ([System.Windows.Automation.ValuePattern]::Pattern)
     $value = $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
     if ($value.Current.IsReadOnly) { throw "The Free scratchpad is read-only." }
     $scratchpadText = "Notchling disposable cloud smoke " + [guid]::NewGuid().ToString("N")
@@ -417,7 +454,7 @@ namespace NotchlingUiSmoke {
     $report.ScratchpadSaved = $true
     Invoke-Button "Home"
     Invoke-Button "Scratchpad"
-    $editor = Wait-Control "Scratchpad" ([System.Windows.Automation.ControlType]::Edit)
+    $editor = Wait-Control "Scratchpad" ([System.Windows.Automation.ControlType]::Edit) $true ([System.Windows.Automation.ValuePattern]::Pattern)
     $value = $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
     if ($value.Current.Value -ne $scratchpadText) { throw "The scratchpad lost its text after navigating away and back." }
     $report.ScratchpadRoundTrip = $true
@@ -425,10 +462,12 @@ namespace NotchlingUiSmoke {
     Wait-ScratchpadSave ""
     $report.ScratchpadCleared = $true
     $report.Actions += "Verified scratchpad edit, durable save, navigation, and cleanup"
+    $report.Stage = "Completed all UI interaction regressions"
     $report.Succeeded = $true
 } catch {
     $failure = $_
-    $report.Error = $_.Exception.Message
+    $report.ScriptStackTrace = $_.ScriptStackTrace
+    $report.Error = "Stage [$($report.Stage)], operation [$($report.Operation)]: $($_.Exception.Message). Script stack: $($report.ScriptStackTrace). Completed actions: $($report.Actions -join '; '). Rejected named providers: $($report.PatternRejections -join '; ')"
 } finally {
     if (Get-Variable -Name restoreCursor -ErrorAction SilentlyContinue) {
         if ($restoreCursor) { [NotchlingUiSmoke.Native]::SetCursorPos($originalCursor.X, $originalCursor.Y) | Out-Null }
