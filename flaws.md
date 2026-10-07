@@ -102,7 +102,7 @@ Local verification passed **228 checks**: 92 core, 58 commerce, 47 Debug view-mo
 
 The supplied PDF shows evaluation **0.2.5** running on the reporting Windows laptop. The screenshots confirm sparse Free layouts, persistent sample-mode labeling/music, Settings horizontal overflow, an overcrowded dock and a Premium-access message styled as an error. The reported lag, sticking and unexpected closing require the forthcoming live video to distinguish collapse/fullscreen suppression from a process exit. No video was attached with this PDF.
 
-The **0.2.7** candidate addresses these findings:
+The **0.2.8** candidate addresses these findings:
 
 | Finding | Repair |
 | --- | --- |

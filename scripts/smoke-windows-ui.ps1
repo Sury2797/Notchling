@@ -404,7 +404,7 @@ namespace NotchlingUiSmoke {
     $expander.Expand()
     Scroll-ToSetting "Preview sample data for this session" $null ([System.Windows.Automation.TogglePattern]::Pattern) | Out-Null
     Set-Toggle "Preview sample data for this session" $true
-    Wait-Control "Preview · sample data" ([System.Windows.Automation.ControlType]::Text) | Out-Null
+    Wait-Control ("Preview " + [char]0x00B7 + " sample data") ([System.Windows.Automation.ControlType]::Text) | Out-Null
     Invoke-Button "Exit sample data preview"
     $previewWait = [Diagnostics.Stopwatch]::StartNew()
     while (Find-Control "Exit sample data preview" ([System.Windows.Automation.ControlType]::Button) $false) {
