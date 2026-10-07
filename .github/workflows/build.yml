@@ -72,22 +72,13 @@ jobs:
           }
       - name: Exercise prerequisite handling in Windows PowerShell 5.1
         shell: pwsh
-        run: |
-          $desktopPowerShell = Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
-          & $desktopPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-prerequisites.ps1 -Mode Unit -OutputDirectory artifacts/prerequisite-tests
-          if ($LASTEXITCODE -ne 0) { throw 'Prerequisite regression fixtures failed.' }
+        run: ./scripts/invoke-prerequisite-check.ps1 -Mode Unit
       - name: Exercise Windows App Runtime module-not-found recovery
         shell: pwsh
-        run: |
-          $desktopPowerShell = Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
-          & $desktopPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-prerequisites.ps1 -Mode RuntimeFallback -OutputDirectory artifacts/prerequisite-tests
-          if ($LASTEXITCODE -ne 0) { throw 'Signed Windows App Runtime package recovery failed.' }
+        run: ./scripts/invoke-prerequisite-check.ps1 -Mode RuntimeFallback
       - name: Exercise the missing-dotnet download and installer path
         shell: pwsh
-        run: |
-          $desktopPowerShell = Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
-          & $desktopPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-prerequisites.ps1 -Mode Integration -OutputDirectory artifacts/prerequisite-tests
-          if ($LASTEXITCODE -ne 0) { throw 'The production .NET download/install branch failed.' }
+        run: ./scripts/invoke-prerequisite-check.ps1 -Mode Integration
       - name: Build native WinUI application
         run: dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=x64
       - name: Publish application without bundled shared runtimes
