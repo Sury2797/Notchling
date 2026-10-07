@@ -83,19 +83,20 @@ Installed launch, native icon/message response, Free media empty state, Pomodoro
 
 The owner's Windows 10 Pro 22H2 machine (build **19045.7725**) reproduced an evaluation **0.2.0** setup failure. Its log confirms .NET 10.0.12 was present, Microsoft's 106,879,800-byte runtime download passed Authenticode verification, and the native Windows App Runtime installer returned **0x8007007E** (module not found). The required 1.8 framework/Main/DDLM registrations were missing or below the SDK minimum; the newer shared Singleton was healthy. This was an installation failure, not evidence that the notch's managed UI had launched and crashed. The older cloud result did not cover this device configuration.
 
-The **0.2.1** candidate repairs the following confirmed issues:
+The **0.2.5** evaluation release repairs the following confirmed issues:
 
 | Finding | Repair and coverage |
 | --- | --- |
 | Native runtime installer cannot load a module | Targeted recovery reads the already verified Microsoft's four x64 MSIX resources as data, checks every manifest before deployment, and lets Windows verify the package signatures. Framework dependencies install first; healthy newer Singleton registrations are reused. Other installer errors do not trigger this fallback. |
 | Setup hides the failing component and shows a blank console | Capture installer output; record component, hexadecimal error and phase; explain cancelled permission/restarts and genuine Windows package-deployment failures. |
+| Windows PowerShell can lose the native installer exit code | Retain the process handle before waiting, refresh the exit state, and reject missing exit evidence; the cloud integration actually runs Microsoft’s .NET installer. |
 | Setup does not launch the app by default | The normal post-install Open action is selected; silent installs still do not launch it. |
 | Private `DOTNET_ROOT` overrides the shared runtime verified by Setup | Published apphost uses global runtime discovery; installed-app CI supplies intentionally invalid overrides. |
 | Startup/Explorer/fullscreen recovery leaves the app unreachable | Explicit first launch and existing-instance activation, optional theme/icon fallbacks, tray-registration retries, native fatal diagnostics, and save recovery before closing without a tray. |
 | Native service failures remove working controls or escape shutdown callbacks | Preserve valid media without timelines, select an active player when the current session is absent, isolate optional audio metadata, retry clipboard enrollment, and contain background telemetry/power/cleanup exceptions. |
 | Core presentation and persistence failures | Normalize imported notebook fields, reset deletion undo and obsolete calendar caches, publish media independently of telemetry, retry native integrations independently, and keep timers/local services usable while optional billing is delayed. |
 
-Local verification passed **228 checks**: 92 core, 58 commerce, 47 Debug view-model, two Release Free, 19 native-service doubles, and 10 Python release cases. Actual native source/XAML projections compiled with zero warnings/errors. Windows PowerShell 5.1 installer fixtures and real Windows installed-app execution are separate checks in the expanded workflow; their release results belong in the [validation record](docs/validation-notes.md). No result here claims every possible crash is eliminated or substitutes for running the repaired installer on the reporting laptop. See [troubleshooting](docs/troubleshooting.md).
+Local verification passed **228 checks**: 92 core, 58 commerce, 47 Debug view-model, two Release Free, 19 native-service doubles, and 10 Python release cases. Actual native source/XAML projections compiled with zero warnings/errors. Windows PowerShell 5.1 prerequisite fixtures, actual Microsoft runtime integration/recovery, native build/publish, and installed-app controls/reopening/uninstall also passed on both `windows-latest` and `windows-2022` in [run 37608970728](https://github.com/SuryaK999/Notchling/actions/runs/37608970728). The published installer is 8,881,476 bytes. Exact results are in the [validation record](docs/validation-notes.md). No result here claims every possible crash is eliminated or substitutes for running the repaired installer on the reporting laptop. See [troubleshooting](docs/troubleshooting.md).
 
 ## Original audit findings
 

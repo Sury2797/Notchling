@@ -6,7 +6,7 @@ Use the official **Windows x64 Setup EXE** from [Notchling releases](https://git
 
 The 0.2.0 installer can fail while preparing Microsoft's Windows App Runtime, even when .NET and a downloaded, verified Microsoft installer are present. Error **0x8007007E** means a module could not be found; it does not identify a particular missing DLL, and retrying an Internet download alone does not fix it.
 
-The 0.2.1 installer automatically recovers from this native-installer error by reading the same trusted Microsoft EXE's signed MSIX resources without executing its loader. It validates the four x64 package identities and versions, deploys the framework before dependent packages for the installing account, and reuses a newer healthy shared Singleton. No SDK, unsigned-package mode, DLL download site, forced application shutdown, or manual package extraction is needed.
+The [v0.2.5 installer](https://github.com/SuryaK999/Notchling/releases/download/notchling-evaluation-0.2.5/Notchling-0.2.5-windows-x64-evaluation-setup.exe) automatically recovers from this native-installer error by reading the same trusted Microsoft EXE's signed MSIX resources without executing its loader. It validates the four x64 package identities and versions, deploys the framework before dependent packages for the installing account, and reuses a newer healthy shared Singleton. No SDK, unsigned-package mode, DLL download site, forced application shutdown, or manual package extraction is needed.
 
 Windows still verifies package signatures and enforces deployment policy. If package registration itself fails, Setup reports that error and stops. A genuinely damaged or policy-blocked Windows AppX service may need an administrator's Windows repair; the app cannot safely bypass those checks.
 
