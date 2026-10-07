@@ -50,6 +50,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private CancellationTokenSource? _saveDelay;
     private CancellationTokenSource? _volumeDelay;
     private int _tickCounter;
+    private TimerSnapshot? _timerSnapshot;
     private bool _loaded;
     private bool _initializing;
     private volatile bool _disposed;
@@ -113,13 +114,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool RequirePremium(ModuleId module)
     {
         if (CanAccessModule(module)) return true;
-        ShowError("This tool is included in Premium. Your existing data remains available for export in Settings.");
+        Status = "This tool is included in Premium. Your existing data remains available for export in Settings.";
         return false;
     }
     private bool RequirePremiumFeature()
     {
         if (IsPremium) return true;
-        ShowError("This control is included in Premium. Basic playback, Pomodoro and scratchpad remain available."); return false;
+        Status = "This control is included in Premium. Basic playback, Pomodoro and scratchpad remain available."; return false;
     }
     public bool CalendarRangeLoaded(DateTime month) => _calendarRange?.ContainsMonth(month) == true;
 
@@ -188,7 +189,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 var generation = _preferencesGeneration;
                 var preferences = await _store.ReadAsync<AppPreferences>("preferences", _lifetimeToken);
-                if (!_disposed && generation == _preferencesGeneration) Preferences = NormalizePreferences(preferences ?? new());
+                if (!_disposed && generation == _preferencesGeneration)
+                {
+                    // Preview is an explicit choice for this session. Older builds persisted
+                    // it and could reopen showing fabricated music and metrics indefinitely.
+                    Preferences = NormalizePreferences(preferences ?? new()) with { DemoMode = false };
+                    if (preferences?.DemoMode == true) _preferencesChanged = true;
+                }
             });
             if (_disposed) return;
             await ExecuteAsync(async () =>
@@ -235,9 +242,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             // not delay ready local tools, media registration, or initial system readings.
             if (_subscription is not null) await ExecuteAsync(RefreshSubscriptionAsync);
             if (_disposed) return;
-            if (!IsDemo && Preferences.CalendarPath is { } calendar) await ExecuteAsync(() => ImportCalendarAsync(calendar));
+            if (!IsDemo && CanAccessModule(ModuleId.Calendar) && Preferences.CalendarPath is { } calendar) await ExecuteAsync(() => ImportCalendarAsync(calendar));
             if (_disposed) return;
-            if (!IsDemo && Preferences.CodingPath is { } coding) await ExecuteAsync(() => ImportCodingAsync(coding));
+            if (!IsDemo && CanAccessModule(ModuleId.Coding) && Preferences.CodingPath is { } coding) await ExecuteAsync(() => ImportCodingAsync(coding));
         }
         finally { _initializing = false; }
     }
@@ -260,8 +267,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public void SelectModule(ModuleId module)
     {
         if (_disposed) return;
-        if (!RequirePremium(module)) { Overlay.Expand(ModuleId.Settings); return; }
         Error = _workspaceReadable ? "" : WorkspaceRecoveryMessage;
+        if (!RequirePremium(module)) { Overlay.Expand(ModuleId.Settings); return; }
         Overlay.Expand(module);
     }
     public void ShowError(string message)
@@ -290,7 +297,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             if (_disposed || !_loaded || IsDemo || !_refreshLock.Wait(0)) return;
             generation = _dataGeneration;
             viewGeneration = _viewGeneration;
-            scanPorts = Overlay.Mode == OverlayMode.Expanded && SelectedModule is ModuleId.Home or ModuleId.Servers;
+            scanPorts = CanAccessModule(ModuleId.Servers) && Overlay.Mode == OverlayMode.Expanded && SelectedModule is ModuleId.Home or ModuleId.Servers;
         }
         try
         {
@@ -314,7 +321,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             if (!CanPublish(generation)) return;
             Media = _mediaService.Current;
         }
-        catch (Exception error) when (Recoverable(error) && !CanPublish(generation)) { }
+        catch (Exception error) when (Recoverable(error) && (!CanPublish(generation) || viewGeneration != _viewGeneration)) { }
         finally { _refreshLock.Release(); }
     }
     private bool CanPublishPorts(int generation, int viewGeneration) => CanPublish(generation)
@@ -328,6 +335,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (SelectedModule == ModuleId.Weather && Weather is null) await RefreshWeatherAsync();
     });
     public Task SetPreferencesAsync(AppPreferences preferences) => ApplyPreferencesAsync(preferences);
+    public Task ExitDemoAsync() => !IsDemo || _disposed ? Task.CompletedTask : SetPreferencesAsync(Preferences with { DemoMode = false });
     private async Task ApplyPreferencesAsync(AppPreferences preferences, RequestSlot? origin = null, int originGeneration = 0)
     {
         if (_disposed) return;
@@ -345,9 +353,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             Invalidate(_calendarRequest); _calendarSource = null; _calendarRange = null;
             if (!IsDemo) CalendarEvents = [];
         }
-        Overlay.Pinned = Preferences.Pinned;
-        await ExecuteAsync(() => { ClipboardService.SetEnabled(IsPremium && Preferences.CaptureClipboard); return Task.CompletedTask; });
-        if (_disposed) return;
         if (old.FocusMinutes != Preferences.FocusMinutes && !FocusRunning) _focus.Pomodoro.Reset(TimeSpan.FromMinutes(Preferences.FocusMinutes));
         if (old.HydrationMinutes != Preferences.HydrationMinutes)
         {
@@ -362,33 +367,49 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             _calendarSource = null; _calendarRange = null;
             _volumeDelay?.Cancel(); _volumeDelay?.Dispose(); _volumeDelay = null;
             if (IsDemo && _realAwake)
-                await ExecuteAsync(() => { _systemService.SetAwake(false); _realAwake = false; return Task.CompletedTask; });
-            if (_disposed) return;
+                TryOptionalService(() => { _systemService.SetAwake(false); _realAwake = false; });
             Awake = false; Notify(nameof(Awake));
             Weather = null; Revenue = null; Analytics = null; Coding = null; CalendarEvents = [];
             Media = null; System = null; ListeningPorts = [];
             if (IsDemo) LoadDemo();
             else
             {
-                await ExecuteAsync(RefreshAsync);
-                if (_disposed) return;
-                if (!IsDemo && Preferences.CalendarPath is { } calendar) await ExecuteAsync(() => ImportCalendarAsync(calendar));
-                if (_disposed) return;
-                if (!IsDemo && Preferences.CodingPath is { } coding) await ExecuteAsync(() => ImportCodingAsync(coding));
+                Status = "Live data — controls follow your active Windows player.";
+                Media = _mediaService.Current;
             }
         }
-        if (_disposed) return;
+        Overlay.Pinned = Preferences.Pinned;
         Notify(nameof(IsDemo)); NotifyTimers();
+        TryOptionalService(() => ClipboardService.SetEnabled(IsPremium && Preferences.CaptureClipboard));
+        // Save accepted settings after invalidating their obsolete request results,
+        // but before optional native reads or calendar imports can delay the operation.
         var savedPreferencesGeneration = _preferencesGeneration;
-        var savedPreferences = Preferences;
+        var savedPreferences = Preferences with { DemoMode = false };
         await PersistAsync("preferences", savedPreferences, _lifetimeToken);
-        if (savedPreferencesGeneration == _preferencesGeneration) _preferencesChanged = false;
+        if (_disposed || savedPreferencesGeneration != _preferencesGeneration) return;
+        _preferencesChanged = false;
         Notify(nameof(HasUnsavedChanges));
+        if (old.DemoMode != Preferences.DemoMode && !IsDemo)
+        {
+            await ExecuteAsync(() => RefreshAfterPreviewAsync(_dataGeneration));
+            if (_disposed) return;
+            if (!IsDemo && CanAccessModule(ModuleId.Calendar) && Preferences.CalendarPath is { } calendar) await ExecuteAsync(() => ImportCalendarAsync(calendar));
+            if (_disposed) return;
+            if (!IsDemo && CanAccessModule(ModuleId.Coding) && Preferences.CodingPath is { } coding) await ExecuteAsync(() => ImportCodingAsync(coding));
+        }
+    }
+    private async Task RefreshAfterPreviewAsync(int generation)
+    {
+        // A live read begun before preview can still own this gate. Wait asynchronously
+        // for it to drain, then obtain a fresh sample instead of leaving the UI empty.
+        await _refreshLock.WaitAsync(_lifetimeToken);
+        _refreshLock.Release();
+        if (CanPublish(generation)) await RefreshAsync();
     }
     public Task PlayPauseAsync()
     {
         if (!ReadyForInput()) return Task.CompletedTask;
-        if (IsDemo) { if (Media is { } media) Media = media with { IsPlaying = !media.IsPlaying }; return Task.CompletedTask; }
+        if (IsDemo) return Task.CompletedTask;
         return _mediaService.PlayPauseAsync();
     }
     public Task PreviousAsync() => !ReadyForInput() || IsDemo ? Task.CompletedTask : _mediaService.PreviousAsync();
@@ -449,14 +470,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                     var accepted = Overlay.ShowActivity(new(reminder.Id, ActivityKind.Meeting, "Reminder", reminder.Title, null, DateTimeOffset.UtcNow, TimeSpan.FromSeconds(8), Destination: ModuleId.Calendar));
                     if (!accepted) _queuedReminders.Remove(reminder.Id);
                 }
+        _tickCounter++;
         if (_tickCounter % 300 == 0 && _subscription is not null) _ = ExecuteAsync(RefreshSubscriptionAsync);
-        if (++_tickCounter % 5 == 0 && Overlay.Mode == OverlayMode.Expanded && SelectedModule is ModuleId.Home or ModuleId.System or ModuleId.Media or ModuleId.Servers or ModuleId.ScreenTime)
+        if (_tickCounter % 5 == 0 && Overlay.Mode == OverlayMode.Expanded && SelectedModule is ModuleId.Home or ModuleId.System or ModuleId.Media or ModuleId.Servers or ModuleId.ScreenTime)
             _ = ExecuteAsync(RefreshAsync);
     }
     private void NotifyTimers()
     {
-        foreach (var name in new[] { nameof(FocusTime), nameof(CountdownTime), nameof(StopwatchTime), nameof(HydrationTime), nameof(FocusProgress), nameof(FocusRunning), nameof(StopwatchRunning) }) Notify(name);
+        var current = new TimerSnapshot(FocusTime, CountdownTime, StopwatchTime, HydrationTime, FocusProgress, FocusRunning, StopwatchRunning);
+        var previous = _timerSnapshot;
+        _timerSnapshot = current;
+        if (previous?.FocusTime != current.FocusTime) Notify(nameof(FocusTime));
+        if (previous?.CountdownTime != current.CountdownTime) Notify(nameof(CountdownTime));
+        if (previous?.StopwatchTime != current.StopwatchTime) Notify(nameof(StopwatchTime));
+        if (previous?.HydrationTime != current.HydrationTime) Notify(nameof(HydrationTime));
+        if (previous?.FocusProgress != current.FocusProgress) Notify(nameof(FocusProgress));
+        if (previous?.FocusRunning != current.FocusRunning) Notify(nameof(FocusRunning));
+        if (previous?.StopwatchRunning != current.StopwatchRunning) Notify(nameof(StopwatchRunning));
     }
+    private sealed record TimerSnapshot(string FocusTime, string CountdownTime, string StopwatchTime, string HydrationTime,
+        double FocusProgress, bool FocusRunning, bool StopwatchRunning);
     public void Activity(ActivityKind kind, string source, string title, string? detail)
     {
         if (!_disposed)
@@ -761,7 +794,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             Task[] writes; lock (_shutdownGate) writes = _pendingWrites.ToArray();
             try { await Task.WhenAll(writes); } catch (Exception error) when (Recoverable(error)) { /* Retry durable saves below; an earlier native or cancelled write cannot decide whether the current notebook is durable. */ }
-            if (_preferencesChanged) { var generation = _preferencesGeneration; var snapshot = Preferences; await PersistAsync("preferences", snapshot, CancellationToken.None); if (generation == _preferencesGeneration) _preferencesChanged = false; }
+            if (_preferencesChanged) { var generation = _preferencesGeneration; var snapshot = Preferences with { DemoMode = false }; await PersistAsync("preferences", snapshot, CancellationToken.None); if (generation == _preferencesGeneration) _preferencesChanged = false; }
             if (_loaded && !_workspaceReadable && _workspaceDirty) throw new InvalidDataException("Recover or export the unsaved notebook before quitting.");
             if (_loaded && _workspaceReadable) await SaveLocalAsync(CancellationToken.None);
             Notify(nameof(HasUnsavedChanges));
@@ -894,7 +927,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void LoadDemo()
     {
         if (_disposed || !IsDemo) return;
-        Media = new("Golden Hour Drive", "Neon Harbor · Coastline", null, false, TimeSpan.FromSeconds(74), TimeSpan.FromSeconds(214), "Sample media — no audio", false);
+        Media = new("Sample track", "Preview only · no audio", null, false, TimeSpan.FromSeconds(74), TimeSpan.FromSeconds(214), "Sample media — no audio", false, false, false, false, false);
         System = new(12, 48, 78, .64, "Sample output", TimeSpan.FromHours(3.3)); ListeningPorts = [3000, 5173, 8080];
         Revenue = new(RevenueProvider.Stripe, 7896.30m, "USD", Enumerable.Range(0, 8).Select(i => new RevenuePayment($"sample-{i}", i % 2 == 0 ? "Pro plan · sample" : "Team plan · sample", i % 2 == 0 ? 49 : 149, "USD", DateTimeOffset.Now.AddMinutes(-i * 4))).ToArray(), Enumerable.Range(0, 30).Select(i => (decimal)(20 + (i * 31 % 190))).ToArray(), DateTimeOffset.Now);
         Analytics = new("Sample workspace", 142, 9812, 1915, Enumerable.Range(0, 30).Select(i => 2 + (i * 7 % 18)).ToArray(), [new("/", 48), new("/pricing", 27), new("/features", 19), new("/changelog", 14)], DateTimeOffset.Now);

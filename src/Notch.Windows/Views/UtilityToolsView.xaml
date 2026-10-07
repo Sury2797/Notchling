@@ -2,7 +2,11 @@
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   FontFamily="Segoe UI" Foreground="{ThemeResource NotchTextBrush}">
-  <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" ZoomMode="Disabled" IsTabStop="False">
-    <StackPanel x:Name="ContentStack" Spacing="14" Padding="24,24,24,20" />
+  <ScrollViewer x:Name="ContentScroll" HorizontalScrollBarVisibility="Disabled"
+    HorizontalScrollMode="Disabled" VerticalScrollBarVisibility="Auto"
+    HorizontalContentAlignment="Stretch" ZoomMode="Disabled" IsTabStop="False"
+    AutomationProperties.Name="Notchling tool content">
+    <StackPanel x:Name="ContentStack" Spacing="14" Padding="24,24,24,20"
+      HorizontalAlignment="Stretch" />
   </ScrollViewer>
 </UserControl>

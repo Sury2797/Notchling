@@ -22,10 +22,15 @@
           </Grid>
         </Button>
         <Grid x:Name="ExpandedContent" Visibility="Collapsed">
-          <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
           <ContentControl x:Name="ToolContent" IsEnabled="False" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
-          <TextBlock x:Name="StatusText" Grid.Row="1" FontSize="12" Foreground="{ThemeResource NotchMutedBrush}" Margin="24,0,24,7" TextTrimming="CharacterEllipsis" />
-          <InfoBar x:Name="ErrorBar" Grid.Row="2" VerticalAlignment="Bottom" Margin="16,0,16,8" Severity="Error" IsOpen="False" IsClosable="True" CloseButtonClick="OnErrorClosed" />
+          <Grid x:Name="DemoStrip" Grid.Row="1" Visibility="Collapsed" Margin="20,0,20,8" ColumnSpacing="10">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <TextBlock Text="Preview · sample data" Foreground="{ThemeResource NotchWarmBrush}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            <Button Grid.Column="1" Content="Exit preview" Style="{StaticResource NotchButtonStyle}" Click="OnExitDemoClick" AutomationProperties.Name="Exit sample data preview" />
+          </Grid>
+          <TextBlock x:Name="StatusText" Grid.Row="2" FontSize="12" Foreground="{ThemeResource NotchMutedBrush}" Margin="24,0,24,7" TextTrimming="CharacterEllipsis" />
+          <InfoBar x:Name="ErrorBar" Grid.Row="3" VerticalAlignment="Bottom" Margin="16,0,16,8" Severity="Error" IsOpen="False" IsClosable="True" CloseButtonClick="OnErrorClosed" />
         </Grid>
         <ScrollViewer x:Name="ActivityContent" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <Grid Padding="20,18" ColumnSpacing="12">

@@ -62,10 +62,10 @@ function Invoke-FreeTierUiSmoke([int]$AppProcessId, [IntPtr]$AppWindowHandle) {
     try {
         $standardOutput = $helper.StandardOutput.ReadToEndAsync()
         $standardError = $helper.StandardError.ReadToEndAsync()
-        if (-not $helper.WaitForExit(45000)) {
+        if (-not $helper.WaitForExit(90000)) {
             $helper.Kill()
             $helper.WaitForExit(5000) | Out-Null
-            $report.UIInteractions = [ordered]@{ Succeeded = $false; Status = "Timed out"; Error = "Owned UI Automation helper exceeded its 45-second watchdog." }
+            $report.UIInteractions = [ordered]@{ Succeeded = $false; Status = "Timed out"; Error = "Owned UI Automation helper exceeded its 90-second watchdog." }
             throw $report.UIInteractions.Error
         }
         if (Test-Path -LiteralPath $helperReportPath -PathType Leaf) {

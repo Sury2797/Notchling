@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Notch.Core/Notch.Core.csproj" />
+    <Compile Include="../../src/Notch.Windows/Interop/OverlayGeometry.cs" Link="OverlayGeometry.cs" />
   </ItemGroup>
 </Project>

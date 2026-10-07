@@ -33,6 +33,7 @@ namespace Notch.Windows.Services
         public WindowsMediaService() => Latest = this;
         public MediaSnapshot? Current { get; set; }
         public int Starts { get; private set; }
+        public int PlaybackCommands { get; private set; }
         public bool Disposed { get; private set; }
         public Exception? DisposalFailure { get; set; }
         public event EventHandler<MediaSnapshot?>? Changed;
@@ -44,10 +45,10 @@ namespace Notch.Windows.Services
             Starts++;
             return StartFailure is { } failure ? Task.FromException(failure) : Task.CompletedTask;
         }
-        public Task PlayPauseAsync() => Task.CompletedTask;
-        public Task PreviousAsync() => Task.CompletedTask;
-        public Task NextAsync() => Task.CompletedTask;
-        public Task SeekAsync(TimeSpan position) => Task.CompletedTask;
+        public Task PlayPauseAsync() { PlaybackCommands++; return Task.CompletedTask; }
+        public Task PreviousAsync() { PlaybackCommands++; return Task.CompletedTask; }
+        public Task NextAsync() { PlaybackCommands++; return Task.CompletedTask; }
+        public Task SeekAsync(TimeSpan position) { PlaybackCommands++; return Task.CompletedTask; }
         public ValueTask DisposeAsync() { Disposed = true; return DisposalFailure is { } failure ? ValueTask.FromException(failure) : ValueTask.CompletedTask; }
     }
     public sealed class WindowsSystemService : ISystemService
@@ -57,6 +58,7 @@ namespace Notch.Windows.Services
         public WindowsSystemService() => Latest = this;
         public static SystemSnapshot RealSnapshot => new(91, 82, null, .4, "Actual native device", TimeSpan.FromHours(2));
         public TaskCompletionSource<SystemSnapshot>? ReadGate { get; set; }
+        public TaskCompletionSource? ReadStarted { get; set; }
         public TaskCompletionSource? VolumeGate { get; set; }
         public TaskCompletionSource? PortsGate { get; set; }
         public TaskCompletionSource PortsStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -74,6 +76,7 @@ namespace Notch.Windows.Services
         {
             if (Disposed) throw new ObjectDisposedException(nameof(WindowsSystemService));
             Reads++;
+            ReadStarted?.TrySetResult();
             if (ReadGate is { } gate) return gate.Task;
             return ReadFailure is { } failure ? Task.FromException<SystemSnapshot>(failure) : Task.FromResult(RealSnapshot);
         }

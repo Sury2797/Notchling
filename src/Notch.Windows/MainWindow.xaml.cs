@@ -34,6 +34,7 @@ public sealed partial class MainWindow : Window
     private bool _active;
     private bool _shutdownDialogOpen;
     private bool _closingAttempt;
+    private bool? _dockPremium;
     public MainWindow()
     {
         InitializeComponent();
@@ -74,7 +75,14 @@ public sealed partial class MainWindow : Window
         };
         Closed += async (_, _) => { if (!_quitting) await QuitAsync(); };
         _openDelay.Tick += (_, _) => { _openDelay.Stop(); Open(); };
-        _closeDelay.Tick += (_, _) => { _closeDelay.Stop(); if (!_vm.Preferences.Pinned && !EditorHasFocus()) _vm.Overlay.Collapse(); };
+        _closeDelay.Tick += (_, _) =>
+        {
+            _closeDelay.Stop();
+            // Child controls and the gap above the dock can report PointerExited.
+            // Only collapse after the pointer actually leaves the native surface.
+            if (!_vm.Preferences.Pinned && !_host.IsPointerInsideWindow && !EditorHasFocus() &&
+                !(_active && _vm.SelectedModule == ModuleId.Settings)) _vm.Overlay.Collapse();
+        };
         _switchDelay.Tick += (_, _) =>
         {
             _switchDelay.Stop();
@@ -111,7 +119,13 @@ public sealed partial class MainWindow : Window
     }
     private void BuildToolbar()
     {
-        foreach (var module in ModuleCatalog.Toolbar)
+        _pendingModule = null; _switchDelay.Stop();
+        NavigationButtons.Children.Clear(); NavigationButtons.ColumnDefinitions.Clear(); _buttons.Clear();
+        _dockPremium = _vm.IsPremium;
+        ModuleId[] modules = _vm.IsPremium
+            ? [ModuleId.Home, ModuleId.Media, ModuleId.Focus, ModuleId.Calendar, ModuleId.Shelf, ModuleId.Clipboard, ModuleId.Tools]
+            : [ModuleId.Home, ModuleId.Media, ModuleId.Focus, ModuleId.Scratchpad, ModuleId.Tools];
+        foreach (var module in modules)
         {
             var definition = ModuleCatalog.Get(module);
             NavigationButtons.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
@@ -142,32 +156,43 @@ public sealed partial class MainWindow : Window
     {
         if (_quitting) return;
         if (args.PropertyName is nameof(MainViewModel.Preferences) or nameof(MainViewModel.IsDemo) or nameof(MainViewModel.IsReady) or nameof(MainViewModel.IsPremium)) RenderShell(false);
-        else if (args.PropertyName is nameof(MainViewModel.Media) or nameof(MainViewModel.FocusTime)) CompactTitle.Text = _vm.Media?.Title ?? (_vm.FocusRunning ? "Focus · " + _vm.FocusTime : ProductIdentity.DisplayName);
+        else if (args.PropertyName is nameof(MainViewModel.Media) or nameof(MainViewModel.FocusTime) or nameof(MainViewModel.FocusRunning)) UpdateCompactTitle();
         else if (args.PropertyName == nameof(MainViewModel.Error)) { ErrorBar.Message = _vm.Error; ErrorBar.IsOpen = !string.IsNullOrWhiteSpace(_vm.Error); }
         else if (args.PropertyName is nameof(MainViewModel.Status) or nameof(MainViewModel.SaveState) or nameof(MainViewModel.PlanStatus)) UpdateStatus();
     }
     private void RenderShell(bool animate, bool reposition = true)
     {
         if (_quitting) return;
+        if (_dockPremium != _vm.IsPremium) BuildToolbar();
         var mode = _vm.Overlay.Mode;
         var expanded = mode == OverlayMode.Expanded;
         var activity = mode == OverlayMode.Activity;
         var definition = ModuleCatalog.Get(_vm.SelectedModule);
-        var requestedWidth = activity ? 460 : definition.Width;
-        var requestedHeight = activity ? 144 : definition.Height + 22;
+        var (contentWidth, contentHeight) = _vm.SelectedModule switch
+        {
+            ModuleId.Settings => (640d, 540d),
+            ModuleId.Tools => (640d, 470d),
+            ModuleId.Home when !_vm.IsPremium => (600d, 330d),
+            ModuleId.Media when !_vm.IsPremium => (600d, 280d),
+            ModuleId.Focus when !_vm.IsPremium => (520d, 310d),
+            _ => (definition.Width, definition.Height),
+        };
+        var requestedWidth = activity ? 460 : contentWidth;
+        var requestedHeight = activity ? 144 : contentHeight + (_vm.IsDemo ? 66 : 26);
         if (reposition)
             _host.ResizeAndPlace(requestedWidth, requestedHeight, expanded || activity, _vm.Preferences.Pinned, _vm.Preferences.ActiveMonitor,
                 showToolbar: expanded, monitorDeviceId: _vm.Preferences.MonitorDeviceId, horizontalOffset: _vm.Preferences.HorizontalOffset,
                 topOffset: _vm.Preferences.TopOffset, suppressInFullscreen: _vm.Preferences.HideInFullscreen,
-                animate: animate && !_vm.Preferences.ReducedMotion && NativeTheme.AnimationsEnabled, geometryChanged: UpdateShellGeometry);
+                animate: animate && !_vm.Preferences.ReducedMotion && NativeTheme.AnimationsEnabled, geometryChanged: UpdateShellGeometry,
+                toolbarWidth: _vm.IsPremium ? 496 : 400);
         BodyRow.Height = new(_host.LogicalPanelHeight);
-        GapRow.Height = new(expanded ? 10 : 0); ToolbarRow.Height = new(expanded ? 48 : 0); TailRow.Height = new(expanded ? 12 : 0);
+        GapRow.Height = new(_host.ToolbarVisible ? 10 : 0); ToolbarRow.Height = new(_host.ToolbarVisible ? 48 : 0); TailRow.Height = new(_host.ToolbarVisible ? 12 : 0);
         PanelSurface.Width = _host.LogicalWidth;
         CompactButton.Visibility = !expanded && !activity ? Visibility.Visible : Visibility.Collapsed;
         ExpandedContent.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         ActivityContent.Visibility = activity ? Visibility.Visible : Visibility.Collapsed;
-        ToolbarGrid.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-        var toolbarWidth = Math.Min(720, _host.LogicalWidth);
+        ToolbarGrid.Visibility = expanded && _host.ToolbarVisible ? Visibility.Visible : Visibility.Collapsed;
+        var toolbarWidth = Math.Min(_vm.IsPremium ? 496 : 400, _host.LogicalWidth);
         ToolbarGrid.Width = toolbarWidth; NavigationColumn.Width = new(Math.Max(0, toolbarWidth - 112));
         ToolContent.Content = !expanded ? null : _vm.SelectedModule is ModuleId.Home or ModuleId.Media or ModuleId.Revenue or ModuleId.Analytics or ModuleId.Coding or ModuleId.Calendar or ModuleId.Weather or ModuleId.Focus
             ? _featured ??= new(_vm) : _utilities ??= new(_vm);
@@ -175,7 +200,7 @@ public sealed partial class MainWindow : Window
         PinButton.IsEnabled = _vm.IsReady && !_closingAttempt;
         foreach (var (id, button) in _buttons)
         {
-            var selected = id == _vm.SelectedModule;
+            var selected = id == _vm.SelectedModule || id == ModuleId.Tools && !_buttons.ContainsKey(_vm.SelectedModule) && _vm.SelectedModule != ModuleId.Settings;
             button.IsEnabled = !_closingAttempt;
             button.Background = selected ? NativeTheme.SelectedBackground : NativeTheme.Brush("Transparent");
             button.Foreground = selected ? NativeTheme.SelectedForeground : NativeTheme.Foreground;
@@ -186,7 +211,7 @@ public sealed partial class MainWindow : Window
         PinButton.Foreground = _vm.Preferences.Pinned ? NativeTheme.SelectedForeground : NativeTheme.Foreground;
         UpdateStatus();
         ErrorBar.Message = _vm.Error; ErrorBar.IsOpen = !string.IsNullOrWhiteSpace(_vm.Error);
-        CompactTitle.Text = _vm.Media?.Title ?? (_vm.FocusRunning ? "Focus · " + _vm.FocusTime : ProductIdentity.DisplayName);
+        UpdateCompactTitle();
         if (activity && _vm.Overlay.Activity is { } notification)
         {
             ActivityOpenButton.Visibility = notification.Destination is null ? Visibility.Collapsed : Visibility.Visible;
@@ -200,14 +225,25 @@ public sealed partial class MainWindow : Window
     }
     private void UpdateStatus()
     {
-        StatusText.Text = _vm.IsDemo ? "DEMO — sample data" : _vm.PlanStatus + " · " + _vm.SaveState + (string.IsNullOrWhiteSpace(_vm.Status) ? "" : " · " + _vm.Status);
+        DemoStrip.Visibility = _vm.IsDemo ? Visibility.Visible : Visibility.Collapsed;
+        StatusText.Text = string.IsNullOrWhiteSpace(_vm.Status) ? _vm.SaveState : _vm.Status;
         ToolTipService.SetToolTip(StatusText, StatusText.Text);
+    }
+    private void UpdateCompactTitle()
+    {
+        var title = _vm.Media?.Title ?? (_vm.FocusRunning ? "Focus · " + _vm.FocusTime : ProductIdentity.DisplayName);
+        CompactTitle.Text = _vm.IsDemo ? "Preview · " + title : title;
+        CompactGlyph.Glyph = _vm.Media is not null ? "\uE8D6" : _vm.FocusRunning ? "\uE916" : "\uE713";
     }
     private void UpdateShellGeometry()
     {
         BodyRow.Height = new(_host.LogicalPanelHeight);
         PanelSurface.Width = _host.LogicalWidth;
-        var width = Math.Min(720, _host.LogicalWidth);
+        GapRow.Height = new(_host.ToolbarVisible ? 10 : 0);
+        ToolbarRow.Height = new(_host.ToolbarVisible ? 48 : 0);
+        TailRow.Height = new(_host.ToolbarVisible ? 12 : 0);
+        ToolbarGrid.Visibility = _host.ToolbarVisible ? Visibility.Visible : Visibility.Collapsed;
+        var width = Math.Min(_vm.IsPremium ? 496 : 400, _host.LogicalWidth);
         ToolbarGrid.Width = width; NavigationColumn.Width = new(Math.Max(0, width - 112));
     }
     private void AnimateContent()
@@ -237,6 +273,7 @@ public sealed partial class MainWindow : Window
     }
     private void OnPointerExited(object sender, PointerRoutedEventArgs args)
     {
+        if (_host.IsPointerInsideWindow) return;
         _openDelay.Stop(); _closeDelay.Stop(); _closeDelay.Start();
     }
     private void OnKeyDown(object sender, KeyRoutedEventArgs args)
@@ -246,6 +283,7 @@ public sealed partial class MainWindow : Window
     }
     private void OnOpenClick(object sender, RoutedEventArgs args) { Open(); Activate(); }
     private void OnSettingsClick(object sender, RoutedEventArgs args) => OpenSettings();
+    private async void OnExitDemoClick(object sender, RoutedEventArgs args) => await _vm.ExecuteAsync(_vm.ExitDemoAsync);
     private async void OnPinToggled(object sender, RoutedEventArgs args)
     {
         // Toggle state changes also come from accessibility clients, without a Click event.

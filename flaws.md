@@ -98,6 +98,25 @@ The **0.2.5** evaluation release repairs the following confirmed issues:
 
 Local verification passed **228 checks**: 92 core, 58 commerce, 47 Debug view-model, two Release Free, 19 native-service doubles, and 10 Python release cases. Actual native source/XAML projections compiled with zero warnings/errors. Windows PowerShell 5.1 prerequisite fixtures, actual Microsoft runtime integration/recovery, native build/publish, and installed-app controls/reopening/uninstall also passed on both `windows-latest` and `windows-2022` in [run 37608970728](https://github.com/SuryaK999/Notchling/actions/runs/37608970728). The published installer is 8,881,476 bytes. Exact results are in the [validation record](docs/validation-notes.md). No result here claims every possible crash is eliminated or substitutes for running the repaired installer on the reporting laptop. See [troubleshooting](docs/troubleshooting.md).
 
+## Live UI report and refinement — 7 October 2026
+
+The supplied PDF shows evaluation **0.2.5** running on the reporting Windows laptop. The screenshots confirm sparse Free layouts, persistent sample-mode labeling/music, Settings horizontal overflow, an overcrowded dock and a Premium-access message styled as an error. The reported lag, sticking and unexpected closing require the forthcoming live video to distinguish collapse/fullscreen suppression from a process exit. No video was attached with this PDF.
+
+The **0.2.6** candidate addresses these findings:
+
+| Finding | Repair |
+| --- | --- |
+| Generic Free screens and disruptive media updates | Persistent responsive Home cards and focus dial; shared native artwork/playback controls; accessible empty, paused and completed states. Updates retain focus and pointer state. Free seeking/volume entitlement restrictions remain. |
+| Sample track appears as current music after restart | Preview is explicit and session-only. Legacy saved demo mode resets without deleting notebook content. A visible Exit preview action restores real media and clears sample metrics; samples cannot pretend to play audio. |
+| Settings clipped and difficult to use | Bounded vertical scrolling, wrapping/adaptive rows, grouped cards, collapsed optional connection/placement/preview/support sections, and clear provider/plan requirements. Toggling preferences updates controls in place; drafts and scroll position survive. |
+| Too many dock controls and misleading Premium errors | Free dock contains Home, Media, Focus, Scratchpad and All tools; advanced tools remain discoverable with requirements. Access restrictions are informational, while genuine failures keep diagnostic errors. Native clipping matches actual dock widths. |
+| Panel collapses while using controls or crossing the dock gap | Delayed collapse checks native cursor bounds and edit/dialog state. Active Settings stays expanded. Maximized windows are excluded from fullscreen suppression. |
+| Excess resize/refresh work and jitter | Identical geometry does not restart animations, enumerate monitors or rebuild native regions. Unchanged timer notifications and irrelevant Free listener scans are suppressed; inactive media projection timers stop. |
+| Placement exceeds a small or scaled display | Pixel-clamped work-area geometry handles fractional DPI, mixed monitor coordinates and extreme saved offsets; an unusably short work area omits the dock. |
+| Awake toggle/shutdown can wait on a worker indefinitely | Native disposable Windows power-request handles replace blocking worker handshakes and joins. Windows API failure closes partial requests cleanly. Actual Premium Awake hardware qualification remains open. |
+
+Local checks passed **246 scenarios**: 103 core (including 11 geometry cases), 58 commerce, 53 Debug view-model, three Release Free, 19 native-service doubles, and 10 release cases. Native source/XAML projections compiled with zero warnings/errors. The expanded Windows UI check exercises real pointer movements, dock bounds, active Settings retention, horizontal containment, preference scrolling/drafts and preview exit, in addition to playback empty state, Pomodoro and scratchpad. Candidate Windows execution is pending; this report does not claim the forthcoming video's failures have already been reproduced.
+
 ## Original audit findings
 
 The remainder preserves the original problem descriptions and acceptance intent for traceability, including the former **Notch** product name. Statements about absent functionality describe the pre-repair snapshot; use the implementation table above for current status.

@@ -50,7 +50,12 @@ public sealed class OverlayHost : IDisposable
     private bool _expanded;
     private bool _pinned;
     private bool _showToolbar = true;
+    private double _toolbarWidth = 720;
     private int _monitorIndex;
+    private bool _hasLayoutRequest;
+    private (int X, int Y, int Width, int Height)? _nativeLayout;
+    private RegionGeometry? _nativeRegion;
+    private readonly StringBuilder _foregroundClassName = new(128);
 
     public event EventHandler? ToggleRequested;
     public event EventHandler? ShowRequested;
@@ -62,11 +67,19 @@ public sealed class OverlayHost : IDisposable
     public bool HotkeyRegistered { get; }
     public double LogicalWidth { get; private set; } = 256;
     public double LogicalPanelHeight { get; private set; } = 40;
+    public bool ToolbarVisible { get; private set; }
     public string? ActiveMonitorDeviceId { get; private set; }
     public bool IsHidden => _hidden;
     public bool IsShown => _shown;
     public bool IsVisible => _shown && !_hidden && !_fullscreenSuppressed;
     public bool IsFullscreenSuppressed => _fullscreenSuppressed;
+    // Include the transparent gap between the body and dock. Crossing this short gap
+    // is part of the same interaction, rather than a request to collapse the window.
+    public bool IsPointerInsideWindow => !_disposed && IsVisible
+        && NativeMethods.GetCursorPos(out var point)
+        && NativeMethods.GetWindowRect(_handle, out var bounds)
+        && point.X >= bounds.Left && point.X < bounds.Right
+        && point.Y >= bounds.Top && point.Y < bounds.Bottom;
 
     public OverlayHost(Window window)
     {
@@ -108,26 +121,49 @@ public sealed class OverlayHost : IDisposable
     /// <param name="monitorIndex">Primary monitor is index zero; remaining monitors sort by their desktop coordinates.</param>
     public void ResizeAndPlace(double width, double panelHeight, bool expanded, bool pinned, int monitorIndex,
         bool showToolbar = true, string? monitorDeviceId = null, double horizontalOffset = 0,
-        double topOffset = 0, bool suppressInFullscreen = true, bool animate = false, Action? geometryChanged = null)
+        double topOffset = 0, bool suppressInFullscreen = true, bool animate = false,
+        Action? geometryChanged = null, double toolbarWidth = 720)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!double.IsFinite(width) || !double.IsFinite(panelHeight) || width <= 0 || panelHeight <= 0)
             throw new ArgumentOutOfRangeException(nameof(width), "Overlay dimensions must be finite and positive.");
+        if (!double.IsFinite(toolbarWidth) || toolbarWidth <= 0)
+            throw new ArgumentOutOfRangeException(nameof(toolbarWidth));
+
+        var deviceId = string.IsNullOrWhiteSpace(monitorDeviceId) ? null : monitorDeviceId;
+        var nextHorizontalOffset = double.IsFinite(horizontalOffset) ? horizontalOffset : 0;
+        var nextTopOffset = double.IsFinite(topOffset) ? Math.Max(0, topOffset) : 0;
+        var monitorChanged = !_hasLayoutRequest || _monitorIndex != monitorIndex
+            || !StringComparer.OrdinalIgnoreCase.Equals(_monitorDeviceId, deviceId);
+        var geometryUnchanged = _hasLayoutRequest && !monitorChanged && _width == width
+            && _panelHeight == panelHeight && _expanded == expanded && _showToolbar == showToolbar
+            && _toolbarWidth == toolbarWidth
+            && _horizontalOffset == nextHorizontalOffset && _topOffset == nextTopOffset;
+        _pinned = pinned;
+        _suppressInFullscreen = suppressInFullscreen;
+        _geometryChanged = geometryChanged;
+        if (geometryUnchanged)
+        {
+            // Preferences such as accent, billing or a text edit do not change HWND geometry.
+            // Preserve a running resize animation and avoid repeated monitor/GDI work.
+            UpdateVisibility();
+            NotifyGeometryChanged();
+            return;
+        }
 
         _width = width;
         _panelHeight = panelHeight;
         _expanded = expanded;
-        _pinned = pinned;
         _monitorIndex = monitorIndex;
         _showToolbar = showToolbar;
+        _toolbarWidth = toolbarWidth;
 
-        _monitorDeviceId = string.IsNullOrWhiteSpace(monitorDeviceId) ? null : monitorDeviceId;
-        _horizontalOffset = double.IsFinite(horizontalOffset) ? horizontalOffset : 0;
-        _topOffset = double.IsFinite(topOffset) ? Math.Max(0, topOffset) : 0;
-        _suppressInFullscreen = suppressInFullscreen;
+        _monitorDeviceId = deviceId;
+        _horizontalOffset = nextHorizontalOffset;
+        _topOffset = nextTopOffset;
+        _hasLayoutRequest = true;
         _resizeAnimation.Stop();
-        _placementMonitor = null;
-        _geometryChanged = geometryChanged;
+        if (monitorChanged) _placementMonitor = null;
         _animationRunning = animate && IsVisible &&
             (Math.Abs(LogicalWidth - width) > .5 || Math.Abs(LogicalPanelHeight - panelHeight) > .5);
         if (_animationRunning)
@@ -185,30 +221,23 @@ public sealed class OverlayHost : IDisposable
         var workArea = monitor.WorkArea;
         if (workArea.Width <= 0 || workArea.Bottom <= workArea.Top)
             throw new Win32Exception("The selected monitor has no usable work area.");
-        var availableWidth = Math.Max(1, workArea.Width / scale - 16);
-        var topOffset = Math.Min(_topOffset, Math.Max(0, (workArea.Bottom - workArea.Top) / scale - 80));
-        var availableBodyHeight = Math.Max(1, (workArea.Bottom - workArea.Top) / scale - topOffset
-            - (_expanded && _showToolbar ? 70 : 0));
-        // On narrow/high-DPI monitors the minimum must fit inside the actual available desktop.
-        var logicalWidth = _expanded || _animationRunning ? Math.Clamp(_animationRunning ? _animatedWidth : _width, Math.Min(256, availableWidth), availableWidth)
-            : Math.Min(256, availableWidth);
-        var logicalBodyHeight = _expanded || _animationRunning
-            ? Math.Clamp(_animationRunning ? _animatedHeight : _panelHeight, Math.Min(40, availableBodyHeight), availableBodyHeight)
-            : Math.Min(40, availableBodyHeight);
-        var physicalWidth = Pixels(logicalWidth, scale);
-        var physicalHeight = Pixels(logicalBodyHeight + (_expanded && _showToolbar ? 70 : 0), scale);
-        var horizontalOffset = Math.Clamp(_horizontalOffset, -availableWidth, availableWidth);
-        var x = Math.Clamp(workArea.Left + (workArea.Width - physicalWidth) / 2 + Pixels(horizontalOffset, scale),
-            workArea.Left, Math.Max(workArea.Left, workArea.Right - physicalWidth));
-        var y = workArea.Top + Pixels(topOffset, scale);
+        var layout = OverlayGeometry.Calculate(_animationRunning ? _animatedWidth : _width,
+            _animationRunning ? _animatedHeight : _panelHeight, _expanded || _animationRunning,
+            _expanded && _showToolbar, workArea.Left, workArea.Top, workArea.Width,
+            workArea.Bottom - workArea.Top, scale, _horizontalOffset, _topOffset);
+        var nativeLayout = (layout.X, layout.Y, layout.Width, layout.Height);
+        if (_nativeLayout != nativeLayout)
+        {
+            if (!NativeMethods.SetWindowPos(_handle, NativeMethods.HwndTopmost, layout.X, layout.Y,
+                    layout.Width, layout.Height, NativeMethods.SwpNoActivate))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not position the overlay.");
+            _nativeLayout = nativeLayout;
+        }
 
-        if (!NativeMethods.SetWindowPos(_handle, NativeMethods.HwndTopmost, x, y,
-                physicalWidth, physicalHeight, NativeMethods.SwpNoActivate))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not position the overlay.");
-
-        ApplyRegion(logicalWidth, logicalBodyHeight, _expanded, _showToolbar, scale);
-        LogicalWidth = logicalWidth;
-        LogicalPanelHeight = logicalBodyHeight;
+        ApplyRegion(layout.LogicalWidth, layout.LogicalBodyHeight, _expanded, layout.ToolbarVisible, scale);
+        LogicalWidth = layout.LogicalWidth;
+        LogicalPanelHeight = layout.LogicalBodyHeight;
+        ToolbarVisible = layout.ToolbarVisible;
         ActiveMonitorDeviceId = monitor.DeviceName;
         _monitorBounds = monitor.Bounds;
     }
@@ -288,11 +317,12 @@ public sealed class OverlayHost : IDisposable
 
     private bool IsForegroundFullscreen(nint foreground)
     {
-        if (foreground == 0 || foreground == _handle || NativeMethods.IsIconic(foreground) || _monitorBounds.Width <= 0)
+        if (foreground == 0 || foreground == _handle || NativeMethods.IsIconic(foreground)
+            || NativeMethods.IsZoomed(foreground) || _monitorBounds.Width <= 0)
             return false;
-        var className = new StringBuilder(128);
-        NativeMethods.GetClassName(foreground, className, className.Capacity);
-        if (className.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return false;
+        _foregroundClassName.Clear();
+        NativeMethods.GetClassName(foreground, _foregroundClassName, _foregroundClassName.Capacity);
+        if (_foregroundClassName.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return false;
         // A normal maximized window can cover full bounds with an auto-hidden taskbar.
         // Captioned applications are not presentation/fullscreen surfaces.
         if ((NativeMethods.GetWindowLong(foreground, NativeMethods.GwlStyle).ToInt64() & NativeMethods.WsCaption) == NativeMethods.WsCaption)
@@ -316,6 +346,16 @@ public sealed class OverlayHost : IDisposable
         var right = Pixels(width, scale);
         var bottom = Pixels(bodyHeight, scale);
         var radius = Pixels(Math.Min(expanded ? 26 : 20, bodyHeight / 2), scale);
+        var toolbarWidth = Math.Min(_toolbarWidth, width);
+        var toolbarLeft = (width - toolbarWidth) / 2;
+        var toolbarTop = Pixels(bodyHeight + 10, scale);
+        var toolbarBottom = Pixels(bodyHeight + 58, scale);
+        var diameter = Pixels(48, scale);
+        var geometry = new RegionGeometry(right, bottom, radius, expanded && showToolbar,
+            Pixels(toolbarLeft, scale), Pixels(toolbarLeft + toolbarWidth - 112, scale),
+            Pixels(toolbarLeft + Math.Max(0, toolbarWidth - 96), scale), Pixels(toolbarLeft + toolbarWidth, scale),
+            toolbarTop, toolbarBottom, diameter);
+        if (_nativeRegion == geometry) return;
         var region = NativeMethods.CreateRoundRectRgn(0, 0, right, bottom, radius * 2, radius * 2);
         if (region == 0)
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not create the overlay region.");
@@ -324,25 +364,19 @@ public sealed class OverlayHost : IDisposable
             UnionRegion(region, NativeMethods.CreateRectRgn(0, 0, right, Math.Max(1, bottom - radius)));
             if (expanded && showToolbar)
             {
-                var toolbarWidth = Math.Min(720, width);
-                var left = (width - toolbarWidth) / 2;
-                var top = bodyHeight + 10;
-                var toolbarBottom = Pixels(top + 48, scale);
-                var toolbarTop = Pixels(top, scale);
-                var diameter = Pixels(48, scale);
                 if (toolbarWidth > 112)
                 {
-                    UnionRegion(region, NativeMethods.CreateRoundRectRgn(Pixels(left, scale), toolbarTop,
-                        Pixels(left + toolbarWidth - 112, scale), toolbarBottom, diameter, diameter));
+                    UnionRegion(region, NativeMethods.CreateRoundRectRgn(geometry.ToolbarLeft, toolbarTop,
+                        geometry.NavigationRight, toolbarBottom, diameter, diameter));
                 }
                 UnionRegion(region, NativeMethods.CreateRoundRectRgn(
-                    Pixels(left + Math.Max(0, toolbarWidth - 96), scale), toolbarTop,
-                    Pixels(left + toolbarWidth, scale), toolbarBottom, diameter, diameter));
+                    geometry.ControlsLeft, toolbarTop, geometry.ToolbarRight, toolbarBottom, diameter, diameter));
             }
 
             if (NativeMethods.SetWindowRgn(_handle, region, true) == 0)
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not apply the overlay region.");
             region = 0; // Successful SetWindowRgn transfers ownership to the system.
+            _nativeRegion = geometry;
         }
         finally
         {
@@ -438,6 +472,8 @@ public sealed class OverlayHost : IDisposable
                     return;
                 StopResizeAnimation();
                 _placementMonitor = null;
+                _nativeLayout = null;
+                _nativeRegion = null;
                 _retryCount = 0;
                 if (TryPlace()) PublishDisplayChanged();
             }))
@@ -504,4 +540,7 @@ public sealed class OverlayHost : IDisposable
     }
 
     private sealed record Monitor(nint Handle, NativeMethods.Rect Bounds, NativeMethods.Rect WorkArea, string DeviceName, bool Primary);
+    private readonly record struct RegionGeometry(int Right, int Bottom, int Radius, bool HasToolbar,
+        int ToolbarLeft, int NavigationRight, int ControlsLeft, int ToolbarRight,
+        int ToolbarTop, int ToolbarBottom, int ToolbarDiameter);
 }

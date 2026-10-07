@@ -4,6 +4,7 @@ var suite = new TestSuite();
 PreferenceCases.Register(suite);
 TimerCases.Register(suite);
 OverlayCases.Register(suite);
+OverlayGeometryCases.Register(suite);
 StoreCases.Register(suite);
 WorkspaceCases.Register(suite);
 ConverterCases.Register(suite);

@@ -53,7 +53,7 @@ await Case("Release starts Free and refuses extended tools and direct commands",
     await vm.InitializeAsync();
     Assert(!vm.IsDevelopmentBuild && !vm.IsPremium, "Unconfigured Release granted development or Premium access.");
     vm.SelectModule(ModuleId.Notes);
-    Assert(vm.SelectedModule == ModuleId.Settings && vm.Error.Contains("Premium"), "Premium navigation did not explain the required plan.");
+    Assert(vm.SelectedModule == ModuleId.Settings && vm.Status.Contains("Premium") && vm.Error == "", "Premium navigation did not explain the required plan as ordinary information.");
     vm.AddNote("Blocked", "Must not create a paid note");
     vm.SetAwake(true); vm.StartCountdown(5); vm.ToggleStopwatch();
     await vm.SetVolumeAsync(.8);
@@ -69,6 +69,20 @@ await Case("Release starts Free and refuses extended tools and direct commands",
     Assert(File.Exists(export), "Free data recovery/export was blocked.");
     await vm.SetPreferencesAsync(vm.Preferences with { DemoMode = true });
     Assert(!vm.IsPremium, "Demo mode granted paid access.");
+});
+await Case("Release Free startup skips previously configured paid integrations", async () =>
+{
+    await File.WriteAllTextAsync(Path.Combine(data, "preferences.json"), JsonSerializer.Serialize(new AppPreferences
+        { CalendarPath = Path.Combine(data, "previous.ics"), CodingPath = Path.Combine(data, "previous.jsonl"), DemoMode = true }));
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    Assert(vm.IsReady && !vm.IsDemo && !vm.IsPremium && vm.Error == "", "Saved paid connections or preview made Free startup appear broken.");
+    Assert(vm.CalendarEvents.Count == 0 && vm.Coding is null && !vm.Status.Contains("Premium"), "Startup attempted unavailable paid connections.");
+    vm.Overlay.Expand(ModuleId.Home);
+    await vm.RefreshAsync();
+    Assert(WindowsSystemService.Latest.PortReads == 0, "Basic Free Home enumerated paid server listeners it cannot display.");
+    vm.SelectModule(ModuleId.Media);
+    Assert(vm.SelectedModule == ModuleId.Media && vm.Error == "", "Free playback inherited a paid integration error.");
 });
 await Case("Release Free essentials remain usable after system and media failures", async () =>
 {
@@ -258,6 +272,68 @@ await Case("Entering demo releases real power request and demo controls never is
     vm.SetAwake(true);
     vm.SetAwake(false);
     Assert(system.AwakeRequests.Count == 2 && !vm.Awake, "Demo awake controls issued native power requests.");
+});
+await Case("Saved preview never reopens as fabricated music or metrics and retains the notebook", async () =>
+{
+    var preferences = new AppPreferences { DemoMode = true, WeatherCity = "Existing city", FocusMinutes = 42 };
+    var note = new SavedNote(Guid.NewGuid(), "My own note", "Keep this content", DateTimeOffset.UtcNow);
+    var local = new MainViewModel.LocalData([note], [], [], [], "Existing scratchpad");
+    await File.WriteAllTextAsync(Path.Combine(data, "preferences.json"), JsonSerializer.Serialize(preferences));
+    await File.WriteAllTextAsync(Path.Combine(data, "workspace.json"), JsonSerializer.Serialize(local));
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    Assert(!vm.IsDemo && vm.Media is null && vm.System == WindowsSystemService.RealSnapshot && vm.ListeningPorts.Count == 0,
+        "Persisted preview reopened with sample music or machine metrics.");
+    Assert(vm.Notes.Single() == note && vm.Scratchpad == local.Scratchpad && vm.Preferences.WeatherCity == "Existing city" && vm.Preferences.FocusMinutes == 42,
+        "Preview recovery replaced personal content or unrelated preferences.");
+    Assert(await vm.SaveBeforeExitAsync(), "Reset preview could not save its preferences.");
+    var persisted = JsonSerializer.Deserialize<AppPreferences>(await File.ReadAllTextAsync(Path.Combine(data, "preferences.json")));
+    Assert(persisted == preferences with { DemoMode = false }, "Startup failed to repair only the persisted preview flag.");
+});
+await Case("Explicit preview is session-only and sample transport never pretends to play audio", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    vm.Scratchpad = "Personal content remains real";
+    await vm.SetPreferencesAsync(vm.Preferences with { DemoMode = true, FocusMinutes = 37 });
+    Assert(vm.IsDemo && vm.Media is { IsPlaying: false, CanPlay: false, CanPause: false, CanPrevious: false, CanNext: false, CanSeek: false },
+        "Explicit preview exposed fake working transport controls.");
+    await vm.PlayPauseAsync(); await vm.PreviousAsync(); await vm.NextAsync(); await vm.SeekMediaAsync(.5);
+    Assert(vm.Media?.IsPlaying == false && WindowsMediaService.Latest.PlaybackCommands == 0 && vm.Scratchpad == "Personal content remains real",
+        "Preview playback pretended to start, reached native audio, or replaced local content.");
+    Assert(await vm.SaveBeforeExitAsync(), "Preview session failed to save real local content.");
+    var persisted = JsonSerializer.Deserialize<AppPreferences>(await File.ReadAllTextAsync(Path.Combine(data, "preferences.json")));
+    Assert(persisted is { DemoMode: false, FocusMinutes: 37 }, "Preview leaked its sample-mode flag into the next launch or lost actual settings.");
+    await vm.ExitDemoAsync();
+    Assert(!vm.IsDemo && vm.Media is null && vm.Weather is null && vm.Revenue is null && vm.Analytics is null && vm.Coding is null && vm.CalendarEvents.Count == 0
+        && vm.System == WindowsSystemService.RealSnapshot && !vm.Status.Contains("DEMO"), "Exit preview retained fabricated content or a sample status.");
+});
+await Case("Exiting preview drains an older live refresh and obtains a fresh real sample", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    var system = WindowsSystemService.Latest;
+    var oldRead = new TaskCompletionSource<SystemSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+    system.ReadGate = oldRead;
+    var refresh = vm.RefreshAsync();
+    await vm.SetPreferencesAsync(vm.Preferences with { DemoMode = true });
+    var actualMedia = new MediaSnapshot("My active player", "Actual artist", null, true, TimeSpan.Zero, TimeSpan.FromMinutes(3), "Actual source", false);
+    WindowsMediaService.Latest.Current = actualMedia;
+    var exiting = vm.ExitDemoAsync();
+    try
+    {
+        Assert(!vm.IsDemo && vm.Media == actualMedia && !vm.Status.Contains("DEMO"), "Exit preview held its UI state behind a slow previous refresh.");
+        Assert(!exiting.IsCompleted, "Exit preview discarded its new live read while the prior native read held the gate.");
+    }
+    finally
+    {
+        system.ReadGate = null;
+        oldRead.SetResult(new(3, 4, 5, .1, "Obsolete read", TimeSpan.Zero));
+    }
+    await refresh;
+    await exiting;
+    Assert(vm.System == WindowsSystemService.RealSnapshot && vm.Media == actualMedia && system.Reads == 3,
+        "Exit preview retained an obsolete sample or skipped a fresh read after the old gate drained.");
 });
 await Case("Late real refresh cannot replace demo system or media samples", async () =>
 {
@@ -459,9 +535,13 @@ await Case("Turning demo off survives disposal during the awaited slow native re
     var system = WindowsSystemService.Latest;
     var gate = new TaskCompletionSource<SystemSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
     system.ReadGate = gate;
+    system.ReadStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     var accepted = vm.Preferences with { DemoMode = false, WeatherCity = "Persist during refresh" };
     var apply = vm.SetPreferencesAsync(accepted);
+    await system.ReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
     Assert(!apply.IsCompleted && vm.Preferences == accepted, "Fixture did not hold Demo-off before its persistence stage.");
+    var immediatelyPersisted = JsonSerializer.Deserialize<AppPreferences>(await File.ReadAllTextAsync(Path.Combine(data, "preferences.json")));
+    Assert(immediatelyPersisted == accepted && !vm.IsDemo, "Slow native refresh held accepted settings or preview exit behind its completion.");
     var disposal = vm.DisposeAsync().AsTask();
     Assert(!disposal.IsCompleted && !system.Disposed, "Disposal did not wait for the in-flight preference refresh.");
     gate.SetResult(WindowsSystemService.RealSnapshot);
@@ -506,7 +586,7 @@ await Case("Native Awake is gated while delayed saved-demo preferences are loadi
     vm.SetAwake(true); vm.ToggleFocus(); vm.ToggleStopwatch();
     Assert(WindowsSystemService.Latest.AwakeRequests.Count == 0 && !vm.Awake, "An early native Awake request escaped before saved demo mode loaded.");
     await context.PumpUntilAsync(initialize);
-    Assert(vm.IsReady && vm.IsDemo && !vm.Awake && WindowsSystemService.Latest.AwakeRequests.Count == 0, "Saved demo initialization retained an early real power request.");
+    Assert(vm.IsReady && !vm.IsDemo && !vm.Awake && WindowsSystemService.Latest.AwakeRequests.Count == 0, "Saved preview startup did not return to real data or retained an early power request.");
 });
 await Case("Accepted early preferences fence delayed saved preferences from replacing them", async () =>
 {
@@ -678,6 +758,36 @@ await Case("Stopwatch fast ticks notify time only while real lap changes still n
     vm.SelectModule(ModuleId.Media);
     Assert(!fastTick.IsEnabled, "Navigating away kept the 10 Hz stopwatch UI timer running.");
 });
+await Case("Idle periodic ticks do not flood native views with unchanged timer properties", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    Tick().Fire();
+    var notifications = new List<string>();
+    vm.PropertyChanged += (_, args) =>
+    {
+        if (args.PropertyName is nameof(vm.FocusTime) or nameof(vm.CountdownTime) or nameof(vm.StopwatchTime) or nameof(vm.HydrationTime)
+            or nameof(vm.FocusProgress) or nameof(vm.FocusRunning) or nameof(vm.StopwatchRunning)) notifications.Add(args.PropertyName);
+    };
+    for (var index = 0; index < 8; index++) Tick().Fire();
+    Assert(notifications.Count == 0, "Idle ticks repeatedly rebuilt views for unchanged timer properties.");
+    vm.ToggleFocus();
+    Assert(notifications.Contains(nameof(vm.FocusRunning)) && notifications.Contains(nameof(vm.FocusProgress)), "Actual focus changes no longer notified the native views.");
+});
+await Case("First periodic tick does not repeat startup entitlement notifications", async () =>
+{
+    using var handler = new PausedBillingHandler();
+    using var http = new HttpClient(handler);
+    using var signingKey = global::System.Security.Cryptography.RSA.Create(2048);
+    var subscription = new SubscriptionService(http, new WindowsSecretVault(), new Uri("https://billing.example.invalid/"), signingKey.ExportSubjectPublicKeyInfoPem());
+    await using var vm = ViewModel();
+    typeof(MainViewModel).GetField("_subscription", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(vm, subscription);
+    await vm.InitializeAsync();
+    var notifications = 0;
+    vm.PropertyChanged += (_, args) => { if (args.PropertyName is nameof(vm.IsPremium) or nameof(vm.PlanStatus) or nameof(vm.SubscriptionStatus)) notifications++; };
+    Tick().Fire();
+    Assert(notifications == 0, "The first idle tick repeated the already-completed startup entitlement publication.");
+});
 await Case("Notebook restore normalizes legacy null fields before publishing or saving", async () =>
 {
     await using var vm = ViewModel();
@@ -736,6 +846,22 @@ await Case("Media remains available when machine telemetry cannot be read", asyn
     Assert(vm.Media == snapshot && vm.Error.Contains("telemetry unavailable"), "An unavailable system reading hid usable media playback.");
     vm.ToggleFocus(); vm.Scratchpad = "Local tools still work";
     Assert(vm.FocusRunning && vm.Scratchpad == "Local tools still work", "Optional telemetry failure disabled local essentials.");
+});
+await Case("An obsolete telemetry failure does not cover a newly opened local tool", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    SelectWithoutAutomaticRefresh(vm, ModuleId.Home);
+    var system = WindowsSystemService.Latest;
+    var read = new TaskCompletionSource<SystemSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+    system.ReadGate = read;
+    var refresh = vm.ExecuteAsync(vm.RefreshAsync);
+    vm.SelectModule(ModuleId.Scratchpad);
+    vm.Scratchpad = "Current work";
+    read.SetException(new IOException("Old machine view failed"));
+    await refresh;
+    Assert(vm.SelectedModule == ModuleId.Scratchpad && vm.Scratchpad == "Current work" && vm.Error == "",
+        "A failure from the previous view covered the current local tool with an unrelated error.");
 });
 await Case("Listener scan failure does not prevent media refresh", async () =>
 {

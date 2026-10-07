@@ -34,14 +34,11 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     private string? _artworkPath;
     private int _artworkRequest;
     private double? _renderedFocusProgress;
+    private double? _renderedFreeFocusProgress;
     private readonly DispatcherTimer _liveTick = new() { Interval = TimeSpan.FromMilliseconds(250) };
-    private readonly StackPanel _freeView = new() { Spacing = 14, Padding = new Thickness(16) };
-    private TextBlock? _freeFocusText;
-    private ModuleId? _freeModule;
     private long _mediaProjectionStart;
     private MediaSnapshot? _projectionSnapshot;
     private TimeSpan _projectionPosition;
-    private int _freshnessTicks;
     // WinUI returns no capture collection when a control has not captured a pointer.
     public bool IsManipulating => MediaSeekSlider?.PointerCaptures?.Count > 0 || VolumeSlider?.PointerCaptures?.Count > 0;
 
@@ -58,14 +55,13 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
             [ModuleId.Coding] = CodingView, [ModuleId.Calendar] = CalendarView,
             [ModuleId.Weather] = WeatherView, [ModuleId.Focus] = FocusView,
         };
-        ModuleRoot.Children.Add(_freeView);
         _liveTick.Tick += (_, _) =>
         {
-            if (_viewModel.SelectedModule == ModuleId.Media && _viewModel.IsPremium)
+            if (_viewModel.SelectedModule == ModuleId.Media)
             {
                 _rendering = true; try { RenderMediaPosition(); } finally { _rendering = false; }
             }
-            if (++_freshnessTicks % 240 == 0 && _viewModel.SelectedModule == ModuleId.Analytics) RenderAnalyticsFreshness();
+            else if (_viewModel.SelectedModule == ModuleId.Analytics) RenderAnalyticsFreshness();
         };
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -81,7 +77,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
             _subscribed = true;
         }
         RenderSelected();
-        _liveTick.Start();
+        UpdateLiveTick();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -97,6 +93,8 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         _volumeDelay?.Cancel();
         _artworkRequest++;
         _artworkPath = null;
+        MediaArtwork.Source = null;
+        ArtworkPlaceholder.Visibility = Visibility.Visible;
     }
 
     private void ViewModelChanged(object? sender, PropertyChangedEventArgs e)
@@ -125,7 +123,13 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
             or nameof(MainViewModel.HydrationTime) or nameof(MainViewModel.FocusProgress) or nameof(MainViewModel.FocusRunning)
             or nameof(MainViewModel.StopwatchRunning) or nameof(MainViewModel.StopwatchLaps))
         {
-            if (_viewModel.SelectedModule == ModuleId.Focus) { if (_viewModel.IsPremium) RefreshFocusProperty(property); else if (_freeFocusText is not null) _freeFocusText.Text = _viewModel.FocusTime; }
+            if (_viewModel.SelectedModule == ModuleId.Focus)
+            {
+                if (_viewModel.IsPremium) RefreshFocusProperty(property);
+                else if (property is nameof(MainViewModel.FocusTime) or nameof(MainViewModel.FocusRunning) or nameof(MainViewModel.FocusProgress)) RenderFreeFocus();
+            }
+            else if (_viewModel.SelectedModule == ModuleId.Home && !_viewModel.IsPremium
+                && property is nameof(MainViewModel.FocusTime) or nameof(MainViewModel.FocusRunning)) RenderFreeHomeFocus();
             return;
         }
         if (property is "Status" or "Error")
@@ -136,7 +140,9 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         var relevant = property is nameof(MainViewModel.SelectedModule) or nameof(MainViewModel.Preferences) or nameof(MainViewModel.IsReady) or nameof(MainViewModel.IsPremium)
             || _viewModel.SelectedModule switch
             {
-                ModuleId.Home => property is nameof(MainViewModel.System) or nameof(MainViewModel.ListeningPorts) or nameof(MainViewModel.Analytics) or nameof(MainViewModel.Revenue) or nameof(MainViewModel.Weather),
+                ModuleId.Home => _viewModel.IsPremium
+                    ? property is nameof(MainViewModel.System) or nameof(MainViewModel.ListeningPorts) or nameof(MainViewModel.Analytics) or nameof(MainViewModel.Revenue) or nameof(MainViewModel.Weather)
+                    : property == nameof(MainViewModel.Media),
                 ModuleId.Media => property is nameof(MainViewModel.Media) or nameof(MainViewModel.System),
                 ModuleId.Revenue => property == nameof(MainViewModel.Revenue),
                 ModuleId.Analytics => property == nameof(MainViewModel.Analytics),
@@ -150,17 +156,20 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
 
     private void RenderSelected()
     {
-        ModuleRoot.MinHeight = ModuleCatalog.Get(_viewModel.SelectedModule).Height;
+        // The shell chooses a bounded viewport. Content owns its natural height;
+        // reserving the Premium dashboard height left Free mostly empty.
+        ModuleRoot.MinHeight = 0;
         var free = !_viewModel.IsPremium;
         foreach (var (module, view) in _views)
-            view.Visibility = !free && module == _viewModel.SelectedModule ? Visibility.Visible : Visibility.Collapsed;
-        _freeView.Visibility = free ? Visibility.Visible : Visibility.Collapsed;
-        if (free) { RenderFree(); SetError(_viewModel.Error); return; }
-        _freeModule = null;
+            view.Visibility = module == _viewModel.SelectedModule && (!free || module == ModuleId.Media) ? Visibility.Visible : Visibility.Collapsed;
+        FreeHomeView.Visibility = free && _viewModel.SelectedModule == ModuleId.Home ? Visibility.Visible : Visibility.Collapsed;
+        FreeFocusView.Visibility = free && _viewModel.SelectedModule == ModuleId.Focus ? Visibility.Visible : Visibility.Collapsed;
         _rendering = true;
         try
         {
-            switch (_viewModel.SelectedModule)
+            if (free && _viewModel.SelectedModule == ModuleId.Home) RenderFreeHome();
+            else if (free && _viewModel.SelectedModule == ModuleId.Focus) RenderFreeFocus();
+            else switch (_viewModel.SelectedModule)
             {
                 case ModuleId.Home: RenderHome(); break;
                 case ModuleId.Media: RenderMedia(); break;
@@ -173,7 +182,17 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
             }
             SetError(_viewModel.Error);
         }
-        finally { _rendering = false; }
+        finally { _rendering = false; UpdateLiveTick(); }
+    }
+
+    private void UpdateLiveTick()
+    {
+        var mediaPlaying = _viewModel.SelectedModule == ModuleId.Media && _viewModel.Media is { IsPlaying: true } media && media.Duration > TimeSpan.Zero;
+        var analytics = _viewModel.IsPremium && _viewModel.SelectedModule == ModuleId.Analytics;
+        if (!_subscribed || (!mediaPlaying && !analytics)) { _liveTick.Stop(); return; }
+        var interval = analytics ? TimeSpan.FromMinutes(1) : TimeSpan.FromMilliseconds(250);
+        if (_liveTick.Interval != interval) _liveTick.Interval = interval;
+        if (!_liveTick.IsEnabled) _liveTick.Start();
     }
 
     private string DemoSuffix => _viewModel.Preferences.DemoMode ? " · Demo data" : "";
@@ -219,14 +238,26 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     private void RenderMedia()
     {
         var media = _viewModel.Media;
-        MediaTitleText.Text = media?.Title ?? "Nothing playing";
-        MediaArtistText.Text = media is null ? "Start playback in a Windows media app" : media.Artist + DemoSuffix;
+        var premium = _viewModel.IsPremium;
+        MediaStateText.Text = _viewModel.IsDemo ? "DEMO MEDIA" : media?.IsPlaying == true ? "NOW PLAYING" : media is null ? "READY TO PLAY" : "PAUSED";
+        MediaSourceText.Text = media is null ? "Windows media" : MediaSourceLabel(media.Source);
+        MediaTitleText.Text = string.IsNullOrWhiteSpace(media?.Title) ? media is null ? "Nothing playing" : "Untitled media" : media.Title;
+        MediaArtistText.Text = media is null ? "Start playback in a Windows media app. Your controls will appear here."
+            : (string.IsNullOrWhiteSpace(media.Artist) ? "Connected to Windows media controls" : media.Artist) + DemoSuffix;
         PlayingGlyph.Visibility = media?.IsPlaying == true ? Visibility.Visible : Visibility.Collapsed;
         PlayPauseIcon.Glyph = media?.IsPlaying == true ? "\uE769" : "\uE768";
-        AutomationProperties.SetName(PlayPauseButton, media?.IsPlaying == true ? "Pause playback" : "Play playback");
+        var playbackAction = media?.IsPlaying == true ? "Pause" : "Play";
+        AutomationProperties.SetName(PlayPauseButton, premium ? playbackAction + " playback" : playbackAction);
+        AutomationProperties.SetName(PreviousButton, premium ? "Previous track" : "Previous");
+        AutomationProperties.SetName(NextButton, premium ? "Next track" : "Next");
+        ToolTipService.SetToolTip(PlayPauseButton, playbackAction);
         PlayPauseButton.IsEnabled = media is not null && (media.IsPlaying ? media.CanPause : media.CanPlay);
         PreviousButton.IsEnabled = media?.CanPrevious == true; NextButton.IsEnabled = media?.CanNext == true;
-        MediaSeekSlider.IsEnabled = media is { CanSeek: true } && media.Duration > TimeSpan.Zero && !_viewModel.Preferences.DemoMode;
+        MediaSeekSlider.Visibility = premium ? Visibility.Visible : Visibility.Collapsed;
+        MediaReadOnlyProgress.Visibility = premium ? Visibility.Collapsed : Visibility.Visible;
+        MediaTimelinePanel.Visibility = media is not null && media.Duration > TimeSpan.Zero ? Visibility.Visible : Visibility.Collapsed;
+        MediaSeekSlider.IsEnabled = premium && media is { CanSeek: true } && media.Duration > TimeSpan.Zero && !_viewModel.Preferences.DemoMode;
+        MediaVolumePanel.Visibility = premium ? Visibility.Visible : Visibility.Collapsed;
         if (!ReferenceEquals(_projectionSnapshot, media))
         {
             _projectionSnapshot = media; _mediaProjectionStart = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -235,7 +266,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         }
         RenderMediaPosition();
         MediaDurationText.Text = media is null ? "0:00" : Clock(media.Duration);
-        VolumeSlider.IsEnabled = _viewModel.System is { OutputDevice: not "Unavailable" and not "No output device" and not "Audio output unavailable" };
+        VolumeSlider.IsEnabled = premium && _viewModel.System is { OutputDevice: not "Unavailable" and not "No output device" and not "Audio output unavailable" };
         if (_volumeDelay is null && (VolumeSlider.PointerCaptures?.Count ?? 0) == 0 && VolumeSlider.FocusState == FocusState.Unfocused)
             VolumeSlider.Value = Math.Clamp(_viewModel.System?.Volume ?? 0, 0, 1);
         OutputDeviceText.Text = _viewModel.System?.OutputDevice ?? "No output device";
@@ -246,6 +277,20 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         }
     }
 
+    private static string MediaSourceLabel(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source)) return "Connected player";
+        if (source.Contains("Spotify", StringComparison.OrdinalIgnoreCase)) return "Spotify";
+        if (source.Contains("chrome", StringComparison.OrdinalIgnoreCase)) return "Google Chrome";
+        if (source.Contains("msedge", StringComparison.OrdinalIgnoreCase)) return "Microsoft Edge";
+        if (source.Contains("firefox", StringComparison.OrdinalIgnoreCase)) return "Firefox";
+        if (source.Contains("ZuneMusic", StringComparison.OrdinalIgnoreCase)) return "Media Player";
+        if (source.Contains("AppleMusic", StringComparison.OrdinalIgnoreCase)) return "Apple Music";
+        // Package identities are implementation details rather than useful player names.
+        if (source.Contains('!') || source.Contains('_')) return "Connected player";
+        return source.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? source[..^4] : source;
+    }
+
     private void RenderMediaPosition()
     {
         var media = _viewModel.Media;
@@ -253,42 +298,51 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         if (media?.IsPlaying == true && _projectionSnapshot == media)
             position += System.Diagnostics.Stopwatch.GetElapsedTime(_mediaProjectionStart) * media.PlaybackRate;
         if (media is not null) position = TimeSpan.FromTicks(Math.Clamp(position.Ticks, 0, Math.Max(0, media.Duration.Ticks)));
+        var progress = media is not null && media.Duration > TimeSpan.Zero ? Math.Clamp(position.TotalSeconds / media.Duration.TotalSeconds, 0, 1) : 0;
         if (_seekDelay is null && (MediaSeekSlider.PointerCaptures?.Count ?? 0) == 0 && MediaSeekSlider.FocusState == FocusState.Unfocused)
-            MediaSeekSlider.Value = media is not null && media.Duration > TimeSpan.Zero ? Math.Clamp(position.TotalSeconds / media.Duration.TotalSeconds, 0, 1) : 0;
+            MediaSeekSlider.Value = progress;
+        MediaReadOnlyProgress.Value = progress;
         MediaPositionText.Text = Clock(position);
     }
-    private void RenderFree()
+
+    private void RenderFreeHome()
     {
-        if (_freeModule == _viewModel.SelectedModule && _viewModel.SelectedModule == ModuleId.Focus) { if (_freeFocusText is not null) _freeFocusText.Text = _viewModel.FocusTime; return; }
-        _freeModule = _viewModel.SelectedModule; _freeView.Children.Clear();
-        _freeView.Children.Add(new TextBlock { Text = ProductIdentity.DisplayName + " Free", FontSize = 24, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        Button Action(string text, Func<Task> action) { var button = new Button { Content = text, Style = (Style)Application.Current.Resources["NotchButtonStyle"] }; button.Click += async (_, _) => await SafeAsync(action); return button; }
-        if (_viewModel.SelectedModule == ModuleId.Media)
-        {
-            var media = _viewModel.Media;
-            _freeView.Children.Add(new TextBlock { Text = media?.Title ?? "Nothing playing", FontSize = 18, TextWrapping = TextWrapping.Wrap });
-            _freeView.Children.Add(Caption(media?.Artist ?? "Start playback in a Windows media app"));
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-            var previous = Action("Previous", _viewModel.PreviousAsync); previous.IsEnabled = media?.CanPrevious == true;
-            var play = Action(media?.IsPlaying == true ? "Pause" : "Play", _viewModel.PlayPauseAsync); play.IsEnabled = media is not null && (media.IsPlaying ? media.CanPause : media.CanPlay);
-            var next = Action("Next", _viewModel.NextAsync); next.IsEnabled = media?.CanNext == true;
-            row.Children.Add(previous); row.Children.Add(play); row.Children.Add(next); _freeView.Children.Add(row);
-        }
-        else if (_viewModel.SelectedModule == ModuleId.Focus)
-        {
-            _freeFocusText = new TextBlock { Text = _viewModel.FocusTime, FontSize = 44, FontFamily = new FontFamily("Consolas") };
-            _freeView.Children.Add(_freeFocusText);
-            _freeView.Children.Add(Action("Start / pause Pomodoro", () => { _viewModel.ToggleFocus(); return Task.CompletedTask; }));
-            _freeView.Children.Add(Action("Reset", () => { _viewModel.ResetFocus(); return Task.CompletedTask; }));
-        }
-        else
-        {
-            _freeView.Children.Add(Caption("Quick playback, one Pomodoro and a local scratchpad. No account required.", wrap: true));
-            foreach (var module in new[] { ModuleId.Media, ModuleId.Focus, ModuleId.Scratchpad })
-                _freeView.Children.Add(Action(ModuleCatalog.Get(module).Title, () => { _viewModel.SelectModule(module); return Task.CompletedTask; }));
-        }
-        _freeView.Children.Add(Action("Premium — US$2/month and recovery settings", () => { _viewModel.SelectModule(ModuleId.Settings); return Task.CompletedTask; }));
+        FreeBrandText.Text = ProductIdentity.DisplayName + " Free";
+        FreeHomeDateText.Text = DateTime.Now.ToString("dddd, MMMM d", CultureInfo.CurrentCulture) + DemoSuffix;
+        var media = _viewModel.Media;
+        FreeHomeMediaTitle.Text = string.IsNullOrWhiteSpace(media?.Title) ? "Nothing playing" : media.Title;
+        FreeHomeMediaDetail.Text = media is null ? "Play music in your favorite app."
+            : (media.IsPlaying ? "Playing" : "Paused") + (string.IsNullOrWhiteSpace(media.Artist) ? "" : " · " + media.Artist) + DemoSuffix;
+        RenderFreeHomeFocus();
     }
+
+    private void RenderFreeHomeFocus()
+    {
+        FreeHomeFocusTime.Text = _viewModel.FocusTime;
+        FreeHomeFocusStatus.Text = _viewModel.FocusRunning ? "Your focus session is running."
+            : _viewModel.FocusProgress <= 0 ? "Session complete. Take a breath."
+            : _viewModel.FocusProgress < 1 ? "Paused. Pick up when you're ready." : "One task. Start at your pace.";
+    }
+
+    private void RenderFreeFocus()
+    {
+        FreeFocusTimeText.Text = _viewModel.FocusTime;
+        var progress = Math.Clamp(_viewModel.FocusProgress, 0, 1);
+        var paused = !_viewModel.FocusRunning && progress is > 0 and < 1;
+        FreeFocusStateText.Text = _viewModel.FocusRunning ? "Stay with your task" : progress <= 0 ? "Session complete" : paused ? "Take a breath" : "Ready when you are";
+        FreeFocusDescriptionText.Text = _viewModel.FocusRunning ? "Your session continues when the notch is collapsed."
+            : paused ? "Your time is paused. Continue when you're ready."
+            : progress <= 0 ? "Nice work. Make room for a short break."
+            : $"A {_viewModel.Preferences.FocusMinutes}-minute session, at your pace.";
+        FreeFocusToggleButton.Content = _viewModel.FocusRunning ? "Pause" : paused ? "Resume focus" : "Start focus";
+        FreeFocusToggleButton.IsEnabled = _viewModel.IsReady;
+        var dialSize = 126 * Math.Max(1, NativeTheme.TextScaleFactor);
+        if (_renderedFreeFocusProgress == progress && FreeFocusDial.Width == dialSize) return;
+        FreeFocusDial.Width = FreeFocusDial.Height = dialSize;
+        FreeFocusArc.Data = ArcGeometry(dialSize / 2, dialSize / 2 - 2, progress);
+        _renderedFreeFocusProgress = progress;
+    }
+
     private async Task LoadArtworkAsync(string? path)
     {
         var request = ++_artworkRequest;
@@ -299,7 +353,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         {
             var file = await global::Windows.Storage.StorageFile.GetFileFromPathAsync(System.IO.Path.GetFullPath(path));
             using var stream = await file.OpenReadAsync();
-            var image = new BitmapImage();
+            var image = new BitmapImage { DecodePixelWidth = 256 };
             await image.SetSourceAsync(stream);
             if (request != _artworkRequest) return;
             MediaArtwork.Source = image;
@@ -586,7 +640,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     {
         var progress = Math.Clamp(_viewModel.FocusProgress, 0, 1);
         if (_renderedFocusProgress == progress) return;
-        var dialSize = 81 * Math.Max(1, NativeTheme.TextScaleFactor);
+        var dialSize = 96 * Math.Max(1, NativeTheme.TextScaleFactor);
         FocusDial.Width = FocusDial.Height = dialSize;
         FocusArc.Data = ArcGeometry(dialSize / 2, dialSize / 2 - 2, progress);
         _renderedFocusProgress = progress;
@@ -673,7 +727,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
 
     private async void MediaSeekSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        if (_rendering || _viewModel.Media is not { CanSeek: true } || _viewModel.Preferences.DemoMode) return;
+        if (_rendering || !_viewModel.IsPremium || _viewModel.Media is not { CanSeek: true } || _viewModel.Preferences.DemoMode) return;
         _seekDelay?.Cancel(); _seekDelay?.Dispose(); _seekDelay = new CancellationTokenSource();
         var delay = _seekDelay;
         try { await Task.Delay(180, delay.Token); await SafeAsync(() => _viewModel.SeekMediaAsync(e.NewValue)); }
@@ -682,7 +736,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     }
     private async void VolumeSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        if (_rendering || _viewModel.System is null) return;
+        if (_rendering || !_viewModel.IsPremium || _viewModel.System is null) return;
         _volumeDelay?.Cancel(); _volumeDelay?.Dispose(); _volumeDelay = new CancellationTokenSource();
         var delay = _volumeDelay;
         try { await Task.Delay(80, delay.Token); await SafeAsync(() => _viewModel.SetVolumeAsync(e.NewValue)); }

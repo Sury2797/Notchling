@@ -1,8 +1,8 @@
-using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using Notch.Core;
 
 namespace Notch.Windows.Services;
@@ -21,8 +21,7 @@ public sealed class WindowsSystemService : ISystemService
     private long _lastScreenSample = Stopwatch.GetTimestamp();
     private TimeSpan _activeScreenTime;
     private bool _screenSamplingUnavailable;
-    private BlockingCollection<AwakeRequest>? _awakeRequests;
-    private Thread? _awakeThread;
+    private SafeFileHandle? _awakeRequest;
     private volatile bool _disposed;
     public bool AudioAvailable { get; private set; }
 
@@ -220,44 +219,39 @@ public sealed class WindowsSystemService : ISystemService
         lock (_awakeGate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_awakeRequests is null)
+            if (!awake)
             {
-                if (!awake) return;
-                _awakeRequests = new BlockingCollection<AwakeRequest>();
-                var requests = _awakeRequests;
-                _awakeThread = new Thread(() => AwakeWorker(requests)) { IsBackground = true, Name = ProductIdentity.DisplayName + " power request" };
-                _awakeThread.Start();
+                // Closing this handle releases both requests, including after suspend or
+                // a failed partial setup. There is no worker thread to wait for on the UI.
+                _awakeRequest?.Dispose();
+                _awakeRequest = null;
+                return;
             }
-            var request = new AwakeRequest(awake);
-            _awakeRequests.Add(request);
-            request.Completion.Task.GetAwaiter().GetResult();
-        }
-    }
-
-    private static void AwakeWorker(BlockingCollection<AwakeRequest> requests)
-    {
-        try
-        {
-            foreach (var request in requests.GetConsumingEnumerable())
+            if (_awakeRequest is not null) return;
+            var reasonText = Marshal.StringToHGlobalUni(ProductIdentity.DisplayName + " is keeping the display and system awake at your request.");
+            SafeFileHandle? request = null;
+            try
             {
-                try
+                var reason = new PowerReasonContext
                 {
-                    var flags = 0x80000000u | (request.Enabled ? 0x00000001u | 0x00000002u : 0u);
-                    if (Native.SetThreadExecutionState(flags) == 0)
-                        request.Completion.TrySetException(new Win32Exception(Marshal.GetLastWin32Error()));
-                    else request.Completion.TrySetResult();
-                }
-                catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
-                {
-                    request.Completion.TrySetException(error);
-                }
+                    Version = 0, // POWER_REQUEST_CONTEXT_VERSION.
+                    Flags = 1, // POWER_REQUEST_CONTEXT_SIMPLE_STRING.
+                    Reason = new PowerReasonUnion { SimpleReason = reasonText },
+                };
+                request = Native.PowerCreateRequest(ref reason);
+                if (request.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows could not create the Awake request.");
+                if (!Native.PowerSetRequest(request, 0)) // PowerRequestDisplayRequired.
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows could not keep the display awake.");
+                if (!Native.PowerSetRequest(request, 1)) // PowerRequestSystemRequired.
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows could not keep the system awake.");
+                _awakeRequest = request;
+                request = null; // Ownership moves to this service only after both requests succeed.
             }
-        }
-        finally
-        {
-            try { Native.SetThreadExecutionState(0x80000000); }
-            catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
-            { StartupDiagnostics.Write("System.PowerRequestCleanup", error); }
+            finally
+            {
+                request?.Dispose(); // Failed setup also releases a successful first request.
+                Marshal.FreeHGlobal(reasonText); // PowerCreateRequest copies the reason during the call.
+            }
         }
     }
 
@@ -268,24 +262,33 @@ public sealed class WindowsSystemService : ISystemService
             if (_disposed) return;
             _disposed = true;
             _screenSampler.Dispose();
-            if (_awakeRequests is null) return;
-            var release = new AwakeRequest(false);
-            _awakeRequests.Add(release);
-            try { release.Completion.Task.GetAwaiter().GetResult(); }
-            catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
-            { StartupDiagnostics.Write("System.PowerRequestRelease", error); }
-            finally
-            {
-                _awakeRequests.CompleteAdding();
-                _awakeThread?.Join();
-                _awakeRequests.Dispose();
-            }
+            _awakeRequest?.Dispose();
+            _awakeRequest = null;
         }
     }
 
-    private sealed record AwakeRequest(bool Enabled)
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PowerReasonContext
     {
-        public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public uint Version;
+        public uint Flags;
+        public PowerReasonUnion Reason;
+    }
+    // Keep the complete native union size/alignment, rather than declaring only its
+    // pointer-sized simple-string member (the detailed member is larger on x64).
+    [StructLayout(LayoutKind.Explicit)]
+    private struct PowerReasonUnion
+    {
+        [FieldOffset(0)] public nint SimpleReason;
+        [FieldOffset(0)] public PowerDetailedReason DetailedReason;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PowerDetailedReason
+    {
+        public nint Module;
+        public uint ResourceId;
+        public uint StringCount;
+        public nint Strings;
     }
     [StructLayout(LayoutKind.Sequential)] private struct FileTime { public uint Low, High; public readonly ulong Value => ((ulong)High << 32) | Low; }
     [StructLayout(LayoutKind.Sequential)] private struct LastInputInfo { public uint Size, Time; }
@@ -300,7 +303,8 @@ public sealed class WindowsSystemService : ISystemService
         [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
         [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetSystemPowerStatus(out PowerStatus status);
         [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetLastInputInfo(ref LastInputInfo info);
-        [DllImport("kernel32.dll", SetLastError = true)] internal static extern uint SetThreadExecutionState(uint flags);
+        [DllImport("kernel32.dll", SetLastError = true)] internal static extern SafeFileHandle PowerCreateRequest(ref PowerReasonContext context);
+        [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool PowerSetRequest(SafeFileHandle request, int requestType);
         [DllImport("ole32.dll")] internal static extern int PropVariantClear(ref PropVariant value);
     }
 
