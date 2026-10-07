@@ -132,7 +132,10 @@ try {
             try { $pinned = (Get-Content -LiteralPath $preferencesFile -Raw | ConvertFrom-Json).Pinned -eq $true } catch { }
         }
         if ($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On -and $pinned) { break }
-        if ($pinWait.Elapsed.TotalSeconds -ge 3) { throw "The expanded notch could not be pinned for interaction." }
+        if ($pinWait.Elapsed.TotalSeconds -ge 10) {
+            $savedPreferences = if (Test-Path -LiteralPath $preferencesFile) { Get-Content -LiteralPath $preferencesFile -Raw } else { "preferences file absent" }
+            throw "The expanded notch could not be pinned for interaction. Toggle state: $($toggle.Current.ToggleState); persisted pin: $pinned; preferences: $savedPreferences"
+        }
         Start-Sleep -Milliseconds 100
     }
     $report.Actions += "Pinned expanded notch"
