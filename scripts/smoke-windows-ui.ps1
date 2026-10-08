@@ -414,6 +414,9 @@ namespace NotchlingUiSmoke {
     $report.Actions += "Verified unapplied Settings number draft survives navigation"
 
     $report.Stage = "Unsigned evaluation update guidance without error or scroll reset"
+    # A PowerShell 7 CI parent can pass incompatible module paths to this 5.1
+    # helper. Resolve certificate inspection from the running desktop shell.
+    Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
     $installedSignature = Get-AuthenticodeSignature -LiteralPath $process.Path
     if ($installedSignature.Status -eq [System.Management.Automation.SignatureStatus]::Valid) {
         # A future signed smoke run must not exercise the stable update channel.

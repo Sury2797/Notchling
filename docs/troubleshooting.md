@@ -38,6 +38,6 @@ If the process actually exits, share the final startup-log lines and the action 
 
 ## Updates in an evaluation build
 
-Evaluation installers are unsigned. In v0.2.10 and later, **Settings → Updates and troubleshooting → Check for updates** explains manual updates without displaying a signing error. Open **Release page**, download the newest evaluation Setup EXE and run it over the existing installation; your local notebook is retained. Check the app version in Settings after reopening.
+Evaluation installers are unsigned. In v0.2.11 and later, **Settings → Updates and troubleshooting → Check for updates** explains manual updates without displaying a signing error. Open **Release page**, download the newest evaluation Setup EXE and run it over the existing installation; your local notebook is retained. Check the app version in Settings after reopening.
 
 The automatic stable updater is reserved for signed releases. It continues to verify the installed publisher, the manifest and installer integrity; evaluation guidance does not bypass those protections.
