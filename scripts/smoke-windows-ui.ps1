@@ -26,6 +26,10 @@ $report = [ordered]@{
     SettingsNoHorizontalOverflow = $false
     SettingsTogglePreservesScroll = $false
     SettingsDraftPreserved = $false
+    UnsignedUpdateGuidance = $false
+    UpdateActionPreservesSettingsScroll = $false
+    UpdateActionCreatedNoDownload = $false
+    EvaluationUpdateStatus = "Not run"
     ExplicitSamplePreviewExited = $false
     FocusInitial = $null
     FocusAfterStart = $null
@@ -180,6 +184,17 @@ function Assert-HorizontalBounds {
                 throw "Visible Settings content exceeds the native notch width: '$($current.Name)' ($($rectangle.Left)..$($rectangle.Right), notch $($bounds.Left)..$($bounds.Right))."
             }
         } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
+    }
+}
+
+function Get-UpdateDownloadSnapshot {
+    # Inspect only the app-owned updater directory on this disposable desktop.
+    # The unsigned path must return before creating an installer download.
+    $updateDirectory = Join-Path ([IO.Path]::GetTempPath()) "Notchling.Update"
+    if (Test-Path -LiteralPath $updateDirectory -PathType Container) {
+        Get-ChildItem -LiteralPath $updateDirectory -Recurse -File | ForEach-Object {
+            "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)"
+        } | Sort-Object
     }
 }
 
@@ -397,6 +412,56 @@ namespace NotchlingUiSmoke {
     $numberValue.SetValue($initialMinutes)
     $report.SettingsDraftPreserved = $true
     $report.Actions += "Verified unapplied Settings number draft survives navigation"
+
+    $report.Stage = "Unsigned evaluation update guidance without error or scroll reset"
+    $installedSignature = Get-AuthenticodeSignature -LiteralPath $process.Path
+    if ($installedSignature.Status -eq [System.Management.Automation.SignatureStatus]::Valid) {
+        # A future signed smoke run must not exercise the stable update channel.
+        # Record that this evaluation-specific regression was not performed.
+        $report.EvaluationUpdateStatus = "Skipped: installed application is signed; this regression covers unsigned evaluation builds."
+    } else {
+        if ($installedSignature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
+            throw "This evaluation-update regression requires the unsigned CI application."
+        }
+        $support = Scroll-ToSetting "Updates and troubleshooting" $null ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+        $supportExpansion = $support.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+        $supportExpansion.Expand()
+        $updateButton = Scroll-ToSetting "Check for updates" ([System.Windows.Automation.ControlType]::Button) ([System.Windows.Automation.InvokePattern]::Pattern)
+        Start-Sleep -Milliseconds 300
+        $support = Wait-Control "Updates and troubleshooting" $null $true ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+        $supportTop = $support.Current.BoundingRectangle.Top
+        $downloadsBefore = @(Get-UpdateDownloadSnapshot)
+        if (Find-Control "Notchling error" $null $false) { throw "The evaluation-update fixture already has a visible application error." }
+        Invoke-Button "Check for updates"
+        $manualUpdateGuidance = "This evaluation build uses manual updates. Open Release page to download the latest installer."
+        # Check the actual Settings live region, rather than accepting only the
+        # unrelated footer that exposes the same informational status.
+        Wait-Control $manualUpdateGuidance ([System.Windows.Automation.ControlType]::Text) | Out-Null
+        $updateStatus = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, "UpdateStatus"))
+        if ($null -eq $updateStatus -or $updateStatus.Current.IsOffscreen -or $updateStatus.Current.Name -ne $manualUpdateGuidance) {
+            throw "The visible Settings live region did not expose the manual-update guidance."
+        }
+        Wait-Control "Release page" ([System.Windows.Automation.ControlType]::Button) | Out-Null
+        if (Find-Control "Notchling error" $null $false) { throw "An unsigned evaluation update check displayed a red application error instead of manual-update guidance." }
+        $report.UnsignedUpdateGuidance = $true
+        Wait-Control "Check for updates" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
+        Start-Sleep -Milliseconds 300
+        $support = Wait-Control "Updates and troubleshooting" $null $true ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+        # Adding guidance can change content height and therefore scroll percent.
+        # The preceding section header must retain its viewport location.
+        if ([Math]::Abs($support.Current.BoundingRectangle.Top - $supportTop) -gt 2 * $displayScale) {
+            throw "Checking for evaluation updates reset the Settings viewport."
+        }
+        $report.UpdateActionPreservesSettingsScroll = $true
+        $downloadsAfter = @(Get-UpdateDownloadSnapshot)
+        if ([string]::Join("`n", [string[]]$downloadsBefore) -ne [string]::Join("`n", [string[]]$downloadsAfter)) {
+            throw "An unsigned evaluation update check created or changed an installer download."
+        }
+        $report.UpdateActionCreatedNoDownload = $true
+        $report.EvaluationUpdateStatus = "Passed: unsigned evaluation action provides manual-update guidance without an error or installer download."
+        $report.Actions += "Verified unsigned update guidance, no application error, retained Settings viewport, and no installer download"
+    }
 
     $report.Stage = "Explicit sample-data preview and exit to real data"
     $preview = Scroll-ToSetting "Sample-data preview" $null ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)

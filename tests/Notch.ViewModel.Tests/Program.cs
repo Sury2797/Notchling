@@ -46,6 +46,58 @@ Task BeginRefreshOnContext(MainViewModel vm, SynchronizationContext context)
 MainViewModel ViewModel() => new(new DispatcherQueue(), dataDirectory: data);
 #endif
 
+await Case("Unsigned evaluation update check gives manual guidance without saving existing data", async () =>
+{
+    var workspacePath = Path.Combine(data, "workspace.json");
+    var preferencesPath = Path.Combine(data, "preferences.json");
+    await File.WriteAllTextAsync(workspacePath, JsonSerializer.Serialize(new MainViewModel.LocalData([], [], [], [], "Keep my real notebook — café")));
+    await File.WriteAllTextAsync(preferencesPath, JsonSerializer.Serialize(new AppPreferences { FocusMinutes = 37 }));
+    var store = new FaultingStore(data);
+    await using var vm = new MainViewModel(new DispatcherQueue(), dataDirectory: data, store: store);
+    await vm.InitializeAsync();
+    var originalFiles = Directory.GetFiles(data).ToDictionary(path => path, File.ReadAllBytes);
+    var writes = store.Writes;
+    const string guidance = "This evaluation build uses manual updates. Open Release page to download the latest installer.";
+    var updateNotifications = new List<string>();
+    vm.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(vm.UpdateStatus)) updateNotifications.Add(vm.UpdateStatus); };
+    store.FailWrites = true;
+    try
+    {
+        // Uses the linked, real WindowsUpdateService against this unsigned test
+        // executable. A mistaken save would fail rather than quietly pass.
+        await vm.ExecuteAsync(vm.CheckForUpdatesAsync);
+        await vm.ExecuteAsync(vm.CheckForUpdatesAsync);
+        Assert(vm.Error == "" && vm.Status == guidance && vm.UpdateStatus == guidance,
+            "An expected evaluation limitation appeared as an error or failed to explain how to update.");
+        Assert(updateNotifications.Count(status => status == guidance) == 2,
+            "Repeated update checks did not publish the durable Settings guidance.");
+        Assert(vm.IsReady && vm.Scratchpad == "Keep my real notebook — café" && vm.Preferences.FocusMinutes == 37,
+            "Checking for a manual update changed local data or stopped the usable application.");
+        Assert(store.Writes == writes && Directory.GetFiles(data).Length == originalFiles.Count
+            && originalFiles.All(file => File.ReadAllBytes(file.Key).SequenceEqual(file.Value)),
+            "An unsigned update check saved, replaced or created local notebook/settings files.");
+    }
+    finally { store.FailWrites = false; }
+});
+await Case("Update checks respect loading and disposed command boundaries", async () =>
+{
+    var store = new FaultingStore(data);
+    var vm = new MainViewModel(new DispatcherQueue(), dataDirectory: data, store: store);
+    var initialStatus = vm.UpdateStatus;
+    await vm.ExecuteAsync(vm.CheckForUpdatesAsync);
+    Assert(vm.Error.Contains("loading") && vm.UpdateStatus == initialStatus && store.Writes == 0,
+        "An update command bypassed the loading guard and changed update state or notebook data.");
+    await vm.InitializeAsync();
+    await vm.DisposeAsync();
+    var writes = store.Writes;
+    var notifications = 0;
+    vm.PropertyChanged += (_, _) => notifications++;
+    await vm.CheckForUpdatesAsync();
+    await vm.ExecuteAsync(vm.CheckForUpdatesAsync);
+    Assert(notifications == 0 && store.Writes == writes && vm.UpdateStatus == initialStatus,
+        "A disposed update command published late status or accessed released local storage.");
+});
+
 #if !DEBUG
 await Case("Release starts Free and refuses extended tools and direct commands", async () =>
 {

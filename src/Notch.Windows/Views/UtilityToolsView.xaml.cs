@@ -31,6 +31,7 @@ public sealed partial class UtilityToolsView : UserControl
     private string? _scratchpadDraft;
     private bool _invalidDrafts;
     private TextBlock? _saveStateText;
+    private TextBlock? _updateStatusText;
     private TextBlock? _screenTimeText;
     private readonly Dictionary<string, ToggleSwitch> _settingsToggles = [];
     private bool _updatingSettingsToggles;
@@ -54,6 +55,19 @@ public sealed partial class UtilityToolsView : UserControl
         else if (_vm.SelectedModule == ModuleId.ScreenTime && args.PropertyName == nameof(MainViewModel.System) && _screenTimeText is not null) _screenTimeText.Text = _vm.System is { } system ? FocusSession.Format(system.SessionScreenTime) : "00:00";
         else if (_vm.SelectedModule == ModuleId.Clipboard && args.PropertyName == nameof(MainViewModel.Clipboard)) Render();
         else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName == nameof(MainViewModel.SaveState) && _saveStateText is not null) _saveStateText.Text = _vm.SaveState;
+        else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName == nameof(MainViewModel.UpdateStatus) && _updateStatusText is not null)
+        {
+            // A shorter pending message must not shrink scrolled content and
+            // clamp the viewport before the final update guidance arrives.
+            _updateStatusText.MinHeight = Math.Max(_updateStatusText.MinHeight, _updateStatusText.ActualHeight);
+            _updateStatusText.Text = _vm.UpdateStatus;
+            if (Microsoft.UI.Xaml.Automation.Peers.AutomationPeer.ListenerExists(Microsoft.UI.Xaml.Automation.Peers.AutomationEvents.LiveRegionChanged))
+            {
+                var peer = Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.FromElement(_updateStatusText)
+                    ?? Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.CreatePeerForElement(_updateStatusText);
+                peer?.RaiseAutomationEvent(Microsoft.UI.Xaml.Automation.Peers.AutomationEvents.LiveRegionChanged);
+            }
+        }
         else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName == nameof(MainViewModel.SubscriptionStatus)) Render();
     }
     private TextBlock Text(string value, double size = 13, bool muted = false) => new()
@@ -157,6 +171,7 @@ public sealed partial class UtilityToolsView : UserControl
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ContentScroll, _vm.SelectedModule == ModuleId.Settings ? "Notchling settings content" : "Notchling tool content");
         ContentStack.Children.Clear();
         _settingsToggles.Clear();
+        _updateStatusText = null;
         var definition = ModuleCatalog.Get(_vm.SelectedModule);
         Header(definition.Title, _vm.SelectedModule == ModuleId.Tools ? "Choose a tool. Availability and connection requirements are shown below." : definition.Description);
         switch (_vm.SelectedModule)
@@ -549,8 +564,12 @@ public sealed partial class UtilityToolsView : UserControl
 
         ContentStack.Children.Add(SettingsDetails("preview", "Sample-data preview", "See labeled sample states without connecting an account.",
             Toggle("Preview sample data for this session", "Samples are labeled. This does not start music or control your real player.", preferences.DemoMode, value => _vm.Preferences with { DemoMode = value })));
+        _updateStatusText = Text(_vm.UpdateStatus, 12, true);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(_updateStatusText, "UpdateStatus");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(_updateStatusText, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         ContentStack.Children.Add(SettingsDetails("support", "Updates and troubleshooting", "Get updates or reconnect optional Windows services.",
-            Row(Button("Check for verified updates", _vm.CheckForUpdatesAsync), Button("Release page", () => OpenLink("https://github.com/Sury2797/Notchling/releases"))),
+            Row(Button("Check for updates", _vm.CheckForUpdatesAsync), Button("Release page", () => OpenLink("https://github.com/Sury2797/Notchling/releases"))),
+            _updateStatusText,
             Button("Retry media and clipboard services", _vm.RetryNativeServicesAsync),
             Text("Ctrl + Shift + Space opens Notchling. Esc collapses the panel. You can also reopen it from the Windows tray.", 12, true)));
         var notifications = _vm.NotificationHistory.Take(10).Select(activity => (UIElement)Text(activity.Source + ": " + activity.Title, 12, true)).ToArray();

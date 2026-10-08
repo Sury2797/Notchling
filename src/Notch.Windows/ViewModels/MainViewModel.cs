@@ -68,6 +68,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private CodingSnapshot? _coding;
     private AnalyticsSnapshot? _analytics;
     private string _status = "Local first. Ready when you are.";
+    private string _updateStatus = "Evaluation builds use manual updates from Release page. Verified automatic updates require a signed release.";
     private string _error = "";
     private string _scratchpad = "";
     private IReadOnlyList<int> _ports = [];
@@ -85,6 +86,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public CodingSnapshot? Coding { get => _coding; private set => Set(ref _coding, value); }
     public AnalyticsSnapshot? Analytics { get => _analytics; private set => Set(ref _analytics, value); }
     public string Status { get => _status; private set => Set(ref _status, value); }
+    public string UpdateStatus { get => _updateStatus; private set => Set(ref _updateStatus, value); }
     public string Error { get => _error; private set => Set(ref _error, value); }
     public string Scratchpad
     {
@@ -646,15 +648,52 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
     public async Task CheckForUpdatesAsync()
     {
-        using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = true, AutomaticDecompression = DecompressionMethods.All });
-        var service = new WindowsUpdateService(http);
-        var update = await service.CheckAsync(_lifetimeToken);
-        if (update is null) { Status = "You have the current stable version."; return; }
-        Status = "Downloading verified update " + update.Version + "…";
-        var prepared = await service.DownloadAsync(update, _lifetimeToken);
-        if (!await SaveBeforeExitAsync()) return;
-        await service.OpenInstallerAsync(prepared, _lifetimeToken);
-        Status = $"Update installer opened. Save and quit {ProductIdentity.DisplayName} to let installation proceed.";
+        if (!ReadyForInput()) return;
+        UpdateStatus = "Checking whether verified updates are available…";
+        try
+        {
+            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = true, AutomaticDecompression = DecompressionMethods.All });
+            var service = new WindowsUpdateService(http);
+            var canVerifyPublisher = await service.CanVerifyPublisherAsync(_lifetimeToken);
+            if (_disposed) return;
+            _lifetimeToken.ThrowIfCancellationRequested();
+            if (!canVerifyPublisher)
+            {
+                // Evaluation installers deliberately have no trusted signing key.
+                // Explain their manual update path before any manifest request,
+                // download, notebook save or installer launch can take place.
+                Status = UpdateStatus = "This evaluation build uses manual updates. Open Release page to download the latest installer.";
+                return;
+            }
+            Status = UpdateStatus = "Checking for verified updates…";
+            var update = await service.CheckAsync(_lifetimeToken);
+            if (_disposed) return;
+            _lifetimeToken.ThrowIfCancellationRequested();
+            if (update is null) { Status = UpdateStatus = "You have the current stable version."; return; }
+            Status = UpdateStatus = "Downloading verified update " + update.Version + "…";
+            var prepared = await service.DownloadAsync(update, _lifetimeToken);
+            if (_disposed) return;
+            _lifetimeToken.ThrowIfCancellationRequested();
+            if (!await SaveBeforeExitAsync())
+            {
+                if (!_disposed) UpdateStatus = "Update downloaded. Save your changes successfully before installing.";
+                return;
+            }
+            if (_disposed) return;
+            _lifetimeToken.ThrowIfCancellationRequested();
+            await service.OpenInstallerAsync(prepared, _lifetimeToken);
+            if (!_disposed) Status = UpdateStatus = $"Update installer opened. Save and quit {ProductIdentity.DisplayName} to let installation proceed.";
+        }
+        catch (OperationCanceledException)
+        {
+            if (!_disposed) UpdateStatus = "Update check cancelled.";
+            throw;
+        }
+        catch (Exception error) when (Recoverable(error))
+        {
+            if (!_disposed) UpdateStatus = "Update could not be completed. Check the error details or use Release page.";
+            throw;
+        }
     }
     public Task RequestLoginAsync(string email) => _subscription?.RequestLoginAsync(email) ?? Task.FromException(new InvalidOperationException(_subscriptionUnavailable));
     public async Task VerifyLoginAsync(string email, string code) { if (_subscription is null) throw new InvalidOperationException(_subscriptionUnavailable); await _subscription.VerifyLoginAsync(email, code); await RefreshSubscriptionAsync(); }

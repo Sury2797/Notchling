@@ -30,7 +30,7 @@
             <Button Grid.Column="1" Content="Exit preview" Style="{StaticResource NotchButtonStyle}" Click="OnExitDemoClick" AutomationProperties.Name="Exit sample data preview" />
           </Grid>
           <TextBlock x:Name="StatusText" Grid.Row="2" FontSize="12" Foreground="{ThemeResource NotchMutedBrush}" Margin="24,0,24,7" TextTrimming="CharacterEllipsis" />
-          <InfoBar x:Name="ErrorBar" Grid.Row="3" VerticalAlignment="Bottom" Margin="16,0,16,8" Severity="Error" IsOpen="False" IsClosable="True" CloseButtonClick="OnErrorClosed" />
+          <InfoBar x:Name="ErrorBar" AutomationProperties.Name="Notchling error" Grid.Row="3" VerticalAlignment="Bottom" Margin="16,0,16,8" Severity="Error" IsOpen="False" IsClosable="True" CloseButtonClick="OnErrorClosed" />
         </Grid>
         <ScrollViewer x:Name="ActivityContent" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <Grid Padding="20,18" ColumnSpacing="12">

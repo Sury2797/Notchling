@@ -34,4 +34,10 @@ Use v0.2.9 or newer for the UI repairs. Old saved demo mode now starts with real
 
 Settings scrolls vertically; optional connections and placement controls expand inside their own sections. Unapplied number drafts and scroll position are retained during ordinary preference changes. An active Settings panel stays open, and moving between child controls or through the dock gap does not collapse the notch. The normal unpinned panel can still collapse after you leave it; **Keep expanded**, **Esc**, the tray and **Ctrl + Shift + Space** remain explicit controls.
 
-If the process actually exits, share the final startup-log lines and the action that preceded it. A live recording is useful for freezes, fullscreen transitions and display-specific behavior; the supplied PDF alone cannot establish a process crash.
+If the process actually exits, share the final startup-log lines and the action that preceded it. A compact strip that remains visible and reopens is a collapse, rather than a process exit. The supplied v0.2.5 recording shows that distinction; an actual crash needs diagnostic evidence.
+
+## Updates in an evaluation build
+
+Evaluation installers are unsigned. In v0.2.10 and later, **Settings → Updates and troubleshooting → Check for updates** explains manual updates without displaying a signing error. Open **Release page**, download the newest evaluation Setup EXE and run it over the existing installation; your local notebook is retained. Check the app version in Settings after reopening.
+
+The automatic stable updater is reserved for signed releases. It continues to verify the installed publisher, the manifest and installer integrity; evaluation guidance does not bypass those protections.
