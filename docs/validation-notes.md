@@ -194,3 +194,23 @@ Source [`42dbdcd`](https://github.com/Sury2797/Notchling/commit/42dbdcdee797f98d
 The initial UI candidates were withheld while the test harness was corrected: pattern-aware selection now chooses actual switches/inputs instead of identically named text labels, and the PowerShell 5.1 preview assertion constructs its middle-dot character without relying on UTF-8-without-BOM decoding. The complete interaction suite passed after these corrections; functional assertions were retained.
 
 No live recording was supplied for this repair round. The PDF-visible issues are addressed and cloud checks passed, but the owner's actual freezes/process exits, consumer Windows 10/11 hardware, fullscreen behavior, mixed-monitor transitions, Narrator/high contrast, actual media/audio, Premium Awake, sustained performance, production signing and live billing still require their stated qualification. Linux native desktop remains planned.
+
+
+## Live-video follow-up qualification — 8 October 2026
+
+The supplied 62.33-second recording identifies **v0.2.5** in Settings and shows the old sparse panels, locked dock hover, horizontal overflow, switch-induced scroll resets, unlabeled compact sample music and expected signed-updater error. The compact strip remains present during collapse/reopen; no process crash or measured freeze is established by the recording. Timestamped observations and their resolutions are in [flaws.md](../flaws.md#live-recording-review--8-october-2026).
+
+The follow-up source [`7d5226e`](https://github.com/Sury2797/Notchling/commit/7d5226efcb28d858458e20db74fe13beb8cf0af0) passed every job in [run 37735689610](https://github.com/Sury2797/Notchling/actions/runs/37735689610). [Download v0.2.11 Setup](https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.2.11/Notchling-0.2.11-windows-x64-evaluation-setup.exe).
+
+| Check | Result and scope |
+| --- | --- |
+| Regression checks | **250 scenarios per platform**, Windows and Linux: 103 core, 58 commerce, 55 Debug view-model, five Release, 19 native-service doubles and 10 Python release cases. Native source/XAML projections compiled; actual native WinUI/XAML build passed on Windows. |
+| Update and data safety | The real linked updater rejected automatic eligibility for the unsigned fixture before manifest/download/save. Repeated checks preserved notebook/preferences bytes even with an injected failing store. Loading/disposed command boundaries passed. |
+| Installed evaluation interaction | Both `windows-latest` and `windows-2022` verified the actual visible Settings live region and its full accessible text, no error banner, retained viewport and unchanged app-owned download directory. Earlier layout/dock/preview/media-empty-state/Pomodoro/scratchpad assertions also passed. |
+| Native delivery | Windows PowerShell 5.1 prerequisite fixtures, actual Microsoft runtime integration/resource fallback, publish, setup, responding native window, invalid .NET-root overrides, existing-instance reopening and uninstall passed on both hosts. Final Setup reused runtimes prepared by the integration fixtures. |
+| Hosted startup observations | First window **815.8 / 1,015.4 ms**; five responsiveness samples each. Working set **108.60 / 109.59 MiB**, private memory **30.95 / 32.58 MiB**, CPU across all cores **0.699% / 1.161%** over **5.03 / 5.05 seconds**. These are startup samples, not settled-idle, frame-pacing or reporting-laptop measurements. |
+| Public delivery | Unauthenticated download succeeded; valid Windows PE; **8,890,277-byte EXE**. Published app payload **40,694,898 bytes**, excluding shared runtimes. SHA-256 matched the published release: `2630421d8a6a76aa8cd2dd109bf1474d5a649e6ea52e6dbb1ddbbbc919941c29`. |
+
+The initial v0.2.10 candidate failed the new test's certificate-inspection module import and was not published. The Windows PowerShell helper now explicitly imports its own security module instead of resolving the incompatible module search path inherited from a PowerShell 7 parent. The successful v0.2.11 run retains the full interaction assertions.
+
+The evaluation action supplies manual release guidance. It does not weaken the signed stable updater's publisher, asset-URL, HTTPS, size or SHA-256 protections; live signed update delivery remains unqualified. The accessible status exposes its actual text and raises the polite live-region event when a listener exists, but Narrator behavior still needs consumer-device qualification. The owner's Windows 10 laptop must be retested with this repaired version. Other consumer Windows 10/11 hardware, real playback/audio, Premium Awake, mixed displays and sustained performance remain open. Linux native desktop remains planned.
