@@ -307,6 +307,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         int generation;
         int viewGeneration;
         bool scanPorts;
+        var telemetryReadCompleted = false;
         lock (_shutdownGate)
         {
             if (_disposed || !_loaded || IsDemo || !_refreshLock.Wait(0)) return;
@@ -320,6 +321,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             // its current cache before either optional native reader can fail.
             Media = _mediaService.Current;
             var snapshot = await _systemService.ReadAsync(_lifetimeToken);
+            telemetryReadCompleted = true;
             if (!CanPublish(generation)) return;
             System = snapshot;
             ObserveAudioConnection(snapshot);
@@ -338,9 +340,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             Media = _mediaService.Current;
         }
         catch (Exception error) when (Recoverable(error) && (!CanPublish(generation) || viewGeneration != _viewGeneration))
-        { if (CanPublish(generation)) ObserveConnection("audio", "Audio output", ConnectionState.Failed, ConnectionFailure(error)); }
+        { if (CanPublish(generation) && !telemetryReadCompleted) ObserveConnection("audio", "Audio output", ConnectionState.Failed, ConnectionFailure(error)); }
         catch (Exception error) when (Recoverable(error))
-        { ObserveConnection("audio", "Audio output", ConnectionState.Failed, ConnectionFailure(error)); throw; }
+        { if (!telemetryReadCompleted) ObserveConnection("audio", "Audio output", ConnectionState.Failed, ConnectionFailure(error)); throw; }
         finally { _refreshLock.Release(); }
     }
     private bool CanPublishPorts(int generation, int viewGeneration) => CanPublish(generation)

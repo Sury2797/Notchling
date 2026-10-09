@@ -946,6 +946,8 @@ await Case("Late listener failure is suppressed after its port view closes", asy
     system.PortsGate.SetResult();
     await refresh;
     Assert(vm.ListeningPorts.Count == 0 && vm.Error == "", "Obsolete listener failure leaked into the current view.");
+    Assert(vm.ConnectionStatuses.Single(row => row.Id == "audio").State == ConnectionState.Ready,
+        "An obsolete listener scan incorrectly marked a successfully read audio endpoint as failed.");
 });
 await Case("Entering demo prevents in-flight TCP scan from replacing sample listeners", async () =>
 {

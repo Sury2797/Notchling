@@ -18,6 +18,8 @@ $report = [ordered]@{
     Operation = $null
     PatternRejections = @()
     UIStateSnapshots = @()
+    PointerInputMechanism = "SendInput absolute mouse movement over the physical virtual desktop."
+    VerifiedPointerMoves = 0
     Actions = @()
     MediaNoPlayerControlsDisabled = $false
     NoAutomaticSampleData = $false
@@ -176,11 +178,22 @@ function Set-Toggle([string]$Name, [bool]$On) {
 
 function Move-Cursor([int]$X, [int]$Y) {
     Assert-Budget
-    if (-not [NotchlingUiSmoke.Native]::SetCursorPos($X, $Y)) { throw "Windows rejected the owned UI test's pointer move." }
-    $actual = [NotchlingUiSmoke.Native+Point]::new()
-    if (-not [NotchlingUiSmoke.Native]::GetCursorPos([ref]$actual) -or $actual.X -ne $X -or $actual.Y -ne $Y) {
-        throw "The disposable desktop did not move its pointer to the requested regression-test location."
-    }
+    # SetCursorPos guarantees placement without proving that the hosted WinUI
+    # input site received pointer input. Inject actual mouse input instead,
+    # then require Windows to report the exact requested physical pixel.
+    [NotchlingUiSmoke.Native]::MoveCursorWithInput($X, $Y)
+    $wait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        Assert-Budget
+        $actual = [NotchlingUiSmoke.Native+Point]::new()
+        if ([NotchlingUiSmoke.Native]::GetCursorPos([ref]$actual) -and $actual.X -eq $X -and $actual.Y -eq $Y) {
+            $report.VerifiedPointerMoves++
+            return
+        }
+        Start-Sleep -Milliseconds 10
+    } while ($wait.Elapsed.TotalSeconds -lt 1)
+    $state = Get-UiStateSnapshot "Injected mouse did not reach requested pixel ($X, $Y)"
+    throw "The disposable desktop did not deliver injected mouse input to the requested regression-test location. UI state: $state"
 }
 
 function Visit-Panel {
@@ -532,7 +545,27 @@ namespace NotchlingUiSmoke {
         [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+        [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
         [DllImport("user32.dll", SetLastError=true)] private static extern uint SendInput(uint count, Input[] inputs, int size);
+        public static int NormalizeMouseCoordinate(int coordinate, int origin, int extent) {
+            var offset = (long)coordinate - origin;
+            if (extent <= 0 || offset < 0 || offset >= extent)
+                throw new ArgumentOutOfRangeException("coordinate", "The requested pixel is outside the physical virtual desktop.");
+            // Windows maps normalized input into pixel intervals. Aim at the
+            // middle of this pixel's interval, including negative monitor origins.
+            return Math.Max(0, Math.Min(65535, (int)Math.Floor((offset + .5) * 65536 / extent)));
+        }
+        public static void MoveCursorWithInput(int x, int y) {
+            var left = GetSystemMetrics(76); var top = GetSystemMetrics(77);
+            var width = GetSystemMetrics(78); var height = GetSystemMetrics(79);
+            var inputs = new Input[1];
+            inputs[0].Type = 0;
+            inputs[0].Data.Mouse.X = NormalizeMouseCoordinate(x, left, width);
+            inputs[0].Data.Mouse.Y = NormalizeMouseCoordinate(y, top, height);
+            inputs[0].Data.Mouse.Flags = 0x0001 | 0x8000 | 0x4000; // MOVE | ABSOLUTE | VIRTUALDESK
+            if (SendInput(1, inputs, Marshal.SizeOf(typeof(Input))) != 1)
+                throw new InvalidOperationException("Windows rejected mouse input on the owned disposable test desktop (Win32 " + Marshal.GetLastWin32Error() + ").");
+        }
         public static void TypeCharacter(char value) {
             var inputs = new Input[2];
             inputs[0].Type = inputs[1].Type = 1;

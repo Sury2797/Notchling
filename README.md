@@ -110,7 +110,7 @@ Polar, Dodo, and AdSense reporting are not connected. Built-in analytics OAuth, 
 
 ## Free and Premium
 
-**Public testing: all tools are free for everyone.** No owner-only unlock, paid account or fake Premium proof is required. Checkout is paused, and testing access does not automatically become a subscription. This is the current v0.3.2 source policy; the linked v0.2.11 installer predates it until a qualified replacement is published.
+**Public testing: all tools are free for everyone.** No owner-only unlock, paid account or fake Premium proof is required. Checkout is paused, and testing access does not automatically become a subscription. This is the current v0.3.3 source policy; the linked v0.2.11 installer predates it until a qualified replacement is published.
 
 The intended later commercial model remains a deliberately light **Free** edition and **Premium for US$2 per month**. The following split is a future plan, not an active paywall during public testing:
 

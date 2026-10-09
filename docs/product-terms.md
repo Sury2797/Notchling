@@ -1,6 +1,6 @@
 # Notchling application terms
 
-**Public-testing policy and draft commercial terms — 9 October 2026.** All catalog tools are enabled without a subscription in the v0.3.2 candidate. Billing is paused until the owner chooses a commercial release, completes its configuration and publishes the required identity and consumer disclosures. This document is not an active checkout or a claim that legal review has occurred.
+**Public-testing policy and draft commercial terms — 9 October 2026.** All catalog tools are enabled without a subscription in the v0.3.3 candidate. Billing is paused until the owner chooses a commercial release, completes its configuration and publishes the required identity and consumer disclosures. This document is not an active checkout or a claim that legal review has occurred.
 
 Contact the project maintainer through [GitHub Issues](https://github.com/Sury2797/Notchling/issues). The source is governed separately by [LICENSE](../LICENSE). Official application usage follows the applicable product terms; a subscription does not transfer source ownership, permit resale or grant redistribution rights.
 
