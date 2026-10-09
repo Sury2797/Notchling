@@ -270,7 +270,7 @@ function Open-CatalogTool([string]$Module) {
         if ($tool) { break }
     }
     if (-not $tool) { throw "An unlocked public-testing catalog tool could not be reached: $Module." }
-    if ($tool.Current.Name -match '(?i)locked|requires premium|opens plan settings') {
+    if ($tool.Current.Name -match '(?i)\blocked\b|requires premium|opens plan settings') {
         throw "A public-testing tool still exposes a paywall: $Module ($($tool.Current.Name))."
     }
     $tool.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()

@@ -1,6 +1,6 @@
 # Notchling access and planned pricing
 
-**Current source phase: public testing, beginning with the v0.3.3 candidate. All 21 catalog panels are free for everyone in Release and Debug.** No application account, subscription or owner-only unlock is needed for local tools. Checkout is paused. The candidate still needs Windows qualification before it replaces the last verified v0.2.11 download.
+**Current source phase: public testing, beginning with the v0.3.4 candidate. All 21 catalog panels are free for everyone in Release and Debug.** No application account, subscription or owner-only unlock is needed for local tools. Checkout is paused. The candidate still needs Windows qualification before it replaces the last verified v0.2.11 download.
 
 Testing access enables the supported controls; it does not supply provider accounts or pretend that disconnected sources work. Windows media requires a compatible player. Revenue requires your read-only Stripe reporting key, analytics requires your HTTPS endpoint and bearer token, and calendar/coding require selected supported files. Weather still requires the configured licensed service and authenticated session; that backend is not configured in the published application.
 
