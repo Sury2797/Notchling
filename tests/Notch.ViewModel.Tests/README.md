@@ -6,4 +6,4 @@ These scenarios exercise startup recovery, missed reminders, late result isolati
 
 Exit has a durable-save preflight. Native read-only results may finish while the app is still alive for retry/export; successful disposal then waits for those operations before releasing adapters and suppresses future publication. A failed save must keep the application and its edits available.
 
-Debug is intentional for the full development tool suite. Release entitlement enforcement is a separate product concern and must be checked independently; a simulated full-catalog test is not evidence that paying customers can bypass access controls.
+Public testing enables the full catalog in both Debug and Release without inventing a purchased entitlement. The common cases verify direct controls, account cancellation and connection status, including absent audio, provider setup, imported-file failures and late results. Separate Release fixtures select the future Freemium policy to keep its direct-command guards covered. These simulated checks establish neither live provider connectivity nor native Windows rendering.

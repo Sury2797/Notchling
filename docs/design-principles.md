@@ -42,7 +42,7 @@ Local notes and scratch text stay on the device. Provider credentials use Window
 
 Payment totals are not subscription MRR. Imported coding counters are not account quotas. Calendar import is not account synchronization. Unsupported providers and recurrence rules fail explicitly rather than displaying invented results. Illustrative data is available only through labeled demo mode.
 
-Free and Premium share the same accessibility, privacy and data-integrity standards. Their feature split is described in [pricing](pricing.md). Release requires signed Premium access; Debug is labeled for development. Commercial billing is inactive until owner configuration and validation.
+The v0.3.0 public-testing phase opens every supported tool to everyone in Release and Debug, while paid Premium status still requires a valid signed proof. Checkout is paused. A later Free/Premium split shares the same accessibility, privacy and data-integrity standards; see [pricing](pricing.md). Commercial billing requires a further owner decision, configuration and validation.
 
 ## Platform discipline
 

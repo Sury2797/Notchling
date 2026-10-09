@@ -19,11 +19,22 @@ public sealed class RevenueClient(HttpClient client, ISecretVault vault, TimePro
         if (provider != RevenueProvider.Stripe)
             throw new NotSupportedException($"{provider} is not connected: this build has no verified API adapter for that provider. No revenue data has been inferred.");
         var secret = ProviderHttp.RequireSecret(vault, "stripe");
+        using var operation = new ProviderOperation(client, cancellationToken);
+        try { return await ReadReportAsync(provider, days, secret, operation.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("The revenue report did not finish in time. Choose a shorter range or try again.");
+        }
+    }
+
+    private async Task<RevenueSnapshot> ReadReportAsync(RevenueProvider provider, int days, string secret, CancellationToken cancellationToken)
+    {
         var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
         var start = new DateTimeOffset(now.UtcDateTime.Date.AddDays(1 - days), TimeSpan.Zero);
         var payments = new List<RevenuePayment>();
         var daily = new decimal[days];
         var ids = new HashSet<string>(StringComparer.Ordinal);
+        var cursors = new HashSet<string>(StringComparer.Ordinal);
         string? cursor = null, currency = null;
         var complete = false;
         for (var page = 0; page < 100; page++)
@@ -41,6 +52,8 @@ public sealed class RevenueClient(HttpClient client, ISecretVault vault, TimePro
             foreach (var charge in data.EnumerateArray())
             {
                 var id = ProviderHttp.Text(charge, "id", 200);
+                if (string.IsNullOrWhiteSpace(id) || id.Any(char.IsControl))
+                    throw new InvalidDataException("Stripe returned an invalid charge identifier.");
                 lastId = id;
                 if (!ids.Add(id)) continue;
                 if (!IsTrue(charge, "paid") || !IsTrue(charge, "captured") || ProviderHttp.Text(charge, "status", 20) != "succeeded") continue;
@@ -68,7 +81,7 @@ public sealed class RevenueClient(HttpClient client, ISecretVault vault, TimePro
             if (!root.TryGetProperty("has_more", out var more) || more.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                 throw new InvalidDataException("Stripe omitted its pagination status.");
             if (!more.GetBoolean()) { complete = true; break; }
-            if (lastId is null || lastId == cursor) throw new InvalidDataException("Stripe pagination did not advance.");
+            if (lastId is null || !cursors.Add(lastId)) throw new InvalidDataException("Stripe pagination did not advance.");
             cursor = lastId;
         }
         return new(provider, payments.Sum(payment => payment.Amount), currency ?? string.Empty,

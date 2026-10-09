@@ -24,7 +24,7 @@
 
 <p align="center">
   <a href="#the-experience">Experience</a> ·
-  <a href="#free-and-premium">Plans</a> ·
+  <a href="#free-and-premium">Access</a> ·
   <a href="#try-notchling">Downloads</a> ·
   <a href="#build-and-release-with-github-actions">CI / CD</a> ·
   <a href="#development">Development</a> ·
@@ -37,15 +37,19 @@ The **Pixel Dragon** is Notchling’s app icon. The Windows application uses **C
 
 ## Current status
 
-**Active development · Windows installer tested · paid launch pending.** The actual setup, installed app, Free controls, Settings scrolling/drafts, evaluation update guidance, preview exit and dock interactions [passed on two Windows cloud hosts](https://github.com/Sury2797/Notchling/actions/runs/37735689610). The tested setup EXE is **8.9 MB**. [Download Notchling for Windows](https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.2.11/Notchling-0.2.11-windows-x64-evaluation-setup.exe), then follow the steps below.
+**v0.3.0 public-testing candidate · Windows qualification pending.** The current source unlocks **all 21 catalog panels for everyone**, with no subscription or purchase required. This includes the extended media, focus, notes, clipboard and system controls. External connections still need compatible players, your own provider setup or selected files. Purchasing is paused.
+
+The download buttons currently retain the last verified **v0.2.11** installer; that older release still uses the previous access policy. Its actual setup, installed app, Free controls, Settings scrolling/drafts, evaluation update guidance, preview exit and dock interactions [passed on two Windows cloud hosts](https://github.com/Sury2797/Notchling/actions/runs/37735689610). The upcoming v0.3.0 installer will replace those links after Windows qualification succeeds.
+
+This refinement targets the reported sticky hover state, oversized connection buttons, media metadata/artwork and uneven layouts. It uses shape-aware pointer checks, bounded editing leases, rendering-frame shell transitions, retained media controls and compact responsive settings forms. **Settings → Connection status** checks each supported source and distinguishes setup needed, successful reads and failures. Smoothness and consumer Windows 10/11 behavior still require measured hardware results.
 
 The [validation notes](docs/validation-notes.md) record the exact revision, measurements, and test limits. Consumer Windows 10/11 qualification, publisher signing, and production commercial configuration remain launch requirements.
 
-| Area | Available now | Before public release |
+| Area | Current source | Before a stable paid release |
 | --- | --- | --- |
-| Desktop | Native Windows app, local tools, optional connections, adaptive panels, reduced motion | Independent Windows 10/11 interaction, accessibility, and hardware profiling |
+| Desktop | Native Windows app; all catalog tools unlocked for public testing; adaptive panels and reduced motion | Independent Windows 10/11 interaction, accessibility, and hardware profiling |
 | Distribution | Single evaluation setup EXE; installed launch and Free controls tested in Windows CI; automatic shared prerequisites | Publisher certificate and consumer Windows 10/11 clean install/upgrade/update qualification |
-| Subscription | Release Free/Premium enforcement and configurable billing service | Production domain, Stripe, email delivery, customer policies, and sandbox acceptance |
+| Access and subscriptions | Public testing is free for everyone; signed paid-entitlement validation retained; checkout paused | Owner decision to restore Free/Premium, production domain, Stripe, email delivery, customer policies, and sandbox acceptance |
 | Linux | Portable core and automated checks | Native interface and Linux operating-system adapters |
 
 The [release checklist](docs/release-readiness.md) tracks acceptance. Build results establish compilation and packaging; measured responsiveness and native usability need their own evidence.
@@ -56,7 +60,7 @@ The [release checklist](docs/release-readiness.md) tracks acceptance. Build resu
 
 Hover over the notch to open it, choose a tool from the separate dock, and leave to collapse. Pinning keeps your current panel open. Placement settings select the monitor and offsets; fullscreen suppression keeps the overlay out of the way when configured.
 
-Focused editors, open dialogs, and active control manipulation defer passive navigation and temporary activities. Timers and reminders use a bounded activity queue; notification history keeps recent deliveries within reach.
+Recent text input, open dialogs, and active control manipulation defer passive navigation and temporary activities. A previously focused editor does not keep an unpinned island open indefinitely. Timers and reminders use a bounded activity queue; notification history keeps recent deliveries within reach.
 
 | Action | Control |
 | --- | --- |
@@ -76,7 +80,7 @@ Panel transitions respect reduced motion and Windows animation preferences. The 
 
 ## What’s inside
 
-The development catalog contains **Home and 20 tools**, plus Settings and an All tools index. Release access follows the plans below. Debug builds visibly enable the catalog for development.
+The catalog contains **Home and 20 tools**, plus Settings and an All tools index. The v0.3.0 public-testing source enables the entire catalog in both Release and Debug. Provider setup and native capabilities determine which data and controls are available; unlocking a tool does not fabricate a connection.
 
 | Purpose | Tools | Details |
 | --- | --- | --- |
@@ -91,22 +95,24 @@ The [module guide](docs/modules-and-connections.md) describes each tool’s beha
 
 ### Connections with clear boundaries
 
-Local Free tools work without an application account. Connected tools use providers or files you explicitly configure.
+Local tools work without an application account during public testing. Connected tools use providers or files you explicitly configure. **Check connections** reads your saved setup; missing sources are explained rather than replaced with sample data. Saving a credential is not proof that a provider request succeeded.
 
 | Connection | Supported behavior |
 | --- | --- |
-| Media | Windows system media sessions; controls follow the active player’s capabilities |
+| Media | Windows system media sessions; title, artist, source and artwork follow the selected player’s available metadata; unsupported commands remain disabled |
 | Revenue | Read-only Stripe captured payments after refunds; payment revenue, **not subscription MRR** |
 | Analytics | Authenticated, user-configured HTTPS endpoint with a documented JSON contract |
 | Coding | Selected Claude or Codex JSONL imports; imported usage without home-directory scanning or inferred account quotas |
 | Calendar | Local `.ics` import, supported recurrence/time-zone rules, and reminders; account synchronization is future work |
-| Weather | City-local forecasts through an authenticated, commercially licensed proxy in Release |
+| Weather | Tool access is unlocked; real forecasts require the owner’s configured licensed proxy and an authenticated service account. That service is not configured yet |
 
-Polar, Dodo, and AdSense reporting are not connected. Built-in analytics OAuth, calendar account sync, and cloud workspace sync are not implemented. See the [provider contracts](src/Notch.Core/Providers/README.md) for schemas, attribution, and setup. Third-party accounts, service charges, and availability are separate from a Notchling subscription.
+Polar, Dodo, and AdSense reporting are not connected. Built-in analytics OAuth, calendar account sync, and cloud workspace sync are not implemented. See the [provider contracts](src/Notch.Core/Providers/README.md) for schemas, attribution, and setup. Third-party accounts, service charges, and availability are separate from Notchling’s testing access or any future subscription.
 
 ## Free and Premium
 
-A deliberately light **Free** edition, with the full supported tool suite in **Premium for US$2 per month**.
+**Public testing: all tools are free for everyone.** No owner-only unlock, paid account or fake Premium proof is required. Checkout is paused, and testing access does not automatically become a subscription. This is the current v0.3.0 source policy; the linked v0.2.11 installer predates it until a qualified replacement is published.
+
+The intended later commercial model remains a deliberately light **Free** edition and **Premium for US$2 per month**. The following split is a future plan, not an active paywall during public testing:
 
 | | Free | Premium |
 | --- | --- | --- |
@@ -119,9 +125,9 @@ A deliberately light **Free** edition, with the full supported tool suite in **P
 | Connected dashboards | — | Supported revenue, analytics, coding, calendar, and weather connections |
 | Privacy, reduced motion, and workspace recovery/export | Included | Included |
 
-**Billing is prepared, not live.** Release starts Free and accepts Premium only through a verified, device-bound signed entitlement. The separate billing service implements email verification, hosted Stripe checkout, subscription management, and purchase restoration. Production credentials and approved customer policies must be configured before charging; Debug access does not establish a subscription.
+**Billing is prepared, not live.** The testing phase grants tool access separately from paid subscription verification. Actual Premium status still requires a verified, device-bound signed entitlement; the testing phase does not create or alter one. The separate billing service retains email verification, hosted Stripe checkout, subscription management and purchase restoration for a later commercial release. Production credentials and approved customer policies must be configured before charging.
 
-The policy is monthly renewal, cancellation of future renewals, and access through the verified paid period. Expiry preserves local material and recovery/export. No annual or lifetime plan, AI credits, cloud synchronization, or unlimited storage is included. Read [pricing](docs/pricing.md), [product terms](docs/product-terms.md), and [billing setup](docs/billing.md) for the precise boundaries.
+The planned paid policy is monthly renewal, cancellation of future renewals and access through the verified paid period. Expiry preserves local material and recovery/export. No annual or lifetime plan, AI credits, cloud synchronization or unlimited storage is included. Read [pricing](docs/pricing.md), [product terms](docs/product-terms.md) and [billing setup](docs/billing.md) for the current testing phase and future commercial boundaries.
 
 ## Your data and controls
 
@@ -164,7 +170,7 @@ Evaluation releases appear in [Releases](https://github.com/Sury2797/Notchling/r
 
 **One installer is the normal download.** Setup installs the app and checks for the shared .NET and Windows App SDK runtimes. If either is missing, Setup downloads its official installer and installs it; an Internet connection is required, and the .NET installer may request administrator approval. Existing compatible runtimes are reused. No SDK, developer tools, or manual DLL copying is required.
 
-The tested setup EXE is **8,889,407 bytes (8.48 MiB)**; its extracted app files total **40,692,808 bytes (38.81 MiB)**. Separate cloud fixtures exercised real missing-runtime installation and signed-resource recovery; the final app Setup reused the verified runtimes. The official Windows App Runtime download remains approximately **106.9 MB**. A machine missing both runtimes needs roughly **147 MB total** for first-install downloads at current versions, including the estimated .NET download. Later installs reuse compatible shared runtimes. See [delivery measurements and limits](docs/release-delivery.md).
+The last verified v0.2.11 setup EXE is **8,890,277 bytes (8.48 MiB)**; its extracted app files total **40,694,898 bytes (38.81 MiB)**. Separate cloud fixtures exercised real missing-runtime installation and signed-resource recovery; the final app Setup reused the verified runtimes. The official Windows App Runtime download remains approximately **106.9 MB**. A machine missing both runtimes needs roughly **147 MB total** for first-install downloads at current versions, including the estimated .NET download. Later installs reuse compatible shared runtimes. See [delivery measurements and limits](docs/release-delivery.md).
 
 This evaluation installer is unsigned and intended for review and development under the source license. Cloud checks on two Windows hosts cover prerequisite recovery, installation, launch, pinning, no-player media state, Pomodoro, scratchpad persistence, Settings scrolling/drafts, preview exit, pointer interaction, reopening an existing instance, and uninstall; full Windows 10/11 hardware and accessibility qualification remains open.
 

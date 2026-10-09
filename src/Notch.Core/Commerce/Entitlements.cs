@@ -98,3 +98,23 @@ public static class FeaturePolicy
     // Existing records remain readable/exportable after expiry; editing Premium tools is gated separately.
     public static bool CanReadStoredData(ModuleId module) => module is ModuleId.Notes or ModuleId.Links or ModuleId.Shelf or ModuleId.Calendar;
 }
+
+public enum ProductAccessPhase { PublicTesting, Freemium }
+
+/// <summary>
+/// Desktop tool availability is separate from a verified purchase and from access
+/// to a provider's authenticated service. Change this single release policy when
+/// the public testing phase ends; do not create or modify subscription proofs.
+/// </summary>
+public static class ProductAccessPolicy
+{
+    public const ProductAccessPhase CurrentPhase = ProductAccessPhase.PublicTesting;
+
+    public static bool CanUseExtendedTools(bool verifiedPremium, bool developmentBuild = false,
+        ProductAccessPhase phase = CurrentPhase)
+        => phase == ProductAccessPhase.PublicTesting || developmentBuild || verifiedPremium;
+
+    public static bool CanUse(ModuleId module, bool verifiedPremium, bool developmentBuild = false,
+        ProductAccessPhase phase = CurrentPhase)
+        => !FeaturePolicy.RequiresPremium(module) || CanUseExtendedTools(verifiedPremium, developmentBuild, phase);
+}

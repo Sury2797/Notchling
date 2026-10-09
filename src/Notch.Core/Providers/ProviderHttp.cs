@@ -9,7 +9,8 @@ internal static class ProviderHttp
     {
         // ResponseHeadersRead ends HttpClient's own timeout once headers arrive. Keep
         // one deadline alive through the bounded body read, including a stalled stream.
-        var timeout = client.Timeout == Timeout.InfiniteTimeSpan ? TimeSpan.FromSeconds(20) : client.Timeout;
+        var maximum = TimeSpan.FromSeconds(20);
+        var timeout = client.Timeout == Timeout.InfiniteTimeSpan || client.Timeout > maximum ? maximum : client.Timeout;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
         try
@@ -41,9 +42,18 @@ internal static class ProviderHttp
             {
                 HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "Access was refused. Check the configured credential and its read permissions.",
                 HttpStatusCode.TooManyRequests => "The provider rate limit was reached. Try again later.",
-                HttpStatusCode.ServiceUnavailable => "The provider is temporarily unavailable. Try again later.",
+                HttpStatusCode.NotFound => "The configured provider endpoint was not found. Check its HTTPS address.",
+                HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity => "The provider rejected this request. Check the endpoint and its supported data contract.",
+                HttpStatusCode.ProxyAuthenticationRequired => "The network proxy requires authentication. Check Windows proxy settings.",
+                HttpStatusCode.RequestTimeout or HttpStatusCode.GatewayTimeout => "The provider timed out. Try again later.",
+                HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable => "The provider is temporarily unavailable. Try again later.",
                 _ => "The provider request failed. Try again later."
             };
+            // Do not automatically repeat account-reporting requests or sleep on
+            // the UI operation. Display a bounded, server-provided retry hint.
+            if (response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable &&
+                response.Headers.RetryAfter?.Delta is { } wait && wait > TimeSpan.Zero && wait <= TimeSpan.FromDays(1))
+                reason += $" Retry after {Math.Ceiling(wait.TotalSeconds):0} seconds.";
             throw new HttpRequestException($"{reason} HTTP {(int)response.StatusCode}.", null, response.StatusCode);
         }
         const int maximumBytes = 8 * 1024 * 1024;
@@ -83,7 +93,7 @@ internal static class ProviderHttp
     {
         var secret = vault.Read(name);
         if (string.IsNullOrWhiteSpace(secret)) throw new InvalidOperationException($"Connect {name} in Settings before refreshing.");
-        if (secret.Contains('\r') || secret.Contains('\n')) throw new InvalidOperationException("The saved credential is invalid.");
-        return secret;
+        try { return ProviderCredential.Normalize(secret); }
+        catch (ArgumentException) { throw new InvalidOperationException("The saved credential is invalid. Save it again in Settings."); }
     }
 }

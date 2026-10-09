@@ -214,3 +214,16 @@ The follow-up source [`7d5226e`](https://github.com/Sury2797/Notchling/commit/7d
 The initial v0.2.10 candidate failed the new test's certificate-inspection module import and was not published. The Windows PowerShell helper now explicitly imports its own security module instead of resolving the incompatible module search path inherited from a PowerShell 7 parent. The successful v0.2.11 run retains the full interaction assertions.
 
 The evaluation action supplies manual release guidance. It does not weaken the signed stable updater's publisher, asset-URL, HTTPS, size or SHA-256 protections; live signed update delivery remains unqualified. The accessible status exposes its actual text and raises the polite live-region event when a listener exists, but Narrator behavior still needs consumer-device qualification. The owner's Windows 10 laptop must be retested with this repaired version. Other consumer Windows 10/11 hardware, real playback/audio, Premium Awake, mixed displays and sustained performance remain open. Linux native desktop remains planned.
+
+
+## Public-testing refinement — 9 October 2026
+
+The v0.3.0 candidate addresses the owner's current laptop screenshots: hover sticking, oversized credential actions, poor panel density, source artwork and detailed media metadata. All 21 catalog tools and extended controls are enabled for everyone during public testing. Paid proofs remain separate; desktop and server checkout are paused. The future Freemium phase remains covered by explicit commercial-policy fixtures.
+
+Local verification passed **345 checks**: 128 Core, 76 Commerce, 74 Debug view-model, 24 Release view-model, 33 linked native-service cases and 10 Python release cases. Source/XAML projections compiled with zero warnings/errors. Native API doubles and mocked HTTP are identified as such; they do not verify live players or accounts.
+
+The media cases exercise Unicode/long metadata, title/artist/album/source identity, capability-aware transport, paused and non-1× timing, long durations, artwork deadlines, same-session transient failures, session switches and late responses. Connection cases distinguish absent configuration, saved-but-unverified secrets, successful reads, invalid imported files, missing audio, retry recovery, preview and disposal. Hover cases cover finite keyboard leases, leave retries, transparent regions, rapid transition geometry and work-area bounds.
+
+The Windows qualification candidate must complete real XAML build, Setup installation, 21-tool navigation, eight connection states, real pointer hover/leave, typing-lease expiry, compact credential alignment, retained drafts, featured-panel scroll reset, notes/Awake, preview, manual-update guidance, reopening and uninstall on both hosted desktops before the public download is replaced. Screenshots are best-effort native captures with explicit availability status, rather than a functional pass criterion.
+
+Exact consumer Windows 10/11 hardware, real browser/Spotify metadata and artwork, Narrator/text scaling, multi-monitor/sleep/fullscreen scenarios, sustained resource use and 60/120/144 Hz frame pacing still need device qualification. Real reporting accounts and a licensed weather backend are not configured; automated provider contracts cannot establish their live connectivity. Linux native desktop remains planned.

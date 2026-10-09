@@ -68,6 +68,7 @@ var options = new BillingOptions
 };
 var store = new BillingStore(options); var stripe = new FakeStripe(); var sender = new FakeEmail();
 var engine = new BillingEngine(options, store, stripe, sender);
+var freemiumEngine = new BillingEngine(options, store, stripe, sender, ProductAccessPhase.Freemium);
 try
 {
     Check(!new BillingOptions().Ready, "missing production configuration disables billing");
@@ -83,11 +84,31 @@ try
     await engine.RequestLoginAsync(new("owner@example.test", device), default);
     var login = await engine.VerifyLoginAsync(new("owner@example.test", device, sender.Code), default);
     Check(!EntitlementTokens.Validate(login.Entitlement, publicKey, device, login.ServerTime).IsPremium, "verified email alone does not purchase Premium");
+    Check(await engine.RequireWeatherAccessAsync(login.SessionToken, default), "authenticated unpaid account can use configured weather during public testing");
+    Check(!await freemiumEngine.RequireWeatherAccessAsync(login.SessionToken, default), "restored freemium weather denies an unpaid account");
+    Check(!await engine.RequirePremiumAsync(login.SessionToken, default), "public weather access does not weaken verified Premium authorization");
+    Check(stripe.ReadCount == 0, "unpaid public weather never contacts Stripe or creates a customer");
+    await Throws<BillingAuthenticationException>(() => engine.RequireWeatherAccessAsync("", default), "public weather rejects a missing session");
+    await Throws<BillingAuthenticationException>(() => engine.RequireWeatherAccessAsync("unknown-session", default), "public weather rejects an unrecognized session");
+    await Throws<BillingAuthenticationException>(() => freemiumEngine.RequireWeatherAccessAsync("unknown-session", default), "freemium weather still rejects an unrecognized session");
+    await Throws<BillingAuthenticationException>(() => engine.CheckoutAsync("unknown-session", default), "paused public checkout still authenticates the session");
+    await Throws<BillingValidationException>(() => engine.CheckoutAsync(login.SessionToken, default), "public testing pauses server checkout for an unpaid account");
+    Check(stripe.CustomersCreated == 0 && stripe.CheckoutsCreated == 0, "paused public checkout creates no Stripe customer or checkout");
     await Throws<BillingAuthenticationException>(() => engine.VerifyLoginAsync(new("owner@example.test", device, sender.Code), default), "OTP is single use");
-    await engine.CheckoutAsync(login.SessionToken, default);
+    await freemiumEngine.CheckoutAsync(login.SessionToken, default);
     stripe.PaidThrough = now.AddDays(30);
     var purchased = await engine.GetEntitlementAsync(login.SessionToken, default);
     Check(EntitlementTokens.Validate(purchased.Entitlement, publicKey, device, purchased.ServerTime).IsPremium, "authoritative paid subscription restores Premium");
+    var accountBeforePausedCheckout = await store.TransactionAsync(state => Task.FromResult(state.Accounts.Single(account => account.Email == "owner@example.test")));
+    var customerCallsBeforePause = stripe.CustomersCreated;
+    var checkoutCallsBeforePause = stripe.CheckoutsCreated;
+    await Throws<BillingValidationException>(() => engine.CheckoutAsync(login.SessionToken, default), "public testing pauses server checkout for an existing paid account");
+    var accountAfterPausedCheckout = await store.TransactionAsync(state => Task.FromResult(state.Accounts.Single(account => account.Email == "owner@example.test")));
+    Check(accountBeforePausedCheckout == accountAfterPausedCheckout
+        && stripe.CustomersCreated == customerCallsBeforePause && stripe.CheckoutsCreated == checkoutCallsBeforePause
+        && EntitlementTokens.Validate(purchased.Entitlement, publicKey, device, DateTimeOffset.UtcNow).IsPremium,
+        "paused public checkout preserves the paid account and its valid purchased proof without contacting Stripe");
+    Check(await freemiumEngine.RequireWeatherAccessAsync(login.SessionToken, default), "freemium weather accepts a verified paid subscription");
     stripe.PaidThrough = now.AddMinutes(20);
     var ending = await engine.GetEntitlementAsync(login.SessionToken, default);
     Check(EntitlementTokens.Validate(ending.Entitlement, publicKey, device, ending.ServerTime).ValidUntil <= stripe.PaidThrough, "cancellation-period end caps offline lifetime");
@@ -101,6 +122,9 @@ try
     await engine.ProcessWebhookAsync(delayed, Header(delayed, options.StripeWebhookSecret), default);
     var downgraded = await engine.GetEntitlementAsync(login.SessionToken, default);
     Check(!EntitlementTokens.Validate(downgraded.Entitlement, publicKey, device, downgraded.ServerTime).IsPremium, "delayed paid event cannot overwrite current cancellation or payment failure");
+    var publicWeatherStripeReads = stripe.ReadCount;
+    Check(await engine.RequireWeatherAccessAsync(login.SessionToken, default), "public weather remains available after paid subscription cancellation");
+    Check(stripe.ReadCount == publicWeatherStripeReads, "public weather with an existing customer does not depend on a Stripe request");
     await engine.RequestLoginAsync(new("attempts@example.test", device), default);
     var validCode = sender.Code;
     for (var attempt = 0; attempt < 5; attempt++)
@@ -111,6 +135,7 @@ try
     Check(preserved is not null, "failed transaction retained customer records");
     await engine.SignOutAsync(login.SessionToken, default);
     await Throws<BillingAuthenticationException>(() => engine.GetEntitlementAsync(login.SessionToken, default), "server signout revokes session");
+    await Throws<BillingAuthenticationException>(() => engine.RequireWeatherAccessAsync(login.SessionToken, default), "public weather rejects a revoked session");
     var deviceLogins = new List<LoginResponse>();
     for (var index = 0; index < 4; index++)
     {
@@ -120,7 +145,15 @@ try
         deviceLogins.Add(await engine.VerifyLoginAsync(new("devices@example.test", nextDevice, sender.Code), default));
     }
     await Throws<BillingAuthenticationException>(() => engine.GetEntitlementAsync(deviceLogins[0].SessionToken, default), "fourth verified device revokes oldest login");
+    await Throws<BillingAuthenticationException>(() => engine.RequireWeatherAccessAsync(deviceLogins[0].SessionToken, default), "public weather cannot bypass device-session revocation");
     Check(await engine.GetEntitlementAsync(deviceLogins[3].SessionToken, default) is not null, "newest device can restore");
+    await store.TransactionAsync(state =>
+    {
+        var index = state.Sessions.FindIndex(session => session.TokenHash == BillingStore.Hash(deviceLogins[3].SessionToken));
+        state.Sessions[index] = state.Sessions[index] with { ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1) };
+        return Task.FromResult(true);
+    });
+    await Throws<BillingAuthenticationException>(() => engine.RequireWeatherAccessAsync(deviceLogins[3].SessionToken, default), "public weather rejects an expired session");
 }
 finally { if (Directory.Exists(temporary)) Directory.Delete(temporary, true); }
 
@@ -168,9 +201,11 @@ sealed class FakeStripe : IStripeBilling
 {
     public DateTimeOffset? PaidThrough { get; set; }
     public int ReadCount { get; private set; }
-    public Task<string> CreateCustomerAsync(Account account, CancellationToken token) => Task.FromResult("cus_fixture");
+    public int CustomersCreated { get; private set; }
+    public int CheckoutsCreated { get; private set; }
+    public Task<string> CreateCustomerAsync(Account account, CancellationToken token) { CustomersCreated++; return Task.FromResult("cus_fixture"); }
     public Task<DateTimeOffset?> ReadPaidThroughAsync(string customer, CancellationToken token) { ReadCount++; return Task.FromResult(PaidThrough); }
-    public Task<string> CheckoutAsync(string customer, string accountId, CancellationToken token) => Task.FromResult("https://checkout.stripe.com/fixture");
+    public Task<string> CheckoutAsync(string customer, string accountId, CancellationToken token) { CheckoutsCreated++; return Task.FromResult("https://checkout.stripe.com/fixture"); }
     public Task<string> PortalAsync(string customer, CancellationToken token) => Task.FromResult("https://billing.stripe.com/fixture");
     public Task<string?> CustomerForChargeAsync(string charge, CancellationToken token) => Task.FromResult<string?>("cus_fixture");
 }

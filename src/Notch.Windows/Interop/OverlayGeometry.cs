@@ -47,6 +47,54 @@ public static class OverlayGeometry
             physicalWidth, physicalHeight, toolbarVisible);
     }
 
+    /// <summary>Interpolate already-clamped native targets; collapse never targets expanded dimensions.</summary>
+    public static OverlayLayout Interpolate(OverlayLayout start, OverlayLayout target, double progress)
+    {
+        if (!double.IsFinite(progress)) throw new ArgumentOutOfRangeException(nameof(progress));
+        progress = Math.Clamp(progress, 0, 1);
+        if (progress == 0) return start;
+        if (progress == 1) return target;
+        var eased = 1 - Math.Pow(1 - progress, 3);
+        int Pixel(int from, int to) => checked((int)Math.Round(from + ((double)to - from) * eased,
+            MidpointRounding.AwayFromZero));
+        double Logical(double from, double to) => from + (to - from) * eased;
+        return new(Logical(start.LogicalWidth, target.LogicalWidth),
+            Logical(start.LogicalBodyHeight, target.LogicalBodyHeight),
+            Pixel(start.X, target.X), Pixel(start.Y, target.Y),
+            Math.Max(1, Pixel(start.Width, target.Width)), Math.Max(1, Pixel(start.Height, target.Height)),
+            target.ToolbarVisible);
+    }
+
+    /// <summary>The body and short path into the dock form one interaction surface; empty flanks do not.</summary>
+    public static bool ContainsInteractionPoint(double x, double y, double width, double bodyHeight,
+        bool toolbarVisible, double toolbarWidth, double cornerRadius = 26)
+    {
+        if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(width)
+            || !double.IsFinite(bodyHeight) || !double.IsFinite(toolbarWidth)
+            || width <= 0 || bodyHeight <= 0 || toolbarWidth <= 0
+            || x < 0 || y < 0 || x >= width) return false;
+        if (y < bodyHeight)
+        {
+            var radius = Math.Clamp(cornerRadius, 0, Math.Min(width / 2, bodyHeight / 2));
+            if (y < bodyHeight - radius || x >= radius && x < width - radius) return true;
+            var centerX = x < radius ? radius : width - radius;
+            return Math.Pow(x - centerX, 2) + Math.Pow(y - (bodyHeight - radius), 2) <= radius * radius;
+        }
+        if (!toolbarVisible || y >= bodyHeight + 58) return false;
+        var dockWidth = Math.Min(toolbarWidth, width);
+        var left = (width - dockWidth) / 2;
+        if (x < left || x >= left + dockWidth) return false;
+        // The ten-DIP vertical gap and the separator between the two dock capsules
+        // are an intentional pointer corridor, retained by the same finite leave grace.
+        if (y < bodyHeight + 10) return true;
+        var dockX = x - left;
+        var dockY = y - bodyHeight - 10;
+        var dockRadius = Math.Min(24, dockWidth / 2);
+        if (dockX >= dockRadius && dockX < dockWidth - dockRadius) return true;
+        var center = dockX < dockRadius ? dockRadius : dockWidth - dockRadius;
+        return Math.Pow(dockX - center, 2) + Math.Pow(dockY - 24, 2) <= 24 * 24;
+    }
+
     private static int Pixels(double logicalPixels, double scale) =>
         checked((int)Math.Round(logicalPixels * scale, MidpointRounding.AwayFromZero));
 }

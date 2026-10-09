@@ -1,5 +1,8 @@
 using Microsoft.UI.Dispatching;
 using Notch.Windows.Services;
+using Notch.Core;
+using Windows.ApplicationModel;
+using Windows.Storage.Streams;
 using Notch.Windows.Views;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Media.Playback;
@@ -221,6 +224,189 @@ Task<string> Text(string value) => Task.FromResult(value);
     Check(canceled, "Canceled media startup did not honor its caller's cancellation.");
     await media.StartAsync();
     Check(media.Current is not null, "Cancellation poisoned a subsequent media startup retry."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    session.Properties.Title = "  Track\r\n🎧  title\0 "; session.Properties.Artist = "  Alice\t & Bob  ";
+    session.Properties.AlbumTitle = " Album\nOne ";
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService(); await media.StartAsync();
+    Check(media.Current is { Title: "Track 🎧 title", Artist: "Alice & Bob", AlbumTitle: "Album One" }, "Media title/artist/album metadata did not preserve real Unicode while removing control characters.");
+    Check(MediaPresentation.CleanMetadata(new string('x', 900)).Length == 512
+        && MediaPresentation.CleanMetadata("😀", 1).Length == 0, "Metadata bounds split a Unicode character or left unlimited player-controlled text."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    session.Properties.Title = " "; session.Properties.Artist = ""; session.Properties.AlbumTitle = "";
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService(); await media.StartAsync();
+    Check(media.Current is { Title: "", Artist: "", ArtworkPath: null, AlbumTitle: "" }
+        && MediaPresentation.Title(media.Current) == "Untitled media", "Missing metadata invented an artist/title or hid the genuine player.");
+    Check(MediaPresentation.SourceLabel("fakechrome.app") == "Connected player"
+        && MediaPresentation.SourceLabel("Chrome") == "Google Chrome"
+        && MediaPresentation.SourceLabel("test_123!App") == "Connected player", "Player source fallback guessed an unrelated app from an ID substring."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    session.PropertiesReader = () => Task.FromException<GlobalSystemMediaTransportControlsSessionMediaProperties>(new COMException("Metadata unavailable temporarily."));
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService(); await media.StartAsync();
+    Check(media.Current is { Title: "", CanPause: true }, "Optional media properties failure hid usable native transport controls.");
+    await media.PlayPauseAsync(); Check(session.PauseCalls == 1, "Metadata failure prevented a real player pause."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    session.Playback.PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused;
+    session.Playback.PlaybackRate = 2;
+    session.Timeline.Position = TimeSpan.FromSeconds(30);
+    session.Timeline.LastUpdatedTime = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(20);
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService(); await media.StartAsync();
+    Check(media.Current?.Position == TimeSpan.FromSeconds(30), "Paused media incorrectly projected elapsed playback time.");
+    session.Playback.PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+    await media.StartAsync();
+    Check(media.Current?.Position.TotalSeconds is > 69 and < 72, "Playing timeline did not respect the actual 2x playback rate.");
+    Check(MediaPresentation.Clock(TimeSpan.FromHours(25) + TimeSpan.FromMinutes(3)) == "25:03:00", "Long media duration wrapped its total hours."); passed++;
+}
+{
+    var first = new GlobalSystemMediaTransportControlsSession();
+    var properties = new TaskCompletionSource<GlobalSystemMediaTransportControlsSessionMediaProperties>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    first.PropertiesReader = () => { requested.TrySetResult(); return properties.Task; };
+    var manager = new GlobalSystemMediaTransportControlsSessionManager { Current = first };
+    GlobalSystemMediaTransportControlsSessionManager.Available = manager;
+    await using var media = new WindowsMediaService(); var old = media.StartAsync();
+    await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    var observed = new List<string>(); media.Changed += (_, snapshot) => { lock (observed) observed.Add(snapshot?.Title ?? ""); };
+    var replacement = new GlobalSystemMediaTransportControlsSession(); replacement.Properties.Title = "Newest session";
+    manager.Current = replacement; manager.NotifyCurrent();
+    await old; properties.SetResult(first.Properties);
+    await WaitFor(() => Task.FromResult(media.Current?.Title == "Newest session"));
+    lock (observed) Check(!observed.Contains("Real player title"), "A delayed old-session metadata read was published after a native player switch."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    session.Properties.Thumbnail = new Artwork(() => Task.FromResult(new RandomAccessStream(new MemoryStream(new byte[] { 1, 2, 3 }), "image/png")));
+    var manager = new GlobalSystemMediaTransportControlsSessionManager { Current = session };
+    GlobalSystemMediaTransportControlsSessionManager.Available = manager;
+    var cache = Path.Combine(soundCache, "media");
+    await using var media = new WindowsMediaService(cache); await media.StartAsync();
+    var firstPath = media.Current?.ArtworkPath;
+    session.Properties.Thumbnail = new Artwork(() => Task.FromResult(new RandomAccessStream(new MemoryStream(new byte[] { 4, 5, 6 }), "image/png")));
+    session.NotifyProperties();
+    await WaitFor(() => Task.FromResult(media.Current?.ArtworkPath is { } path && path != firstPath));
+    Check(firstPath is not null && File.Exists(firstPath)
+        && File.ReadAllBytes(media.Current!.ArtworkPath!).SequenceEqual(new byte[] { 4, 5, 6 }), "Changed native artwork was missed when track text remained unchanged."); passed++;
+}
+{
+    var first = new GlobalSystemMediaTransportControlsSession();
+    var artwork = new TaskCompletionSource<RandomAccessStream>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    first.Properties.Thumbnail = new Artwork(() => { requested.TrySetResult(); return artwork.Task; });
+    var manager = new GlobalSystemMediaTransportControlsSessionManager { Current = first };
+    GlobalSystemMediaTransportControlsSessionManager.Available = manager;
+    await using var media = new WindowsMediaService(Path.Combine(soundCache, "switch"));
+    var old = media.StartAsync(); await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    Check(media.Current?.Title == "Real player title", "A slow thumbnail blocked immediate track metadata and transport publication.");
+    var replacement = new GlobalSystemMediaTransportControlsSession(); replacement.Properties.Title = "Replacement without art";
+    manager.Current = replacement; manager.NotifyCurrent();
+    await old;
+    await WaitFor(() => Task.FromResult(media.Current?.Title == "Replacement without art"));
+    using var lateStream = new RandomAccessStream(new MemoryStream(new byte[] { 1 }), "image/png");
+    artwork.SetResult(lateStream);
+    await media.StartAsync();
+    Check(media.Current is { Title: "Replacement without art", ArtworkPath: null }, "Late previous-session artwork replaced the new active player."); passed++;
+}
+{
+    var info = new AppInfo(); info.DisplayInfo.DisplayName = "  Registered\nPlayer  ";
+    info.DisplayInfo.Logo = new Artwork(() => Task.FromResult(new RandomAccessStream(new MemoryStream(new byte[] { 7, 8 }), "image/png")));
+    var lookups = new List<string>(); AppInfo.Resolver = id => { lookups.Add(id); return info; };
+    var session = new GlobalSystemMediaTransportControlsSession { SourceAppUserModelId = "Registered.player" };
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService(Path.Combine(soundCache, "source")); await media.StartAsync();
+    Check(media.Current is { ArtworkPath: null, SourceDisplayName: "Registered Player", SourceIconPath: not null }
+        && File.Exists(media.Current.SourceIconPath) && lookups.SequenceEqual(new[] { "Registered.player" }), "Native application icon fallback did not preserve its exact source identity or masqueraded as album art.");
+    await media.StartAsync(); Check(lookups.Count == 1, "Unchanged player logo lookup repeated on every timeline refresh.");
+    AppInfo.Resolver = _ => null; passed++;
+}
+{
+    var lookups = 0; AppInfo.Resolver = _ => { lookups++; throw new ArgumentException("An unpackaged app ID has no AppInfo."); };
+    var session = new GlobalSystemMediaTransportControlsSession { SourceAppUserModelId = "Unregistered.player" };
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService(); await media.StartAsync(); await media.StartAsync();
+    Check(media.Current is { Title: "Real player title", SourceIconPath: null, CanPause: true } && lookups == 1,
+        "Unavailable OS app information broke media controls or caused repeated logo work.");
+    AppInfo.Resolver = _ => null; passed++;
+}
+{
+    var closed = new GlobalSystemMediaTransportControlsSession(); closed.Playback.PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed;
+    var playing = new GlobalSystemMediaTransportControlsSession(); playing.Properties.Title = "Surviving active player";
+    var manager = new GlobalSystemMediaTransportControlsSessionManager { Current = closed }; manager.Sessions.Add(playing);
+    GlobalSystemMediaTransportControlsSessionManager.Available = manager;
+    await using var media = new WindowsMediaService(); await media.StartAsync();
+    Check(media.Current?.Title == "Surviving active player", "A closed designated session hid a genuinely active fallback player.");
+    manager.Current = playing; playing.Playback.PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped;
+    await media.StartAsync();
+    Check(media.Current?.PlaybackState == MediaPlaybackState.Stopped && !media.Current.IsPlaying, "Stopped playback was incorrectly classified as a paused track.");
+    manager.Current = null; manager.Sessions.Clear(); manager.NotifyCurrent();
+    await WaitFor(() => Task.FromResult(media.Current is null)); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    session.Properties.Thumbnail = new Artwork(() => Task.FromResult(new RandomAccessStream(new MemoryStream(new byte[] { 1, 2 }), "image/png")));
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService(Path.Combine(soundCache, "retain-art")); await media.StartAsync();
+    var path = media.Current!.ArtworkPath; var sawBlank = false;
+    media.Changed += (_, snapshot) => { if (snapshot?.ArtworkPath is null) sawBlank = true; };
+    session.Properties.Thumbnail = new FailingArtwork(new ArgumentException("Transient same-track thumbnail error."));
+    session.NotifyProperties(); await media.StartAsync();
+    Check(!sawBlank && path is not null && media.Current?.ArtworkPath == path, "Refreshing unchanged-track artwork flickered blank or discarded a valid cache after an optional preview failure."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService(Path.Combine(soundCache, "timeline-art")); await media.StartAsync();
+    var artwork = new TaskCompletionSource<RandomAccessStream>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Properties.Thumbnail = new Artwork(() => { requested.TrySetResult(); return artwork.Task; });
+    session.NotifyProperties(); await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    session.Timeline.Position = TimeSpan.FromSeconds(45); session.NotifyTimeline();
+    session.Timeline.Position = TimeSpan.FromSeconds(46); session.NotifyTimeline();
+    artwork.SetResult(new RandomAccessStream(new MemoryStream(new byte[] { 9, 10 }), "image/png"));
+    await WaitFor(() => Task.FromResult(media.Current?.ArtworkPath is not null));
+    Check(File.ReadAllBytes(media.Current!.ArtworkPath!).SequenceEqual(new byte[] { 9, 10 }), "Frequent same-track timeline updates starved an in-flight thumbnail refresh."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession();
+    session.Properties.Thumbnail = new Artwork(() => Task.FromResult(new RandomAccessStream(new StalledArtworkStream(), "image/png")));
+    GlobalSystemMediaTransportControlsSessionManager.Available = new() { Current = session };
+    await using var media = new WindowsMediaService(Path.Combine(soundCache, "stalled"));
+    var started = System.Diagnostics.Stopwatch.GetTimestamp(); await media.StartAsync().WaitAsync(TimeSpan.FromSeconds(5));
+    Check(System.Diagnostics.Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(4.5)
+        && media.Current is { Title: "Real player title", ArtworkPath: null, CanPause: true }, "A thumbnail byte-stream that ignored cancellation retained the media refresh gate indefinitely.");
+    session.Properties.Thumbnail = null; await media.StartAsync();
+    await media.PlayPauseAsync(); Check(session.PauseCalls == 1, "Optional stalled artwork poisoned a later media refresh/control."); passed++;
+}
+{
+    var session = new GlobalSystemMediaTransportControlsSession(); session.Properties.AlbumTitle = "Known album";
+    session.Properties.Thumbnail = new Artwork(() => Task.FromResult(new RandomAccessStream(new MemoryStream(new byte[] { 1, 2 }), "image/png")));
+    var manager = new GlobalSystemMediaTransportControlsSessionManager { Current = session };
+    GlobalSystemMediaTransportControlsSessionManager.Available = manager;
+    await using var media = new WindowsMediaService(Path.Combine(soundCache, "known-metadata")); await media.StartAsync();
+    var artwork = media.Current!.ArtworkPath;
+    session.PropertiesReader = () => Task.FromException<GlobalSystemMediaTransportControlsSessionMediaProperties>(new COMException("A temporary same-session metadata failure."));
+    session.Playback.PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused;
+    await media.StartAsync();
+    Check(media.Current is { Title: "Real player title", Artist: "Real player artist", AlbumTitle: "Known album", IsPlaying: false }
+        && media.Current.ArtworkPath == artwork, "An unchanged-session metadata failure erased known track details instead of updating its transport.");
+    session.PropertiesReader = () => Task.FromException<GlobalSystemMediaTransportControlsSessionMediaProperties>(new TimeoutException("Temporary metadata timeout."));
+    await media.StartAsync();
+    Check(media.Current?.Title == "Real player title", "An unchanged-session metadata timeout erased its known title.");
+    session.NotifyProperties(); await media.StartAsync();
+    Check(media.Current is { Title: "", Artist: "", AlbumTitle: "", ArtworkPath: null }, "An actual track-property change reused old metadata after the new track failed to provide any.");
+    manager.Current = new(); manager.Current.PropertiesReader = session.PropertiesReader;
+    await media.StartAsync();
+    Check(media.Current is { Title: "", Artist: "", AlbumTitle: "", ArtworkPath: null }, "A replacement session inherited metadata from its previous application."); passed++;
 }
 Console.WriteLine($"PASS: {passed} native orchestration regression cases (explicit API doubles; native Windows runtime unverified).");
 if (Directory.Exists(soundCache)) Directory.Delete(soundCache, recursive: true);

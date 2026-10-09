@@ -67,7 +67,7 @@ public sealed class WindowsSystemService : ISystemService
                 battery = power.BatteryLifePercent;
             var audio = ReadAudio();
             cancellationToken.ThrowIfCancellationRequested();
-            return new SystemSnapshot(cpu, memory.MemoryLoad, battery, audio.Volume, audio.Device, screenTime);
+            return new SystemSnapshot(cpu, memory.MemoryLoad, battery, audio.Volume, audio.Device, screenTime, AudioAvailable);
         }, cancellationToken);
     }
 
@@ -149,6 +149,7 @@ public sealed class WindowsSystemService : ISystemService
             return WithAudioEndpoint((endpoint, device) =>
             {
                 Marshal.ThrowExceptionForHR(endpoint.GetMasterVolumeLevelScalar(out var scalar));
+                if (!float.IsFinite(scalar)) throw new ArgumentException("The audio endpoint returned an invalid volume.");
                 Marshal.ThrowExceptionForHR(endpoint.GetMute(out var muted));
                 AudioAvailable = true;
                 return (muted ? 0 : Math.Clamp((double)scalar, 0, 1), ReadDeviceName(device));

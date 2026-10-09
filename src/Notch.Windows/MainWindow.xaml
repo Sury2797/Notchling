@@ -10,13 +10,13 @@
       <RowDefinition x:Name="ToolbarRow" Height="0" />
       <RowDefinition x:Name="TailRow" Height="0" />
     </Grid.RowDefinitions>
-    <Border x:Name="PanelSurface" CornerRadius="0,0,26,26" Background="{ThemeResource NotchBackgroundBrush}">
+    <Border x:Name="PanelSurface" HorizontalAlignment="Center" CornerRadius="0,0,26,26" Background="{ThemeResource NotchBackgroundBrush}">
       <Grid>
         <Button x:Name="CompactButton" Background="Transparent" BorderThickness="0" Padding="15,0"
           HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Click="OnOpenClick" UseSystemFocusVisuals="True" AutomationProperties.Name="Open Notchling">
           <Grid ColumnSpacing="10">
             <Grid.ColumnDefinitions><ColumnDefinition Width="22" /><ColumnDefinition Width="*" /><ColumnDefinition Width="28" /></Grid.ColumnDefinitions>
-            <Image Source="ms-appx:///Assets/Notchling.png" Width="22" Height="22" Stretch="Uniform" AutomationProperties.AccessibilityView="Raw" />
+            <Image x:Name="CompactArtwork" Source="ms-appx:///Assets/Notchling.png" Width="22" Height="22" Stretch="Uniform" AutomationProperties.AccessibilityView="Raw" />
             <TextBlock x:Name="CompactTitle" Grid.Column="1" Text="Notchling" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
             <FontIcon x:Name="CompactGlyph" Grid.Column="2" Glyph="&#xE8D6;" FontSize="14" />
           </Grid>

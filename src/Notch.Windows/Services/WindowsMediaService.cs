@@ -1,5 +1,7 @@
 using Notch.Core;
 using System.Runtime.InteropServices;
+using Windows.ApplicationModel;
+using Windows.Foundation;
 using Windows.Media.Control;
 using Windows.Storage.Streams;
 
@@ -19,14 +21,30 @@ public sealed class WindowsMediaService : IMediaService
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private GlobalSystemMediaTransportControlsSession? _session;
     private CancellationTokenSource? _debounce;
+    private CancellationTokenSource? _activeRefresh;
     private MediaSnapshot? _current;
     private string? _artworkKey;
     private string? _artworkPath;
+    private long _refreshVersion;
+    private long _propertiesVersion;
+    private long _artworkVersion = -1;
+    private string? _sourceIdentity;
+    private string? _sourceDisplayName;
+    private string? _sourceIconPath;
+    private DateTimeOffset _sourceResolvedAt;
+    private GlobalSystemMediaTransportControlsSession? _knownMetadataSession;
+    private long _knownPropertiesVersion = -1;
+    private string _knownTitle = "";
+    private string _knownArtist = "";
+    private string _knownAlbum = "";
     private bool _disposed;
 
     public MediaSnapshot? Current { get { lock (_gate) return _current; } }
     public event EventHandler<MediaSnapshot?>? Changed;
     public event EventHandler<string>? Error;
+
+    public WindowsMediaService() { }
+    internal WindowsMediaService(string artworkDirectory) => _artworkDirectory = artworkDirectory;
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -119,16 +137,25 @@ public sealed class WindowsMediaService : IMediaService
 
     private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, CurrentSessionChangedEventArgs args) => ScheduleRefresh();
     private void OnSessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender, SessionsChangedEventArgs args) => ScheduleRefresh();
-    private void OnPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, MediaPropertiesChangedEventArgs args) => ScheduleRefresh();
+    private void OnPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, MediaPropertiesChangedEventArgs args)
+    {
+        Interlocked.Increment(ref _propertiesVersion);
+        ScheduleRefresh();
+    }
     private void OnPlaybackChanged(GlobalSystemMediaTransportControlsSession sender, PlaybackInfoChangedEventArgs args) => ScheduleRefresh();
-    private void OnTimelineChanged(GlobalSystemMediaTransportControlsSession sender, TimelinePropertiesChangedEventArgs args) => ScheduleRefresh();
+    private void OnTimelineChanged(GlobalSystemMediaTransportControlsSession sender, TimelinePropertiesChangedEventArgs args) => ScheduleRefresh(invalidateActive: false);
 
-    private void ScheduleRefresh()
+    private void ScheduleRefresh(bool invalidateActive = true)
     {
         CancellationToken token;
         lock (_gate)
         {
             if (_disposed) return;
+            if (invalidateActive)
+            {
+                _refreshVersion++;
+                _activeRefresh?.Cancel();
+            }
             _debounce?.Cancel();
             _debounce?.Dispose();
             _debounce = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
@@ -142,35 +169,43 @@ public sealed class WindowsMediaService : IMediaService
         try
         {
             await Task.Delay(60, token).ConfigureAwait(false);
-            await RefreshAsync(token).ConfigureAwait(false);
+            await RefreshAsync(token, nativeEvent: true).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (Exception error)
         {
             if (!_disposed)
             {
-                Publish(null);
                 Error?.Invoke(this, $"Media information is unavailable: {error.Message}");
             }
         }
     }
 
-    private async Task RefreshAsync(CancellationToken token)
+    private async Task RefreshAsync(CancellationToken cancellationToken, bool nativeEvent = false)
     {
-        await _refreshGate.WaitAsync(token).ConfigureAwait(false);
+        await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var refresh = nativeEvent ? CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token)
+            : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+        lock (_gate) _activeRefresh = refresh;
+        var token = refresh.Token;
         try
         {
             token.ThrowIfCancellationRequested();
             var session = FindSession();
+            long refreshVersion;
             lock (_gate)
             {
                 if (_disposed) return;
+                refreshVersion = _refreshVersion;
                 if (_session != session)
                 {
                     UnsubscribeSession();
                     _session = session;
                     _artworkKey = null;
                     _artworkPath = null;
+                    _artworkVersion = -1;
+                    _knownMetadataSession = null;
+                    _knownPropertiesVersion = -1;
                     if (session is not null)
                     {
                         TrySessionEvent(() => session.MediaPropertiesChanged += OnPropertiesChanged);
@@ -181,13 +216,20 @@ public sealed class WindowsMediaService : IMediaService
             }
             if (session is null)
             {
-                Publish(null);
+                PublishCurrent(null, refreshVersion, null);
                 return;
             }
 
-            var properties = await session.TryGetMediaPropertiesAsync().AsTask(token)
-                .WaitAsync(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
+            GlobalSystemMediaTransportControlsSessionMediaProperties? properties = null;
+            var propertiesVersion = Interlocked.Read(ref _propertiesVersion);
+            try
+            {
+                properties = await session.TryGetMediaPropertiesAsync().AsTask(token)
+                    .WaitAsync(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
+            }
+            catch (Exception error) when (IsUnavailableSession(error) || error is TimeoutException or ArgumentException) { }
             token.ThrowIfCancellationRequested();
+            if (!IsCurrentRefresh(session, refreshVersion)) return;
             var playback = session.GetPlaybackInfo();
             // Live streams and some otherwise valid players expose no timeline. Their transport
             // controls must remain usable even when the optional seek metadata is unavailable.
@@ -210,40 +252,119 @@ public sealed class WindowsMediaService : IMediaService
                         0, duration.TotalSeconds));
             }
             position = TimeSpan.FromTicks(Math.Clamp(position.Ticks, 0, duration.Ticks));
-            var artworkKey = $"{session.SourceAppUserModelId}\n{properties.Title}\n{properties.Artist}\n{properties.AlbumTitle}";
-            if (artworkKey != _artworkKey)
+            var source = session.SourceAppUserModelId;
+            var keepKnownMetadata = properties is null && _knownMetadataSession == session && _knownPropertiesVersion == propertiesVersion;
+            var title = keepKnownMetadata ? _knownTitle : MediaPresentation.CleanMetadata(properties?.Title);
+            var artist = keepKnownMetadata ? _knownArtist : MediaPresentation.CleanMetadata(properties?.Artist, 256);
+            var album = keepKnownMetadata ? _knownAlbum : MediaPresentation.CleanMetadata(properties?.AlbumTitle, 256);
+            if (properties is not null)
             {
-                _artworkPath = await CacheArtworkAsync(properties.Thumbnail, token).ConfigureAwait(false);
-                _artworkKey = artworkKey;
+                _knownMetadataSession = session; _knownPropertiesVersion = propertiesVersion;
+                _knownTitle = title; _knownArtist = artist; _knownAlbum = album;
             }
-            token.ThrowIfCancellationRequested();
-            Publish(new MediaSnapshot(properties.Title, properties.Artist, _artworkPath, playing,
-                position, duration, session.SourceAppUserModelId,
+            var artworkKey = $"{source}\n{title}\n{artist}\n{album}";
+            var artworkChanged = artworkKey != _artworkKey || propertiesVersion != _artworkVersion;
+            var sourceChanged = source != _sourceIdentity;
+            var refreshSource = sourceChanged || (_sourceIconPath is null && DateTimeOffset.UtcNow - _sourceResolvedAt > TimeSpan.FromMinutes(1));
+            var state = playback.PlaybackStatus switch
+            {
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing => MediaPlaybackState.Playing,
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused => MediaPlaybackState.Paused,
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped => MediaPlaybackState.Stopped,
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Changing => MediaPlaybackState.Loading,
+                _ => MediaPlaybackState.Unknown
+            };
+            var snapshot = new MediaSnapshot(title, artist, artworkKey != _artworkKey ? null : _artworkPath, playing,
+                position, duration, source,
                 playback.Controls.IsPlaybackPositionEnabled && duration > TimeSpan.Zero,
                 playback.Controls.IsPlayEnabled, playback.Controls.IsPauseEnabled,
                 playback.Controls.IsPreviousEnabled, playback.Controls.IsNextEnabled,
-                positionUpdatedAt, playbackRate));
+                positionUpdatedAt, playbackRate, album,
+                sourceChanged ? null : _sourceDisplayName, sourceChanged ? null : _sourceIconPath, state);
+            // Metadata and transport become available before optional thumbnail/logo I/O.
+            // A slow player preview must not postpone its title or playback controls.
+            if (!PublishCurrent(session, refreshVersion, snapshot)) return;
+            if (artworkChanged)
+            {
+                var artworkPath = await CacheArtworkAsync(properties?.Thumbnail, token).ConfigureAwait(false);
+                if (!IsCurrentRefresh(session, refreshVersion)) return;
+                if (artworkPath is null && properties?.Thumbnail is not null && artworkKey == _artworkKey)
+                    artworkPath = _artworkPath;
+                _artworkPath = artworkPath;
+                _artworkKey = artworkKey;
+                _artworkVersion = propertiesVersion;
+            }
+            token.ThrowIfCancellationRequested();
+            if (refreshSource)
+            {
+                var (displayName, iconPath) = await ReadSourceApplicationAsync(source, token).ConfigureAwait(false);
+                if (!IsCurrentRefresh(session, refreshVersion)) return;
+                _sourceIdentity = source;
+                _sourceDisplayName = displayName ?? (sourceChanged ? null : _sourceDisplayName);
+                _sourceIconPath = iconPath;
+                _sourceResolvedAt = DateTimeOffset.UtcNow;
+            }
+            PublishCurrent(session, refreshVersion, snapshot with
+            {
+                ArtworkPath = _artworkPath, SourceDisplayName = _sourceDisplayName, SourceIconPath = _sourceIconPath
+            });
         }
-        finally { _refreshGate.Release(); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && !_lifetime.IsCancellationRequested)
+        { /* A newer native event superseded this refresh; its scheduled read owns publication. */ }
+        finally
+        {
+            lock (_gate) { if (ReferenceEquals(_activeRefresh, refresh)) _activeRefresh = null; }
+            _refreshGate.Release();
+        }
     }
 
-    private void Publish(MediaSnapshot? snapshot)
+    private bool IsCurrentRefresh(GlobalSystemMediaTransportControlsSession session, long version)
+    {
+        lock (_gate)
+            return !_disposed && _session == session && _refreshVersion == version && FindSession() == session;
+    }
+
+    private bool PublishCurrent(GlobalSystemMediaTransportControlsSession? session, long version, MediaSnapshot? snapshot)
     {
         lock (_gate)
         {
-            if (_disposed || Equals(_current, snapshot)) return;
+            if (_disposed || _session != session || _refreshVersion != version || FindSession() != session) return false;
+            if (Equals(_current, snapshot)) return true;
             _current = snapshot;
         }
         Changed?.Invoke(this, snapshot);
+        return true;
+    }
+
+    private async Task<(string? Name, string? Icon)> ReadSourceApplicationAsync(string source, CancellationToken token)
+    {
+        // The OS resolves this exact application ID. Never turn metadata into an executable/file
+        // path or a remote favicon request. Unregistered desktop IDs simply use the neutral fallback.
+        if (string.IsNullOrWhiteSpace(source) || source.Length > 512 || source.Any(char.IsControl)) return (null, null);
+        string? displayName = null;
+        try
+        {
+            var info = AppInfo.GetFromAppUserModelId(source);
+            if (info is null) return (null, null);
+            displayName = MediaPresentation.CleanMetadata(info.DisplayInfo.DisplayName, 80);
+            var icon = await CacheArtworkAsync(info.DisplayInfo.GetLogo(new Size(256, 256)), token).ConfigureAwait(false);
+            return (displayName.Length > 0 ? displayName : null, icon);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception error) when (IsUnavailableSession(error) || error is ArgumentException or InvalidOperationException or IOException or TimeoutException)
+        { return (displayName, null); }
     }
 
     private async Task<string?> CacheArtworkAsync(IRandomAccessStreamReference? thumbnail, CancellationToken token)
     {
         if (thumbnail is null) return null;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(3));
+        var readToken = deadline.Token;
         try
         {
-            using var source = await thumbnail.OpenReadAsync().AsTask(token)
-                .WaitAsync(TimeSpan.FromSeconds(3), token).ConfigureAwait(false);
+            using var source = await thumbnail.OpenReadAsync().AsTask(readToken)
+                .WaitAsync(TimeSpan.FromSeconds(3), readToken).ConfigureAwait(false);
             if (source.Size == 0 || source.Size > MaximumArtworkBytes) return null;
             var extension = source.ContentType switch
             {
@@ -261,12 +382,13 @@ public sealed class WindowsMediaService : IMediaService
                 var buffer = new byte[81920];
                 long copied = 0;
                 int count;
-                while ((count = await input.ReadAsync(buffer, token).ConfigureAwait(false)) > 0)
+                while ((count = await input.ReadAsync(buffer, readToken).AsTask().WaitAsync(readToken).ConfigureAwait(false)) > 0)
                 {
                     copied += count;
                     if (copied > MaximumArtworkBytes) throw new IOException("Media artwork exceeds the cache limit.");
-                    await output.WriteAsync(buffer.AsMemory(0, count), token).ConfigureAwait(false);
+                    await output.WriteAsync(buffer.AsMemory(0, count), readToken).AsTask().WaitAsync(readToken).ConfigureAwait(false);
                 }
+                if (copied == 0) throw new IOException("The media application supplied empty artwork.");
                 return path;
             }
             catch
@@ -275,9 +397,10 @@ public sealed class WindowsMediaService : IMediaService
                 throw;
             }
         }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { return null; }
         catch (OperationCanceledException) { throw; }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or TimeoutException
-            or ArgumentException or System.Security.SecurityException || IsUnavailableSession(error))
+            or ArgumentException or ObjectDisposedException or System.Security.SecurityException || IsUnavailableSession(error))
         {
             return null; // A missing artwork preview must not hide a valid playback session.
         }
@@ -288,15 +411,18 @@ public sealed class WindowsMediaService : IMediaService
         var files = new DirectoryInfo(_artworkDirectory).EnumerateFiles()
             .Where(file => file.Extension is ".png" or ".jpg" or ".webp" or ".gif" or ".bmp")
             .OrderByDescending(file => file.LastWriteTimeUtc).ToArray();
-        long bytes = 0;
-        for (var index = 0; index < files.Length; index++)
+        var protectedFiles = files.Where(file => file.FullName == _artworkPath || file.FullName == _sourceIconPath).ToArray();
+        var retained = protectedFiles.Length;
+        long bytes = protectedFiles.Sum(file => file.Length);
+        foreach (var file in files)
         {
-            bytes += files[index].Length;
+            if (file.FullName == _artworkPath || file.FullName == _sourceIconPath) continue;
             // Leave room for the next bounded four-megabyte thumbnail.
-            if (index >= MaximumArtworkFiles - 1 || bytes > 20 * 1024 * 1024)
+            if (retained >= MaximumArtworkFiles - 1 || bytes + file.Length > 20 * 1024 * 1024)
             {
-                try { files[index].Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                try { file.Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
+            else { retained++; bytes += file.Length; }
         }
     }
 
@@ -316,11 +442,22 @@ public sealed class WindowsMediaService : IMediaService
         GlobalSystemMediaTransportControlsSession? current = null;
         try { current = _manager?.GetCurrentSession(); }
         catch (Exception error) when (IsUnavailableSession(error)) { }
-        if (current is not null || _manager is null) return current;
+        if (current is not null)
+        {
+            try
+            {
+                if (current.GetPlaybackInfo().PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed) return current;
+            }
+            catch (Exception error) when (IsUnavailableSession(error)) { }
+        }
+        if (_manager is null) return null;
         // Windows can have a playing session without designating a current one, particularly
         // immediately after a player starts. Prefer playback and then a paused session.
         GlobalSystemMediaTransportControlsSession? paused = null;
-        foreach (var candidate in _manager.GetSessions())
+        IReadOnlyList<GlobalSystemMediaTransportControlsSession> sessions;
+        try { sessions = _manager.GetSessions(); }
+        catch (Exception error) when (IsUnavailableSession(error)) { return null; }
+        foreach (var candidate in sessions)
         {
             try
             {

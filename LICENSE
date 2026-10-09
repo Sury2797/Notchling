@@ -25,10 +25,16 @@ commercial deployment, or redistribution rights for source-built versions.
 3. Official application releases
 
 Official application builds distributed by the Copyright Holder may be used
-under the applicable Free or Premium product terms and any release-specific
+under the applicable public-testing, Free or Premium product terms and any release-specific
 end-user agreement. Those terms determine the features and subscription period
 you are entitled to use. A product subscription does not grant ownership of the
 Software or rights to resell, sublicense, or redistribute it.
+
+Official builds expressly designated for public testing may be evaluated without
+a subscription, with the supported features enabled for all testers. This is
+authorized product access, not a paid entitlement or a grant of redistribution
+rights. It does not promise permanent free access to future commercial editions
+or automatically enroll testers in a subscription.
 
 Published pricing describes the planned product offering. Publishing this
 repository alone does not activate a subscription, create a payment obligation,

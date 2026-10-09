@@ -6,7 +6,7 @@
     HorizontalScrollMode="Disabled" VerticalScrollBarVisibility="Auto"
     HorizontalContentAlignment="Stretch" ZoomMode="Disabled" IsTabStop="False"
     AutomationProperties.Name="Notchling tool content">
-    <StackPanel x:Name="ContentStack" Spacing="14" Padding="24,24,24,20"
+    <StackPanel x:Name="ContentStack" Spacing="12" Padding="20,20,20,18"
       HorizontalAlignment="Stretch" />
   </ScrollViewer>
 </UserControl>

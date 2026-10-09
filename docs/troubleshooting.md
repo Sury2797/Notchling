@@ -26,7 +26,7 @@ Share the app version, Windows build, action immediately before failure, error c
 
 Launch **Notchling** from the Start menu. Launching it again reopens the existing instance. **Ctrl + Shift + Space** or tray **Open Notchling** also opens the panel. Explicit launch/open temporarily overrides fullscreen suppression. If Explorer is rebuilding the notification area, the app retries its tray registration; the notch's context menu remains available for Settings and Quit.
 
-An unavailable player produces a disabled media empty state. Connected services and paid access require their configured providers; local Free media controls, Pomodoro, and scratchpad do not require billing or a Notchling account.
+An unavailable player produces a disabled media empty state. The v0.3.0 public-testing candidate unlocks all tools without payment; local tools do not require a Notchling account. Connected sources still need their own setup. Use **Settings → Connection status → Check connections** to distinguish unavailable native services, missing provider credentials/imports and real request failures. The older v0.2.11 installer predates the unlocked phase until a qualified replacement is published.
 
 ## Preview, Settings and unexpected collapse
 

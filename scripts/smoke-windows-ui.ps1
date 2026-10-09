@@ -1,5 +1,5 @@
 # Windows PowerShell 5.1 supplies the built-in .NET Framework UI Automation client.
-# The caller bounds this helper to 90 seconds and owns the target app's lifecycle.
+# The caller bounds this all-tools helper to 180 seconds and owns the app lifecycle.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][int]$AppProcessId,
@@ -13,7 +13,7 @@ $clock = [Diagnostics.Stopwatch]::StartNew()
 $failure = $null
 $report = [ordered]@{
     Succeeded = $false
-    Scope = "Free-tier UI Automation on a disposable CI desktop; no external player, account, or payment."
+    Scope = "Public-testing all-tools UI Automation on a disposable CI desktop; native controls, pointer behavior and empty-provider guidance. No real external player, provider account or payment."
     Stage = "Initialize owned UI Automation client"
     Operation = $null
     PatternRejections = @()
@@ -22,10 +22,24 @@ $report = [ordered]@{
     NoAutomaticSampleData = $false
     DockWithinWorkArea = $false
     PointerInsidePreservesExpanded = $false
-    ActiveSettingsPreservesExpanded = $false
+    UnpinnedSettingsCollapses = $false
+    BlankDockFlankCollapses = $false
+    RepeatedHoverReopens = $false
+    KeyboardEditingGrace = $false
+    KeyboardEditingLeaseExpires = $false
+    PublicTestingAccess = $false
+    ToolsOpened = @()
+    ConnectionGuidance = @()
+    Screenshots = @()
+    CredentialActionAlignment = $false
+    ConnectionDraftPreserved = $false
+    NotesRoundTrip = $false
+    AwakeRoundTrip = $false
+    NativeVolumeStatus = "Not run"
     SettingsNoHorizontalOverflow = $false
     SettingsTogglePreservesScroll = $false
     SettingsDraftPreserved = $false
+    FeaturedNavigationStartsAtTop = $false
     UnsignedUpdateGuidance = $false
     UpdateActionPreservesSettingsScroll = $false
     UpdateActionCreatedNoDownload = $false
@@ -44,7 +58,7 @@ $report = [ordered]@{
 }
 
 function Assert-Budget {
-    if ($clock.Elapsed.TotalSeconds -gt 75) { throw "Free-tier UI interaction exceeded its 75-second operation budget." }
+    if ($clock.Elapsed.TotalSeconds -gt 150) { throw "Public-testing UI interaction exceeded its 150-second operation budget." }
     $process = Get-Process -Id $AppProcessId -ErrorAction Stop
     if ($process.HasExited) { throw "The owned app exited during UI interaction." }
 }
@@ -144,6 +158,188 @@ function Move-Cursor([int]$X, [int]$Y) {
     }
 }
 
+function Visit-Panel {
+    $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
+    Move-Cursor ([int](($bounds.Left + $bounds.Right) / 2)) ($bounds.Top + [int][Math]::Round(30 * $displayScale))
+    Start-Sleep -Milliseconds 250
+}
+
+function Move-Outside {
+    $work = [NotchlingUiSmoke.Native]::WorkArea([IntPtr]::new($WindowHandle))
+    $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
+    $outsideX = $work.Right - 8; $outsideY = $work.Bottom - 8
+    if ($outsideX -ge $bounds.Left -and $outsideX -lt $bounds.Right -and
+        $outsideY -ge $bounds.Top -and $outsideY -lt $bounds.Bottom) {
+        throw "The disposable desktop has no outside-window pointer position for this regression check."
+    }
+    Move-Cursor $outsideX $outsideY
+}
+
+function Wait-Collapsed {
+    $wait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        Assert-Budget
+        $compact = Find-Control "Open Notchling" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern)
+        if ($compact) {
+            $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
+            if (($bounds.Bottom - $bounds.Top) -lt 100 * $displayScale) { return }
+        }
+        Start-Sleep -Milliseconds 100
+    } while ($wait.Elapsed.TotalSeconds -lt 9)
+    throw "The unpinned notch remained expanded after the pointer left and its keyboard editing lease expired."
+}
+
+function Find-AutomationId([string]$Id, $Pattern = $null) {
+    Assert-Budget
+    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
+    foreach ($candidate in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) {
+        try {
+            $current = $candidate.Current
+            if ($current.IsOffscreen -or -not $current.IsEnabled -or $current.BoundingRectangle.IsEmpty) { continue }
+            if ($null -ne $Pattern) {
+                $provider = $null
+                if (-not $candidate.TryGetCurrentPattern($Pattern, [ref]$provider)) { continue }
+            }
+            return $candidate
+        } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
+    }
+    return $null
+}
+
+function Open-CatalogTool([string]$Module) {
+    Invoke-Button "All tools"
+    $report.Operation = "Open available catalog tool '$Module'"
+    $content = Wait-Control "Notchling tool content" $null $true ([System.Windows.Automation.ScrollPattern]::Pattern)
+    $scroll = $content.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    if ($scroll.Current.HorizontallyScrollable) { throw "The tool catalog exposes horizontal scrolling." }
+    $tool = $null
+    for ($percent = 0; $percent -le 100; $percent += 10) {
+        if ($scroll.Current.VerticallyScrollable) {
+            $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, $percent)
+            Start-Sleep -Milliseconds 70
+        }
+        $tool = Find-AutomationId ("Tool" + $Module) ([System.Windows.Automation.InvokePattern]::Pattern)
+        if ($tool) { break }
+    }
+    if (-not $tool) { throw "An unlocked public-testing catalog tool could not be reached: $Module." }
+    if ($tool.Current.Name -match '(?i)locked|requires premium|opens plan settings') {
+        throw "A public-testing tool still exposes a paywall: $Module ($($tool.Current.Name))."
+    }
+    $tool.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $report.Actions += "Open catalog tool: $Module"
+    Start-Sleep -Milliseconds 150
+    if ($Module -in @("Home", "Media", "Revenue", "Analytics", "Coding", "Calendar", "Weather", "Focus")) {
+        Assert-FeaturedStartsAtTop
+    }
+    Assert-NoAutomaticSampleData
+    if (Find-Control "Notchling error" $null $false) { throw "Opening public-testing tool '$Module' displayed an application error." }
+}
+
+function Assert-FeaturedStartsAtTop {
+    $wait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $content = Find-AutomationId "ModuleScroll" ([System.Windows.Automation.ScrollPattern]::Pattern)
+        if ($content) {
+            $scroll = $content.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+            if ($scroll.Current.HorizontallyScrollable) { throw "A featured tool exposes horizontal scrolling." }
+            if (-not $scroll.Current.VerticallyScrollable -or $scroll.Current.VerticalScrollPercent -le .1) { return }
+        }
+        Start-Sleep -Milliseconds 100
+    } while ($wait.Elapsed.TotalSeconds -lt 2)
+    throw "Navigating to a featured tool retained another tool's vertical scroll offset or omitted its accessible viewport."
+}
+
+function Assert-CredentialActions([string]$Name) {
+    $input = Scroll-ToSetting $Name ([System.Windows.Automation.ControlType]::Edit)
+    $save = Scroll-ToSetting ("Save " + $Name) ([System.Windows.Automation.ControlType]::Button) ([System.Windows.Automation.InvokePattern]::Pattern)
+    $remove = Scroll-ToSetting ("Remove " + $Name) ([System.Windows.Automation.ControlType]::Button) ([System.Windows.Automation.InvokePattern]::Pattern)
+    # Re-find after scrolling so the rectangles describe one current viewport.
+    $input = Find-Control $Name ([System.Windows.Automation.ControlType]::Edit)
+    $save = Find-Control ("Save " + $Name) ([System.Windows.Automation.ControlType]::Button)
+    $remove = Find-Control ("Remove " + $Name) ([System.Windows.Automation.ControlType]::Button)
+    if (-not $input -or -not $save -or -not $remove) { throw "A credential input and its action pair could not fit together: $Name." }
+    $entry = $input.Current.BoundingRectangle; $saveBounds = $save.Current.BoundingRectangle; $removeBounds = $remove.Current.BoundingRectangle
+    if ($saveBounds.Height -gt 48 * $displayScale -or $removeBounds.Height -gt 48 * $displayScale) {
+        throw "Credential actions are oversized instead of compact form controls: $Name."
+    }
+    if ([Math]::Abs($saveBounds.Top - $removeBounds.Top) -gt 2 * $displayScale -or
+        [Math]::Abs($saveBounds.Height - $removeBounds.Height) -gt 2 * $displayScale) {
+        throw "The credential Save / Remove action pair is not vertically aligned: $Name."
+    }
+    $sameLine = [Math]::Abs(($entry.Top + $entry.Height / 2) - ($saveBounds.Top + $saveBounds.Height / 2)) -le 2 * $displayScale
+    $stacked = $saveBounds.Top -ge $entry.Bottom - 2 * $displayScale
+    if (-not $sameLine -and -not $stacked) { throw "Credential actions neither align with the input nor stack cleanly beneath it: $Name." }
+    Assert-HorizontalBounds
+}
+
+function Wait-ModuleControl([string]$Name, $ControlType, [bool]$RequireEnabled = $true, $Pattern = $null) {
+    $control = Find-Control $Name $ControlType $RequireEnabled $Pattern
+    if ($control) { return $control }
+    $scrollElement = Find-AutomationId "ModuleScroll" ([System.Windows.Automation.ScrollPattern]::Pattern)
+    if (-not $scrollElement) { $scrollElement = Find-Control "Notchling tool content" $null $true ([System.Windows.Automation.ScrollPattern]::Pattern) }
+    if ($scrollElement) {
+        $scroll = $scrollElement.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+        if ($scroll.Current.HorizontallyScrollable) { throw "The current tool exposes horizontal scrolling: $Name." }
+        for ($percent = 0; $percent -le 100; $percent += 10) {
+            if ($scroll.Current.VerticallyScrollable) {
+                $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, $percent)
+                Start-Sleep -Milliseconds 70
+            }
+            $control = Find-Control $Name $ControlType $RequireEnabled $Pattern
+            if ($control) { return $control }
+        }
+    }
+    return Wait-Control $Name $ControlType $RequireEnabled $Pattern
+}
+
+function Read-Workspace {
+    $workspaceFile = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "Notch/workspace.json"
+    if (Test-Path -LiteralPath $workspaceFile -PathType Leaf) {
+        try { return Get-Content -LiteralPath $workspaceFile -Raw | ConvertFrom-Json } catch { }
+    }
+    return $null
+}
+
+function Save-OwnedScreenshot([string]$Name) {
+    $bitmap = $null; $graphics = $null
+    try {
+        Assert-Budget
+        Add-Type -AssemblyName System.Drawing
+        $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
+        $width = $bounds.Right - $bounds.Left; $height = $bounds.Bottom - $bounds.Top
+        if ($width -le 0 -or $height -le 0 -or $width -gt 4096 -or $height -gt 4096 -or [long]$width * $height -gt 16777216) {
+            throw "The owned HWND rectangle exceeds the screenshot memory bound."
+        }
+        $directory = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ReportPath))) "screenshots"
+        [IO.Directory]::CreateDirectory($directory) | Out-Null
+        $destination = Join-Path $directory ($Name + ".png")
+        $bitmap = [Drawing.Bitmap]::new($width, $height, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size, [Drawing.CopyPixelOperation]::SourceCopy)
+        $graphics.Dispose(); $graphics = $null
+        $bitmap.Save($destination, [Drawing.Imaging.ImageFormat]::Png)
+        # A cloud desktop can produce uniform black captures. Retain the file but
+        # report that limitation instead of treating it as visual qualification.
+        $colors = [Collections.Generic.HashSet[int]]::new()
+        for ($row = 0; $row -lt 16; $row++) {
+            for ($column = 0; $column -lt 16; $column++) {
+                $sampleX = [int][Math]::Min($width - 1, [Math]::Floor(($column + .5) * $width / 16))
+                $sampleY = [int][Math]::Min($height - 1, [Math]::Floor(($row + .5) * $height / 16))
+                $colors.Add($bitmap.GetPixel($sampleX, $sampleY).ToArgb()) | Out-Null
+            }
+        }
+        $status = if ($colors.Count -le 1) { "Unavailable as visual evidence: sampled capture is uniform." } else { "PNG captured; visual content requires review." }
+        $report.Screenshots += [pscustomobject]@{ Name = $Name; Path = $destination; Width = $width; Height = $height; Status = $status }
+    } catch {
+        # Functional assertions remain authoritative if a hosted desktop denies
+        # screen copying or has no usable drawing surface.
+        $report.Screenshots += [pscustomobject]@{ Name = $Name; Path = $null; Width = $null; Height = $null; Status = "Unavailable: $($_.Exception.Message)" }
+    } finally {
+        if ($graphics) { $graphics.Dispose() }
+        if ($bitmap) { $bitmap.Dispose() }
+    }
+}
+
 function Get-SettingsScroll {
     $content = Wait-Control "Notchling settings content" $null $true ([System.Windows.Automation.ScrollPattern]::Pattern)
     return $content.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
@@ -170,6 +366,17 @@ function Scroll-ToSetting([string]$Name, $ControlType, $Pattern = $null) {
     throw "A Settings control could not be reached by vertical scrolling: $Name (required pattern: $Pattern)."
 }
 
+function Scroll-ToSettingId([string]$Id) {
+    $control = Find-AutomationId $Id
+    if ($control) { return $control }
+    for ($percent = 0; $percent -le 100; $percent += 10) {
+        Scroll-Settings $percent
+        $control = Find-AutomationId $Id
+        if ($control) { return $control }
+    }
+    throw "An accessible connection-status row could not be reached: $Id."
+}
+
 function Assert-HorizontalBounds {
     Assert-Budget
     $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
@@ -181,7 +388,7 @@ function Assert-HorizontalBounds {
             if ($current.IsOffscreen -or $current.BoundingRectangle.IsEmpty) { continue }
             $rectangle = $current.BoundingRectangle
             if ($rectangle.Left -lt $bounds.Left - 2 -or $rectangle.Right -gt $bounds.Right + 2) {
-                throw "Visible Settings content exceeds the native notch width: '$($current.Name)' ($($rectangle.Left)..$($rectangle.Right), notch $($bounds.Left)..$($bounds.Right))."
+                throw "Visible tool content exceeds the native notch width: '$($current.Name)' ($($rectangle.Left)..$($rectangle.Right), notch $($bounds.Left)..$($bounds.Right))."
             }
         } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
     }
@@ -206,7 +413,7 @@ function Assert-DockBounds {
     if ($bounds.Left -lt $work.Left -or $bounds.Top -lt $work.Top -or $bounds.Right -gt $work.Right -or $bounds.Bottom -gt $work.Bottom) {
         throw "The native notch or its dock exceeds the monitor work area."
     }
-    foreach ($name in @("Home", "Media", "Focus", "Scratchpad", "All tools", "Settings", "Keep Notchling expanded")) {
+    foreach ($name in @("Home", "Media", "Focus", "Calendar", "Shelf", "Clipboard", "All tools", "Settings", "Keep Notchling expanded")) {
         $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $name)
         $dockControl = $null
         foreach ($candidate in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) {
@@ -216,27 +423,21 @@ function Assert-DockBounds {
                     $current.BoundingRectangle.Top -ge $bounds.Bottom - $dockHeight) { $dockControl = $candidate; break }
             } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
         }
-        if (-not $dockControl) { throw "An enabled Free dock control is absent from the visible bottom dock: $name." }
+        if (-not $dockControl) { throw "An enabled public-testing dock control is absent from the visible bottom dock: $name." }
         $rectangle = $dockControl.Current.BoundingRectangle
         if ($rectangle.Left -lt $bounds.Left - 2 -or $rectangle.Right -gt $bounds.Right + 2 -or
             $rectangle.Top -lt $bounds.Top - 2 -or $rectangle.Bottom -gt $bounds.Bottom + 2) {
-            throw "An accessible Free dock control is clipped outside the native window: $name."
+            throw "An accessible public-testing dock control is clipped outside the native window: $name."
         }
     }
 }
 
 function Read-FocusClock {
     Assert-Budget
-    $condition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text)
-    foreach ($element in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) {
-        try {
-            $current = $element.Current
-            if (-not $current.IsOffscreen -and -not $current.BoundingRectangle.IsEmpty -and $current.Name -match '^\d{2}:\d{2}$') {
-                return $current.Name
-            }
-        } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
-    }
+    # Public testing exposes four clocks; reading the first MM:SS text could
+    # accidentally accept a countdown or stopwatch as the Pomodoro timer.
+    $clockText = Find-AutomationId "FocusTimeText"
+    if ($clockText -and $clockText.Current.Name -match '^\d{2}:\d{2}$') { return $clockText.Current.Name }
     return $null
 }
 
@@ -280,6 +481,13 @@ namespace NotchlingUiSmoke {
         [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
         [StructLayout(LayoutKind.Sequential)] private struct MonitorInfo { public int Size; public Rect Monitor, Work; public uint Flags; }
+        [StructLayout(LayoutKind.Sequential)] private struct MouseInput { public int X, Y; public uint Data, Flags, Time; public IntPtr Extra; }
+        [StructLayout(LayoutKind.Sequential)] private struct KeyboardInput { public ushort Key, Scan; public uint Flags, Time; public IntPtr Extra; }
+        [StructLayout(LayoutKind.Explicit)] private struct InputUnion {
+            [FieldOffset(0)] public MouseInput Mouse;
+            [FieldOffset(0)] public KeyboardInput Keyboard;
+        }
+        [StructLayout(LayoutKind.Sequential)] private struct Input { public uint Type; public InputUnion Data; }
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect bounds);
         [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
         [DllImport("user32.dll", EntryPoint="GetMonitorInfoW")] private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo information);
@@ -289,6 +497,15 @@ namespace NotchlingUiSmoke {
         [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+        [DllImport("user32.dll", SetLastError=true)] private static extern uint SendInput(uint count, Input[] inputs, int size);
+        public static void TypeCharacter(char value) {
+            var inputs = new Input[2];
+            inputs[0].Type = inputs[1].Type = 1;
+            inputs[0].Data.Keyboard.Scan = inputs[1].Data.Keyboard.Scan = value;
+            inputs[0].Data.Keyboard.Flags = 4; inputs[1].Data.Keyboard.Flags = 6;
+            if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
+                throw new InvalidOperationException("Windows rejected keyboard input on the owned disposable test desktop.");
+        }
         public static Rect WindowBounds(IntPtr window) {
             Rect bounds; if (!GetWindowRect(window, out bounds)) throw new InvalidOperationException("Unable to read the owned HWND bounds.");
             return bounds;
@@ -331,13 +548,13 @@ namespace NotchlingUiSmoke {
         Start-Sleep -Milliseconds 100
     }
     $report.Actions += "Pinned expanded notch"
-    $report.Stage = "Verify startup uses real data and the Free dock fits"
-    Wait-Control "Notchling Free" ([System.Windows.Automation.ControlType]::Text) | Out-Null
+    $report.Stage = "Verify startup uses real data and the public-testing dock fits"
+    Wait-Control "Notchling" ([System.Windows.Automation.ControlType]::Text) | Out-Null
     Assert-NoAutomaticSampleData
     $report.NoAutomaticSampleData = $true
     Assert-DockBounds
     $report.DockWithinWorkArea = $true
-    $report.Actions += "Verified real-data startup and in-bounds Free dock"
+    $report.Actions += "Verified real-data startup and in-bounds public-testing dock"
 
     # Unpinned navigation must stay expanded while the cursor crosses children and
     # the native gap above the dock. Neither point is outside the owned HWND.
@@ -351,32 +568,44 @@ namespace NotchlingUiSmoke {
     Start-Sleep -Milliseconds 100
     Move-Cursor $insideX ($bounds.Bottom - [int][Math]::Round(65 * $displayScale))
     Start-Sleep -Milliseconds 1600
-    Wait-Control "Notchling Free" ([System.Windows.Automation.ControlType]::Text) | Out-Null
+    Wait-Control "Notchling" ([System.Windows.Automation.ControlType]::Text) | Out-Null
     $report.PointerInsidePreservesExpanded = $true
     $report.Actions += "Verified pointer inside the native dock gap preserves expansion"
 
-    $report.Stage = "Active unpinned Settings preserves expansion with pointer outside"
+    $report.Stage = "Unpinned Settings collapses after a real pointer visit and leave"
     Invoke-Button "Settings"
     Get-SettingsScroll | Out-Null
-    [NotchlingUiSmoke.Native]::SetForegroundWindow([IntPtr]::new($WindowHandle)) | Out-Null
-    $activeWait = [Diagnostics.Stopwatch]::StartNew()
-    while ([NotchlingUiSmoke.Native]::GetForegroundWindow().ToInt64() -ne $WindowHandle) {
-        Assert-Budget
-        if ($activeWait.Elapsed.TotalSeconds -ge 4) { throw "The Settings window could not become active for its collapse regression check." }
-        Start-Sleep -Milliseconds 100
+    Wait-Control ("Public testing " + [char]0x00B7 + " All tools unlocked") ([System.Windows.Automation.ControlType]::Text) | Out-Null
+    $report.PublicTestingAccess = $true
+    Visit-Panel
+    Move-Outside
+    Wait-Collapsed
+    $report.UnpinnedSettingsCollapses = $true
+    $report.Actions += "Verified active unpinned Settings collapses after pointer leave"
+
+    # The HWND contains transparent bottom flanks. Those pixels must not keep a
+    # panel open simply because they lie within the full rectangular HWND bounds.
+    $report.Stage = "Transparent dock flank does not retain expansion"
+    Invoke-Button "Open Notchling"
+    Visit-Panel
+    $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
+    Move-Cursor ($bounds.Left + 2) ($bounds.Bottom - [int][Math]::Round(35 * $displayScale))
+    Wait-Collapsed
+    $report.BlankDockFlankCollapses = $true
+    $report.Actions += "Verified transparent dock flank counts as pointer leave"
+
+    $report.Stage = "Repeated actual-pointer hover opens and leaves without sticking"
+    for ($cycle = 0; $cycle -lt 2; $cycle++) {
+        $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
+        Move-Cursor ([int](($bounds.Left + $bounds.Right) / 2)) ([int](($bounds.Top + $bounds.Bottom) / 2))
+        Get-SettingsScroll | Out-Null
+        Visit-Panel
+        Move-Outside
+        Wait-Collapsed
     }
-    $work = [NotchlingUiSmoke.Native]::WorkArea([IntPtr]::new($WindowHandle))
-    $settingsBounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
-    $outsideX = $work.Right - 8; $outsideY = $work.Bottom - 8
-    if ($outsideX -ge $settingsBounds.Left -and $outsideX -lt $settingsBounds.Right -and
-        $outsideY -ge $settingsBounds.Top -and $outsideY -lt $settingsBounds.Bottom) {
-        throw "The disposable desktop has no outside-window pointer position for this Settings regression check."
-    }
-    Move-Cursor $outsideX $outsideY
-    Start-Sleep -Milliseconds 1600
-    Get-SettingsScroll | Out-Null
-    $report.ActiveSettingsPreservesExpanded = $true
-    $report.Actions += "Verified active Settings preserves expansion with pointer outside"
+    $report.RepeatedHoverReopens = $true
+    $report.Actions += "Verified two real-pointer hover open / leave cycles"
+    Invoke-Button "Open Notchling"
     Set-Toggle "Keep Notchling expanded" $true
 
     # Check each vertical section: disabled horizontal scrolling alone would not
@@ -412,6 +641,72 @@ namespace NotchlingUiSmoke {
     $numberValue.SetValue($initialMinutes)
     $report.SettingsDraftPreserved = $true
     $report.Actions += "Verified unapplied Settings number draft survives navigation"
+
+    $report.Stage = "Compact credential controls, draft preservation and real keyboard editing lease"
+    $connections = Scroll-ToSetting "Provider connections" $null ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+    $connections.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    Assert-CredentialActions "Stripe read-only key"
+    Assert-CredentialActions "Analytics bearer token"
+    $report.CredentialActionAlignment = $true
+    Save-OwnedScreenshot "settings-connections"
+    $endpoint = Scroll-ToSetting "HTTPS analytics endpoint" ([System.Windows.Automation.ControlType]::Edit) ([System.Windows.Automation.ValuePattern]::Pattern)
+    $endpointValue = $endpoint.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+    $initialEndpoint = $endpointValue.Current.Value
+    $endpointDraft = "https://example.invalid/notchling-ui-draft"
+    $endpointValue.SetValue($endpointDraft)
+    Invoke-Button "Home"
+    Invoke-Button "Settings"
+    $endpoint = Scroll-ToSetting "HTTPS analytics endpoint" ([System.Windows.Automation.ControlType]::Edit) ([System.Windows.Automation.ValuePattern]::Pattern)
+    if ($endpoint.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne $endpointDraft) {
+        throw "Navigating away discarded the unapplied analytics endpoint draft."
+    }
+    $report.ConnectionDraftPreserved = $true
+    Set-Toggle "Keep Notchling expanded" $false
+    Visit-Panel
+    [NotchlingUiSmoke.Native]::SetForegroundWindow([IntPtr]::new($WindowHandle)) | Out-Null
+    $endpoint.SetFocus()
+    [NotchlingUiSmoke.Native]::TypeCharacter('x')
+    $typedWait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        Assert-Budget
+        $endpoint = Find-Control "HTTPS analytics endpoint" ([System.Windows.Automation.ControlType]::Edit) $true ([System.Windows.Automation.ValuePattern]::Pattern)
+        if ($endpoint -and $endpoint.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne $endpointDraft) { break }
+        if ($typedWait.Elapsed.TotalSeconds -ge 3) { throw "The disposable desktop did not deliver real keyboard input to the owned endpoint editor." }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+    Move-Outside
+    Start-Sleep -Milliseconds 1000
+    Get-SettingsScroll | Out-Null
+    $report.KeyboardEditingGrace = $true
+    Wait-Collapsed
+    $report.KeyboardEditingLeaseExpires = $true
+    Invoke-Button "Open Notchling"
+    Set-Toggle "Keep Notchling expanded" $true
+    $endpoint = Scroll-ToSetting "HTTPS analytics endpoint" ([System.Windows.Automation.ControlType]::Edit) ([System.Windows.Automation.ValuePattern]::Pattern)
+    $endpoint.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($initialEndpoint)
+    $report.Actions += "Verified compact credential alignment, endpoint draft retention, actual typing grace and eventual collapse after editing stops"
+
+    $report.Stage = "Honest native and unconfigured-provider connection diagnostics"
+    $connectionStatus = Scroll-ToSetting "Connection status" $null ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+    $connectionStatus.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    Scroll-ToSetting "Check connections" ([System.Windows.Automation.ControlType]::Button) ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
+    Invoke-Button "Check connections"
+    Start-Sleep -Milliseconds 300
+    Wait-Control "Check connections" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
+    foreach ($provider in @("media", "audio", "clipboard", "stripe", "analytics", "calendar", "coding", "weather")) {
+        $state = (Scroll-ToSettingId ("ConnectionState" + $provider)).Current.Name
+        $detail = (Scroll-ToSettingId ("ConnectionDetail" + $provider)).Current.Name
+        if ($state -notin @("Setup needed", "Ready", "Connected", "Unavailable", "Needs attention")) {
+            throw "Connection diagnostics did not complete with a usable state: $provider ($state)."
+        }
+        if ([string]::IsNullOrWhiteSpace($detail)) { throw "Connection diagnostics omitted actionable details: $provider." }
+        if ($provider -in @("stripe", "analytics", "calendar", "coding", "weather") -and $state -ne "Setup needed") {
+            throw "The empty-provider fixture claims a configured connection without credentials or imports: $provider ($state)."
+        }
+        $report.ConnectionGuidance += [pscustomobject]@{ Provider = $provider; State = $state; Detail = $detail }
+    }
+    if (Find-Control "Notchling error" $null $false) { throw "Missing optional connections produced an application error instead of setup guidance." }
+    $report.Actions += "Verified eight connection diagnostics; absent provider credentials or imports remain setup guidance"
 
     $report.Stage = "Unsigned evaluation update guidance without error or scroll reset"
     # A PowerShell 7 CI parent can pass incompatible module paths to this 5.1
@@ -482,7 +777,99 @@ namespace NotchlingUiSmoke {
     }
     Assert-NoAutomaticSampleData
     $report.ExplicitSamplePreviewExited = $true
-    $report.Actions += "Verified active Settings, work-area dock bounds, vertical layout, toggle scroll position, unapplied draft retention, and explicit preview exit"
+    $report.Actions += "Verified work-area dock bounds, vertical layout, toggle scroll position, unapplied draft retention, and explicit preview exit"
+
+    $report.Stage = "All twenty-one tools open without public-testing paywalls"
+    Invoke-Button "All tools"
+    Save-OwnedScreenshot "all-tools"
+    $toolCases = @(
+        @{ Module = "Home"; Name = "Notchling"; Type = [System.Windows.Automation.ControlType]::Text },
+        @{ Module = "Media"; Name = "Nothing playing"; Type = [System.Windows.Automation.ControlType]::Text },
+        @{ Module = "Revenue"; Name = "Connect a payment provider"; Type = [System.Windows.Automation.ControlType]::Text },
+        @{ Module = "Analytics"; Name = "Your website"; Type = [System.Windows.Automation.ControlType]::Text },
+        @{ Module = "Coding"; Name = "Connect your local usage logs"; Type = [System.Windows.Automation.ControlType]::Text },
+        @{ Module = "Calendar"; Name = "Previous month"; Type = [System.Windows.Automation.ControlType]::Button },
+        @{ Module = "Weather"; Name = "Weather"; Type = [System.Windows.Automation.ControlType]::Text },
+        @{ Module = "Focus"; Name = "Start / pause Pomodoro"; Type = [System.Windows.Automation.ControlType]::Button },
+        @{ Module = "Shelf"; Name = "Choose files"; Type = [System.Windows.Automation.ControlType]::Button },
+        @{ Module = "Clipboard"; Name = "Enable clipboard history"; Type = [System.Windows.Automation.ControlType]::Button },
+        @{ Module = "Servers"; Name = "Refresh ports"; Type = [System.Windows.Automation.ControlType]::Button },
+        @{ Module = "System"; Name = "CPU"; Type = [System.Windows.Automation.ControlType]::Text },
+        @{ Module = "ScreenTime"; Name = "Screen time"; Type = [System.Windows.Automation.ControlType]::Text },
+        @{ Module = "Notes"; Name = "Save note"; Type = [System.Windows.Automation.ControlType]::Button },
+        @{ Module = "Scratchpad"; Name = "Scratchpad"; Type = [System.Windows.Automation.ControlType]::Edit },
+        @{ Module = "Files"; Name = "Documents"; Type = [System.Windows.Automation.ControlType]::Button },
+        @{ Module = "Links"; Name = "Add"; Type = [System.Windows.Automation.ControlType]::Button },
+        @{ Module = "Emoji"; Name = "Open Windows emoji picker"; Type = [System.Windows.Automation.ControlType]::Button },
+        @{ Module = "Sounds"; Name = "A quiet backdrop for focused work."; Type = [System.Windows.Automation.ControlType]::Text },
+        @{ Module = "Convert"; Name = "Length"; Type = [System.Windows.Automation.ControlType]::Text },
+        @{ Module = "Awake"; Name = "Keep awake"; Type = [System.Windows.Automation.ControlType]::Button }
+    )
+    foreach ($case in $toolCases) {
+        Open-CatalogTool $case.Module
+        Wait-ModuleControl $case.Name $case.Type | Out-Null
+        Assert-HorizontalBounds
+        if ($case.Module -eq "Home") {
+            # Exercise the real shared viewport before leaving for the short Media
+            # view; the next catalog navigation must restore its own top edge.
+            $homeScroll = (Find-AutomationId "ModuleScroll" ([System.Windows.Automation.ScrollPattern]::Pattern)).GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+            if ($homeScroll.Current.VerticallyScrollable) {
+                $homeScroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
+                Start-Sleep -Milliseconds 100
+            }
+        }
+        $report.ToolsOpened += $case.Module
+    }
+    $report.FeaturedNavigationStartsAtTop = $true
+    $report.Actions += "Verified twenty-one public-testing tools open into their actual content without a subscription"
+
+    $report.Stage = "Public-testing native Awake power request releases cleanly"
+    Invoke-Button "Keep awake"
+    Wait-Control "Stop keeping awake" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
+    if (Find-Control "Notchling error" $null $false) { throw "The native Awake power request failed on the disposable Windows desktop." }
+    Invoke-Button "Stop keeping awake"
+    Wait-Control "Keep awake" ([System.Windows.Automation.ControlType]::Button) | Out-Null
+    $report.AwakeRoundTrip = $true
+    $report.Actions += "Verified native Awake request enables and releases; no physical sleep-duration claim"
+
+    $report.Stage = "Public-testing note editing persistence and deletion"
+    Open-CatalogTool "Notes"
+    $noteTitle = Wait-ModuleControl "Note title" ([System.Windows.Automation.ControlType]::Edit) $true ([System.Windows.Automation.ValuePattern]::Pattern)
+    $noteTitleText = "Notchling disposable note " + [guid]::NewGuid().ToString("N")
+    $noteTitle.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($noteTitleText)
+    $noteBody = Wait-ModuleControl "Note body" ([System.Windows.Automation.ControlType]::Edit) $true ([System.Windows.Automation.ValuePattern]::Pattern)
+    $noteBodyText = "A public-testing notebook round trip."
+    $noteBody.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($noteBodyText)
+    Wait-ModuleControl "Save note" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
+    Invoke-Button "Save note"
+    $noteWait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        Assert-Budget
+        $workspace = Read-Workspace
+        if ($workspace -and @($workspace.Notes | Where-Object { $_.Title -eq $noteTitleText -and $_.Text -eq $noteBodyText }).Count -eq 1) { break }
+        if ($noteWait.Elapsed.TotalSeconds -ge 4) { throw "The public-testing note did not persist in the disposable workspace." }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+    Invoke-Button "Home"
+    Open-CatalogTool "Notes"
+    Wait-ModuleControl $noteTitleText ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
+    Invoke-Button $noteTitleText
+    $noteBody = Wait-ModuleControl "Note body" ([System.Windows.Automation.ControlType]::Edit) $true ([System.Windows.Automation.ValuePattern]::Pattern)
+    if ($noteBody.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne $noteBodyText) {
+        throw "The public-testing note body was lost after navigation."
+    }
+    Wait-ModuleControl "Delete" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
+    Invoke-Button "Delete"
+    $noteWait.Restart()
+    do {
+        Assert-Budget
+        $workspace = Read-Workspace
+        if ($workspace -and @($workspace.Notes | Where-Object { $_.Title -eq $noteTitleText }).Count -eq 0) { break }
+        if ($noteWait.Elapsed.TotalSeconds -ge 4) { throw "Deleting the disposable test note did not persist." }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+    $report.NotesRoundTrip = $true
+    $report.Actions += "Verified unlocked note creation, durable save, navigation, body recovery and deletion"
 
     $report.Stage = "Genuine no-player media state"
     Invoke-Button "Media"
@@ -492,6 +879,17 @@ namespace NotchlingUiSmoke {
         if ($control.Current.IsEnabled) { throw "No-player media control incorrectly accepts commands: $name" }
     }
     $report.MediaNoPlayerControlsDisabled = $true
+    Save-OwnedScreenshot "media"
+    $volume = Wait-ModuleControl "System volume" ([System.Windows.Automation.ControlType]::Slider) $false ([System.Windows.Automation.RangeValuePattern]::Pattern)
+    $volumeValue = $volume.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current
+    if ($volume.Current.IsEnabled) {
+        if ($volumeValue.Minimum -ne 0 -or $volumeValue.Maximum -ne 1 -or $volumeValue.Value -lt 0 -or $volumeValue.Value -gt 1) {
+            throw "The native audio endpoint volume exposed an invalid scalar."
+        }
+        $report.NativeVolumeStatus = "Native audio endpoint available; valid scalar observed without changing volume."
+    } else {
+        $report.NativeVolumeStatus = "No native audio endpoint on this hosted desktop; volume is correctly disabled."
+    }
     $report.Actions += "Verified genuine no-player media state"
 
     $report.Stage = "Pomodoro start pause and reset"
@@ -506,22 +904,23 @@ namespace NotchlingUiSmoke {
     Start-Sleep -Milliseconds 1200
     $report.FocusAfterPause = Read-FocusClock
     if (-not $paused -or $report.FocusAfterPause -ne $paused) { throw "The Pomodoro kept counting down after pause." }
-    Invoke-Button "Reset"
+    Invoke-Button "Reset Pomodoro"
     $report.FocusAfterReset = Wait-FocusClock $report.FocusInitial
+    Save-OwnedScreenshot "focus"
     $report.Actions += "Verified Pomodoro start, pause, and reset"
 
-    $report.Stage = "Free scratchpad editing persistence and navigation"
+    $report.Stage = "Public-testing scratchpad editing persistence and navigation"
     Invoke-Button "Home"
-    Invoke-Button "Scratchpad"
+    Open-CatalogTool "Scratchpad"
     $editor = Wait-Control "Scratchpad" ([System.Windows.Automation.ControlType]::Edit) $true ([System.Windows.Automation.ValuePattern]::Pattern)
     $value = $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-    if ($value.Current.IsReadOnly) { throw "The Free scratchpad is read-only." }
+    if ($value.Current.IsReadOnly) { throw "The public-testing scratchpad is read-only." }
     $scratchpadText = "Notchling disposable cloud smoke " + [guid]::NewGuid().ToString("N")
     $value.SetValue($scratchpadText)
     Wait-ScratchpadSave $scratchpadText
     $report.ScratchpadSaved = $true
     Invoke-Button "Home"
-    Invoke-Button "Scratchpad"
+    Open-CatalogTool "Scratchpad"
     $editor = Wait-Control "Scratchpad" ([System.Windows.Automation.ControlType]::Edit) $true ([System.Windows.Automation.ValuePattern]::Pattern)
     $value = $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
     if ($value.Current.Value -ne $scratchpadText) { throw "The scratchpad lost its text after navigating away and back." }

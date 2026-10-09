@@ -2,6 +2,8 @@
 
 Notchling includes a separate ASP.NET Core service, a portable entitlement validator, and a desktop billing client. Production commerce remains **disabled until the owner supplies a domain, Stripe configuration, an email sender, durable storage, signing keys, customer policies, and licensed weather access**. This repository does not contain live credentials, activate a subscription, or deploy a service. An email login, browser return, local setting, and demo mode cannot grant a paid entitlement.
 
+**Current product phase: public testing.** The v0.3.0 candidate grants all catalog tools to everyone in both Release and Debug through an explicit product-access policy. The desktop purchase controls and server checkout are paused; no fake Premium proof is issued. Optional service login remains available when the backend is configured, for authenticated services such as the licensed weather proxy. The current published configuration supplies no such backend. The older v0.2.11 download predates this phase until qualification publishes a replacement.
+
 Live Stripe keys additionally require **Billing__CommercialReleaseApproved=true**, set only after the publisher identity, customer terms, private support/refund route, tax configuration, and native release qualification are completed. Test credentials do not activate live charges.
 
 ## Product policy implemented in code
@@ -9,17 +11,18 @@ Live Stripe keys additionally require **Billing__CommercialReleaseApproved=true*
 | Rule | Behavior |
 | --- | --- |
 | Price | Checkout verifies an active Stripe price of **US$2 every month**, quantity one. Additional applicable taxes/customer disclosures must be configured before sale. |
-| Free | Basic media transport, one Pomodoro and scratchpad, navigation, settings and accessibility. The desktop gates Premium features; existing saved work remains accessible for recovery/export. |
+| Public testing | All supported tools unlocked without payment. Provider credentials, file imports, native capabilities and service authentication still apply. Checkout is paused. |
+| Future Free | Basic media transport, one Pomodoro and scratchpad, navigation, settings and accessibility. Commercial-phase gates protect extended features; existing work remains available for recovery/export. |
 | Identity and restore | Verified email with an eight-digit, single-use code; reinstall can restore through the same email. No password or card data enters Notchling. |
 | Devices | Three most recently verified devices. Verifying a fourth replaces the oldest login; its cached proof expires within the offline limit. |
 | Session | A random 256-bit bearer session, hashed on the service and encrypted in Windows Credential Locker, expires after 30 days. |
 | Proof | RSA-SHA256 signature, issuer/audience checks, version, account and device binding. Public verification key only in desktop. |
-| Refresh and offline | Refresh after six hours; up to 24 additional hours offline, always capped by the paid period end. Invalid/expired proof returns Free. Clock rollback beyond five minutes requires restoration. |
+| Refresh and offline | Paid proof refresh after six hours; up to 24 additional hours offline, always capped by the paid period end. Invalid/expired proof does not grant Premium. Public-testing tool access is independent of paid status. Clock rollback beyond five minutes requires restoration. |
 | Cancellation | Stripe customer portal manages cancellation. Period-end cancellation retains paid access until that period ends. Immediate cancellation removes online entitlement. |
 | Failure/refund | Past-due/unpaid/canceled subscriptions grant no new Premium proof. A full refund or dispute on the latest paid invoice revokes access on refresh. A partial goodwill refund retains remaining paid access. Already issued offline proofs remain valid only for the bounded grace period. |
 | Downgrade | Does not delete notes, reminders, links, shelf entries or scratchpad. Desktop recovery/export remains available without Premium. |
 
-Client-side enforcement cannot resist a deliberately patched desktop executable. Premium service operations, including the licensed weather proxy, independently verify the session and current subscription on the server. Clock rollback checks make accidental local clock changes explicit; they are not hardware attestation.
+Client-side enforcement cannot resist a deliberately patched desktop executable. Paid-entitlement verification remains strict in every phase. The weather proxy always validates its authenticated session; during public testing it does not require a paid subscription, while the later commercial phase independently checks current Premium state. Provider licensing, authentication, rate limits and expiry remain enforced. Clock rollback checks make accidental local clock changes explicit; they are not hardware attestation.
 
 ## Service configuration
 
@@ -66,10 +69,10 @@ All bodies are JSON except Stripe's raw webhook. Authenticated requests require 
 | `POST /v1/auth/verify` | `{email,deviceId,code}` | `{sessionToken,entitlement,serverTime}`. |
 | `POST /v1/auth/signout` | Bearer | 204; revoke this server login. |
 | `GET /v1/entitlement` | Bearer | Signed proof and trusted server time from current provider state. |
-| `POST /v1/checkout` | Bearer | `{url}` to Stripe hosted checkout. |
+| `POST /v1/checkout` | Bearer | Disabled during public testing; future commercial phase returns `{url}` to Stripe hosted checkout. |
 | `POST /v1/portal` | Bearer | `{url}` to Stripe customer portal. |
 | `POST /v1/stripe/webhook` | Signed raw bytes | 200 after durable processing; retryable 503 on provider/storage failure. |
-| `GET /v1/weather?city=...` | Premium Bearer | `{location:{name,country,latitude,longitude},forecast:{...}}`. |
+| `GET /v1/weather?city=...` | Authenticated Bearer; Premium additionally required in the commercial phase | `{location:{name,country,latitude,longitude},forecast:{...}}` when licensed provider configuration is ready. |
 
 The desktop accepts only HTTPS links on `checkout.stripe.com` and `billing.stripe.com`. Public client configuration contains the billing base URI and RSA public PEM only. `SubscriptionService.TryCreateFromConfiguration` returns a clear disabled reason for empty/invalid settings. HTTP localhost is accepted for local test harnesses; production requires HTTPS. Login and proof state use `ISecretVault`, which maps to Credential Locker on Windows 10/11.
 
@@ -81,7 +84,7 @@ Local sign-out removes the device's encrypted session and proof immediately. App
 
 Supply `Weather__ApiKey`, `Weather__ForecastBase` and `Weather__GeocodingBase` only after obtaining commercial access. The base URLs must use HTTPS and no embedded query/credentials. For a compatible Open-Meteo licensed deployment, the forecast base is the licensed customer host and geocoding base is the provider-approved host; confirm which endpoint accepts the licensed key with the provider.
 
-The proxy calls `/v1/search` with `count=1&language=en&format=json`, and `/v1/forecast` with `timezone=auto`, `timeformat=unixtime`, seven-day daily weather and current/hourly fields. It exposes no shared provider key to customers. Requests require a current Premium session. Unconfigured weather returns 503; the desktop does not silently fall back to a non-commercial endpoint. Attribution remains required. The proxy uses a 15-second full-response deadline and a 1 MiB response limit. Production provider quota/cost monitoring and caching policy must match the commercial agreement.
+The proxy calls `/v1/search` with `count=1&language=en&format=json`, and `/v1/forecast` with `timezone=auto`, `timeformat=unixtime`, seven-day daily weather and current/hourly fields. It exposes no shared provider key to customers. Requests require a current authenticated session; paid Premium state is additionally required in the commercial phase, while the explicit public-testing phase permits authenticated testers. Unconfigured weather returns 503; the desktop does not silently fall back to a non-commercial endpoint. The current app has no configured weather backend. Attribution remains required. The proxy uses a 15-second full-response deadline and a 1 MiB response limit. Production provider quota/cost monitoring and caching policy must match the commercial agreement.
 
 ## Local verification
 

@@ -46,6 +46,7 @@ public static class IcsCalendar
         var stack = new Stack<string>();
         Dictionary<string, List<Property>>? current = null;
         var eventDepth = 0;
+        var sawCalendar = false;
         foreach (var line in Unfold(text))
         {
             if (line.Length == 0) continue;
@@ -54,6 +55,13 @@ public static class IcsCalendar
             {
                 var component = property.Value.ToUpperInvariant();
                 if (stack.Count >= 16) throw Invalid("Calendar components are nested too deeply.");
+                if (stack.Count == 0 && component != "VCALENDAR")
+                    throw Invalid("The selected file must contain a VCALENDAR calendar.");
+                if (component == "VCALENDAR")
+                {
+                    if (stack.Count != 0 || sawCalendar) throw Invalid("The selected file contains an invalid calendar container.");
+                    sawCalendar = true;
+                }
                 stack.Push(component);
                 if (component == "VEVENT")
                 {
@@ -83,6 +91,7 @@ public static class IcsCalendar
             values.Add(property);
         }
         if (stack.Count != 0 || current is not null) throw Invalid("The calendar has an unterminated component.");
+        if (!sawCalendar) throw Invalid("The selected file does not contain a VCALENDAR calendar.");
         return events;
     }
 

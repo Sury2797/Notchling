@@ -10,7 +10,7 @@ using Notch.Core.Commerce;
 
 namespace Notch.Windows.ViewModels;
 
-public sealed class MainViewModel : ObservableObject, IAsyncDisposable
+public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly DispatcherQueue _dispatcher;
     private readonly IMediaService _mediaService;
@@ -30,6 +30,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string _saveState = "Saved locally";
     private SavedNote? _deletedNote;
     private bool _lastPremium;
+    private bool _lastToolAccess;
     private bool _discardOnDispose;
     private long? _nonScratchpadBytes;
     public Func<bool>? CanPresentActivity { get; set; }
@@ -108,11 +109,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 #else
     public bool IsDevelopmentBuild => false;
 #endif
-    public bool IsPremium => IsDevelopmentBuild || _subscription?.Current.IsPremium == true;
-    public string PlanStatus => IsDevelopmentBuild ? "Development build — all tools enabled" : IsPremium ? "Premium — US$2/month" : "Free — basic media, Pomodoro and scratchpad";
-    public string SubscriptionStatus => _subscription?.Current.Message ?? _subscriptionUnavailable;
+    internal ProductAccessPhase AccessPhase { get; init; } = ProductAccessPolicy.CurrentPhase;
+    public bool IsPublicTesting => AccessPhase == ProductAccessPhase.PublicTesting;
+    public bool IsPremium => _subscription?.Current.IsPremium == true;
+    public bool CanUseExtendedTools => ProductAccessPolicy.CanUseExtendedTools(IsPremium, IsDevelopmentBuild, AccessPhase);
+    public string PlanStatus => IsPublicTesting ? "Public testing — all tools free" : IsDevelopmentBuild ? "Development build — all tools enabled" : IsPremium ? "Premium — US$2/month" : "Free — basic media, Pomodoro and scratchpad";
+    public string SubscriptionStatus => IsPublicTesting ? "No subscription required during public testing. External providers still require their own connection." : _subscription?.Current.Message ?? _subscriptionUnavailable;
     public bool BillingConfigured => _subscription is not null;
-    public bool CanAccessModule(ModuleId module) => IsPremium || module is ModuleId.Home or ModuleId.Media or ModuleId.Focus or ModuleId.Scratchpad or ModuleId.Settings or ModuleId.Tools;
+    public bool PurchasingAvailable => !IsPublicTesting && BillingConfigured;
+    public bool CanAccessModule(ModuleId module) => ProductAccessPolicy.CanUse(module, IsPremium, IsDevelopmentBuild, AccessPhase);
     private bool RequirePremium(ModuleId module)
     {
         if (CanAccessModule(module)) return true;
@@ -121,7 +126,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
     private bool RequirePremiumFeature()
     {
-        if (IsPremium) return true;
+        if (CanUseExtendedTools) return true;
         Status = "This control is included in Premium. Basic playback, Pomodoro and scratchpad remain available."; return false;
     }
     public bool CalendarRangeLoaded(DateTime month) => _calendarRange?.ContainsMonth(month) == true;
@@ -160,6 +165,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (_subscription is not null && configuration.BillingUrl is { } billingUrl && new Uri(billingUrl).Scheme == Uri.UriSchemeHttps)
             weatherConfiguration = WeatherServiceConfiguration.CommercialProxy(new Uri(new Uri(billingUrl.TrimEnd('/') + "/"), "v1/weather").AbsoluteUri);
         _weatherClient = new(_http, weatherConfiguration, () => _subscription?.SessionToken);
+        _weatherProxyConfigured = weatherConfiguration is not null;
         // Keep the established location across branding changes so existing notebooks and preferences remain available.
         _dataDirectory = dataDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Notch");
         _store = store ?? new LocalStore(_dataDirectory);
@@ -228,21 +234,23 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             Overlay.Pinned = Preferences.Pinned;
             _focus.Pomodoro.Reset(TimeSpan.FromMinutes(Preferences.FocusMinutes));
             _focus.Hydration.Reset(TimeSpan.FromMinutes(Preferences.HydrationMinutes));
-            if (IsPremium) _focus.Hydration.Start();
+            if (CanUseExtendedTools) _focus.Hydration.Start();
             _loaded = true;
+            _lastPremium = IsPremium;
+            _lastToolAccess = CanUseExtendedTools;
             _tick.Start();
             NotifyTimers();
             if (IsDemo) LoadDemo();
             Notify(nameof(IsReady));
-            await ExecuteAsync(() => { ClipboardService.SetEnabled(IsPremium && Preferences.CaptureClipboard); return Task.CompletedTask; });
+            await ExecuteAsync(() => { ClipboardService.SetEnabled(CanUseExtendedTools && Preferences.CaptureClipboard); return Task.CompletedTask; });
             if (_disposed) return;
-            await ExecuteAsync(() => _mediaService.StartAsync(_lifetimeToken));
+            await ExecuteAsync(StartMediaConnectionAsync);
             if (_disposed) return;
             await ExecuteAsync(RefreshAsync);
             if (_disposed) return;
             // Cached entitlement already governs native startup. A remote refresh must
             // not delay ready local tools, media registration, or initial system readings.
-            if (_subscription is not null) await ExecuteAsync(RefreshSubscriptionAsync);
+            if (!IsPublicTesting && _subscription is not null) await ExecuteAsync(RefreshSubscriptionAsync);
             if (_disposed) return;
             if (!IsDemo && CanAccessModule(ModuleId.Calendar) && Preferences.CalendarPath is { } calendar) await ExecuteAsync(() => ImportCalendarAsync(calendar));
             if (_disposed) return;
@@ -254,7 +262,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (_disposed) return;
         var generation = _dataGeneration;
-        _dispatcher.TryEnqueue(() => { if (CanPublish(generation)) Media = snapshot; });
+        _dispatcher.TryEnqueue(() => { if (CanPublish(generation)) { Media = snapshot; ObserveMediaConnection(); } });
     }
     private void OnClipboardChanged(object? sender, IReadOnlyList<ClipboardItem> items)
     {
@@ -264,7 +272,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
     private void OnServiceError(object? sender, string message)
     {
-        if (!_disposed) _dispatcher.TryEnqueue(() => { if (!_disposed) ShowError(message); });
+        if (!_disposed) _dispatcher.TryEnqueue(() =>
+        {
+            if (_disposed) return;
+            if (ReferenceEquals(sender, _mediaService)) ObserveConnection("media", "Windows media", ConnectionState.Failed, "Windows media could not refresh. Existing controls may still work; check connections to retry.");
+            ShowError(message);
+        });
     }
     public void SelectModule(ModuleId module)
     {
@@ -309,6 +322,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var snapshot = await _systemService.ReadAsync(_lifetimeToken);
             if (!CanPublish(generation)) return;
             System = snapshot;
+            ObserveAudioConnection(snapshot);
             if (scanPorts && CanPublishPorts(generation, viewGeneration))
             {
                 // TCP enumeration is synchronous native work; never run it on the UI continuation.
@@ -323,7 +337,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             if (!CanPublish(generation)) return;
             Media = _mediaService.Current;
         }
-        catch (Exception error) when (Recoverable(error) && (!CanPublish(generation) || viewGeneration != _viewGeneration)) { }
+        catch (Exception error) when (Recoverable(error) && (!CanPublish(generation) || viewGeneration != _viewGeneration))
+        { if (CanPublish(generation)) ObserveConnection("audio", "Audio output", ConnectionState.Failed, ConnectionFailure(error)); }
+        catch (Exception error) when (Recoverable(error))
+        { ObserveConnection("audio", "Audio output", ConnectionState.Failed, ConnectionFailure(error)); throw; }
         finally { _refreshLock.Release(); }
     }
     private bool CanPublishPorts(int generation, int viewGeneration) => CanPublish(generation)
@@ -334,7 +351,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (_disposed || Overlay.Mode != OverlayMode.Expanded) return;
         if (SelectedModule is ModuleId.Home or ModuleId.System or ModuleId.Media or ModuleId.Servers or ModuleId.ScreenTime) await RefreshAsync();
         if (_disposed || Overlay.Mode != OverlayMode.Expanded) return;
-        if (SelectedModule == ModuleId.Weather && Weather is null) await RefreshWeatherAsync();
+        if (SelectedModule == ModuleId.Weather && Weather is null && CanRefreshWeather) await RefreshWeatherAsync();
     });
     public Task SetPreferencesAsync(AppPreferences preferences) => ApplyPreferencesAsync(preferences);
     public Task ExitDemoAsync() => !IsDemo || _disposed ? Task.CompletedTask : SetPreferencesAsync(Preferences with { DemoMode = false });
@@ -346,6 +363,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         _preferencesGeneration++;
         _preferencesChanged = true;
         Preferences = normalized;
+        if (old.AnalyticsEndpoint != Preferences.AnalyticsEndpoint || old.AnalyticsSite != Preferences.AnalyticsSite) InvalidateConnection("analytics");
+        if (old.CalendarPath != Preferences.CalendarPath && origin != _calendarRequest) InvalidateConnection("calendar");
+        if (old.CodingPath != Preferences.CodingPath && origin != _codingRequest) InvalidateConnection("coding");
+        if (old.WeatherCity != Preferences.WeatherCity && origin != _weatherRequest) InvalidateConnection("weather");
+        if (old.CaptureClipboard != Preferences.CaptureClipboard) Notify(nameof(ConnectionStatuses));
         if (old.WeatherCity != Preferences.WeatherCity && (origin != _weatherRequest || originGeneration != _weatherRequest.Generation)) { Invalidate(_weatherRequest); if (!IsDemo) Weather = null; }
         if (old.AnalyticsEndpoint != Preferences.AnalyticsEndpoint || old.AnalyticsSite != Preferences.AnalyticsSite) { Invalidate(_analyticsRequest); if (!IsDemo) Analytics = null; }
         if (old.AdSenseAccount != Preferences.AdSenseAccount) { Invalidate(_revenueRequest); if (!IsDemo) Revenue = null; }
@@ -360,10 +382,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             var wasRunning = _focus.Hydration.IsRunning;
             _focus.Hydration.Reset(TimeSpan.FromMinutes(Preferences.HydrationMinutes));
-            if (IsPremium && wasRunning) _focus.Hydration.Start();
+            if (CanUseExtendedTools && wasRunning) _focus.Hydration.Start();
         }
         if (old.DemoMode != Preferences.DemoMode)
         {
+            ResetConnectionChecks();
             _dataGeneration++;
             InvalidateRequests();
             _calendarSource = null; _calendarRange = null;
@@ -382,7 +405,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
         Overlay.Pinned = Preferences.Pinned;
         Notify(nameof(IsDemo)); NotifyTimers();
-        TryOptionalService(() => ClipboardService.SetEnabled(IsPremium && Preferences.CaptureClipboard));
+        TryOptionalService(() => ClipboardService.SetEnabled(CanUseExtendedTools && Preferences.CaptureClipboard));
         // Save accepted settings after invalidating their obsolete request results,
         // but before optional native reads or calendar imports can delay the operation.
         var savedPreferencesGeneration = _preferencesGeneration;
@@ -461,11 +484,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         Overlay.SetInteractionSuppressed(!CanPresentActivities());
         Overlay.Tick();
         if (_focus.Pomodoro.Tick()) Activity(ActivityKind.Focus, "Focus", "Session complete", "Take a breath. You earned it.");
-        if (IsPremium && _focus.Countdown.Tick()) Activity(ActivityKind.Focus, "Countdown", "Timer complete", null);
-        if (IsPremium && _focus.Hydration.Tick()) Activity(ActivityKind.Information, "Hydration", "Time for a little water", "Open Focus to reset your reminder.");
+        if (CanUseExtendedTools && _focus.Countdown.Tick()) Activity(ActivityKind.Focus, "Countdown", "Timer complete", null);
+        if (CanUseExtendedTools && _focus.Hydration.Tick()) Activity(ActivityKind.Information, "Hydration", "Time for a little water", "Open Focus to reset your reminder.");
         NotifyTimers();
         var now = DateTimeOffset.Now;
-        if (IsPremium)
+        if (CanUseExtendedTools)
             foreach (var reminder in Reminders.Where(item => !item.Completed && item.DueAt <= now).ToArray())
                 if (!_deliveredReminders.Contains(reminder.Id) && _queuedReminders.Add(reminder.Id))
                 {
@@ -473,7 +496,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                     if (!accepted) _queuedReminders.Remove(reminder.Id);
                 }
         _tickCounter++;
-        if (_tickCounter % 300 == 0 && _subscription is not null) _ = ExecuteAsync(RefreshSubscriptionAsync);
+        if (_tickCounter % 300 == 0 && !IsPublicTesting && _subscription is not null) _ = ExecuteAsync(RefreshSubscriptionAsync);
         if (_tickCounter % 5 == 0 && Overlay.Mode == OverlayMode.Expanded && SelectedModule is ModuleId.Home or ModuleId.System or ModuleId.Media or ModuleId.Servers or ModuleId.ScreenTime)
             _ = ExecuteAsync(RefreshAsync);
     }
@@ -510,11 +533,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var snapshot = await _weatherClient.ReadAsync(city ?? Preferences.WeatherCity, request.Token);
             if (!CanPublish(_weatherRequest, request)) return;
             Weather = snapshot;
+            ObserveConnection("weather", "Weather service", ConnectionState.Connected, "Licensed forecast read successfully.", snapshot.UpdatedAt);
             if (city is not null) await ApplyPreferencesAsync(Preferences with { WeatherCity = city }, _weatherRequest, request.Generation);
             if (!CanPublish(_weatherRequest, request)) return;
             Status = "Weather updated.";
         }
         catch (Exception error) when (Recoverable(error) && !CanPublish(_weatherRequest, request)) { }
+        catch (Exception error) when (Recoverable(error)) { ObserveConnection("weather", "Weather service", ConnectionState.Failed, ConnectionFailure(error)); throw; }
     }
     public async Task RefreshRevenueAsync(RevenueProvider provider, int days = 30)
     {
@@ -526,9 +551,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var snapshot = await new RevenueClient(_http, _vault).ReadAsync(provider, days, Preferences.AdSenseAccount, request.Token);
             if (!CanPublish(_revenueRequest, request)) return;
             Revenue = snapshot;
+            ObserveConnection("stripe", "Stripe reporting", ConnectionState.Connected, snapshot.Complete ? "Read-only report received from Stripe." : "Stripe report is partial; pagination limit reached.", snapshot.UpdatedAt);
             Status = snapshot.Complete ? "Revenue updated." : "Partial revenue result — pagination limit reached.";
         }
         catch (Exception error) when (Recoverable(error) && !CanPublish(_revenueRequest, request)) { }
+        catch (Exception error) when (Recoverable(error))
+        { if (provider == RevenueProvider.Stripe) ObserveConnection("stripe", "Stripe reporting", ConnectionState.Failed, ConnectionFailure(error)); throw; }
     }
     public async Task RefreshAnalyticsAsync()
     {
@@ -540,9 +568,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var snapshot = await new AnalyticsClient(_http, _vault).ReadAsync(Preferences.AnalyticsEndpoint, Preferences.AnalyticsSite, request.Token);
             if (!CanPublish(_analyticsRequest, request)) return;
             Analytics = snapshot;
+            ObserveConnection("analytics", "Website analytics", ConnectionState.Connected, "Valid snapshot received. Provider data timestamp: " + snapshot.UpdatedAt.ToLocalTime().ToString("g"), DateTimeOffset.UtcNow);
             Status = "Analytics updated.";
         }
         catch (Exception error) when (Recoverable(error) && !CanPublish(_analyticsRequest, request)) { }
+        catch (Exception error) when (Recoverable(error)) { ObserveConnection("analytics", "Website analytics", ConnectionState.Failed, ConnectionFailure(error)); throw; }
     }
     public async Task ImportCodingAsync(string path)
     {
@@ -553,11 +583,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var snapshot = await CodingImporter.ReadAsync(path, request.Token);
             if (!CanPublish(_codingRequest, request)) return;
             Coding = snapshot;
+            ObserveConnection("coding", "Coding activity", ConnectionState.Connected, "Supported local activity file read successfully.");
             if (Preferences.CodingPath != path) await ApplyPreferencesAsync(Preferences with { CodingPath = path }, _codingRequest, request.Generation);
             if (!CanPublish(_codingRequest, request)) return;
             Status = "Imported local token usage. Message content is not read into the UI.";
         }
         catch (Exception error) when (Recoverable(error) && !CanPublish(_codingRequest, request)) { }
+        catch (Exception error) when (Recoverable(error)) { ObserveConnection("coding", "Coding activity", ConnectionState.Failed, ConnectionFailure(error)); throw; }
     }
     public async Task ImportCalendarAsync(string path, DateTime? month = null)
     {
@@ -565,32 +597,45 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         var request = BeginRequest(_calendarRequest);
         try
         {
-            var info = new FileInfo(path);
-            if (info.Length > 5 * 1024 * 1024) throw new InvalidDataException("Calendar file exceeds the 5 MB limit.");
-            var content = await File.ReadAllTextAsync(path, request.Token);
+            var content = await CalendarImporter.ReadTextAsync(path, request.Token);
             if (!CanPublish(_calendarRequest, request)) return;
             var range = CalendarRange.ForMonth(month ?? DateTime.Today);
             var snapshot = await Task.Run(() => IcsCalendar.Parse(content, range.From, range.Until, range.Zone), request.Token);
             if (!CanPublish(_calendarRequest, request)) return;
             _calendarSource = content; _calendarRange = range;
             CalendarEvents = snapshot;
+            ObserveConnection("calendar", "Calendar import", ConnectionState.Connected, "ICS file imported; " + snapshot.Count + " events in the loaded date range.");
             if (Preferences.CalendarPath != path) await ApplyPreferencesAsync(Preferences with { CalendarPath = path }, _calendarRequest, request.Generation);
             if (!CanPublish(_calendarRequest, request)) return;
             Status = $"Imported {snapshot.Count} calendar events.";
         }
         catch (Exception error) when (Recoverable(error) && !CanPublish(_calendarRequest, request)) { }
+        catch (Exception error) when (Recoverable(error)) { ObserveConnection("calendar", "Calendar import", ConnectionState.Failed, ConnectionFailure(error)); throw; }
     }
     public void SaveCredential(string provider, string value)
     {
         if (!ReadyForInput()) return;
         if (!new[] { "stripe", "polar", "dodo", "adsense", "analytics" }.Contains(provider)) throw new ArgumentException("Unknown provider.");
         if (string.IsNullOrWhiteSpace(value)) throw new ArgumentException("Enter a credential before saving.");
-        _vault.Save(provider, value.Trim()); InvalidateCredential(provider); Status = "Credential stored in Windows Credential Locker.";
+        _vault.Save(provider, ProviderCredential.Normalize(value)); InvalidateCredential(provider);
+        if (provider == "stripe") _stripeCredentialPresent = true;
+        if (provider == "analytics") _analyticsCredentialPresent = true;
+        Notify(nameof(ConnectionStatuses));
+        Status = "Credential stored in Windows Credential Locker. Use Check connections to verify read access.";
     }
-    public void DeleteCredential(string provider) { if (!ReadyForInput()) return; _vault.Delete(provider); InvalidateCredential(provider); Status = "Credential removed."; }
+    public void DeleteCredential(string provider)
+    {
+        if (!ReadyForInput()) return;
+        _vault.Delete(provider); InvalidateCredential(provider);
+        if (provider == "stripe") _stripeCredentialPresent = false;
+        if (provider == "analytics") _analyticsCredentialPresent = false;
+        Notify(nameof(ConnectionStatuses)); Status = "Credential removed.";
+    }
     public bool HasCredential(string provider) => !_disposed && !string.IsNullOrEmpty(_vault.Read(provider));
     private void InvalidateCredential(string provider)
     {
+        if (provider == "stripe") { _stripeCredentialPresent = null; InvalidateConnection("stripe"); }
+        if (provider == "analytics") { _analyticsCredentialPresent = null; InvalidateConnection("analytics"); }
         if (provider == "analytics") { Invalidate(_analyticsRequest); if (!IsDemo) Analytics = null; }
         else { Invalidate(_revenueRequest); if (!IsDemo) Revenue = null; }
     }
@@ -609,35 +654,39 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public async Task RetryNativeServicesAsync()
     {
         if (!ReadyForInput()) return;
-        await ExecuteAsync(() => _mediaService.StartAsync(_lifetimeToken));
+        await ExecuteAsync(StartMediaConnectionAsync);
         if (_disposed) return;
-        TryOptionalService(() => ClipboardService.SetEnabled(IsPremium && Preferences.CaptureClipboard));
+        TryOptionalService(() => ClipboardService.SetEnabled(CanUseExtendedTools && Preferences.CaptureClipboard));
         await ExecuteAsync(RefreshAsync);
     }
     public async Task RefreshSubscriptionAsync()
     {
-        if (_disposed || _subscription is null) return;
+        if (!ReadyForInput() || _subscription is null) return;
         if (string.IsNullOrWhiteSpace(_subscription.SessionToken)) { ReconcileEntitlement(force: true); return; }
         try { await _subscription.RefreshAsync(_lifetimeToken); }
-        finally { ReconcileEntitlement(force: true); }
+        finally { ReconcileEntitlement(force: true); NotifyAccountConnectionChanged(); }
     }
     private void ReconcileEntitlement(bool force = false)
     {
         if (_disposed) return;
         var premium = IsPremium;
+        var toolAccess = CanUseExtendedTools;
         var changed = premium != _lastPremium;
-        if (!force && !changed) return;
+        var toolAccessChanged = toolAccess != _lastToolAccess;
+        if (!force && !changed && !toolAccessChanged) return;
         _lastPremium = premium;
+        _lastToolAccess = toolAccess;
         TryOptionalService(() => Notify(nameof(IsPremium)));
+        if (toolAccessChanged) TryOptionalService(() => Notify(nameof(CanUseExtendedTools)));
         TryOptionalService(() => Notify(nameof(PlanStatus)));
         TryOptionalService(() => Notify(nameof(SubscriptionStatus)));
-        if (!changed) return;
-        if (premium && _loaded)
+        if (!toolAccessChanged) return;
+        if (toolAccess && _loaded)
         {
             TryOptionalService(() => ClipboardService.SetEnabled(Preferences.CaptureClipboard));
             if (!_focus.Hydration.IsRunning) _focus.Hydration.Start();
         }
-        if (!premium)
+        if (!toolAccess)
         {
             TryOptionalService(() => ClipboardService.SetEnabled(false));
             _focus.Hydration.Pause(); _focus.Countdown.Pause(); _focus.Stopwatch.Pause(); UpdateStopwatchTick();
@@ -695,12 +744,47 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             throw;
         }
     }
-    public Task RequestLoginAsync(string email) => _subscription?.RequestLoginAsync(email) ?? Task.FromException(new InvalidOperationException(_subscriptionUnavailable));
-    public async Task VerifyLoginAsync(string email, string code) { if (_subscription is null) throw new InvalidOperationException(_subscriptionUnavailable); await _subscription.VerifyLoginAsync(email, code); await RefreshSubscriptionAsync(); }
-    public Task<Uri> CheckoutAsync() => _subscription?.CreateCheckoutAsync() ?? Task.FromException<Uri>(new InvalidOperationException(_subscriptionUnavailable));
-    public Task<Uri> CustomerPortalAsync() => _subscription?.CreatePortalAsync() ?? Task.FromException<Uri>(new InvalidOperationException(_subscriptionUnavailable));
-    public void SignOut() { _subscription?.SignOut(); ReconcileEntitlement(force: true); }
-    public async Task SignOutAsync() { var signOut = _subscription?.SignOutAsync(); ReconcileEntitlement(force: true); try { if (signOut is not null) await signOut; } finally { ReconcileEntitlement(force: true); } }
+    public Task RequestLoginAsync(string email) => !ReadyForInput() ? Task.CompletedTask
+        : _subscription?.RequestLoginAsync(email, _lifetimeToken) ?? Task.FromException(new InvalidOperationException(_subscriptionUnavailable));
+    public async Task VerifyLoginAsync(string email, string code)
+    {
+        if (!ReadyForInput()) return;
+        if (_subscription is null) throw new InvalidOperationException(_subscriptionUnavailable);
+        await _subscription.VerifyLoginAsync(email, code, _lifetimeToken);
+        if (_disposed) return;
+        // The OTP response already contains a verified proof and provider session.
+        // Public testing needs no duplicate entitlement request to unlock its tools.
+        if (IsPublicTesting) ReconcileEntitlement(force: true);
+        else await RefreshSubscriptionAsync();
+        NotifyAccountConnectionChanged();
+    }
+    public Task<Uri> CheckoutAsync() => !ReadyForInput() ? Task.FromCanceled<Uri>(new CancellationToken(true)) : IsPublicTesting
+        ? Task.FromException<Uri>(new InvalidOperationException("All tools are free during public testing. Purchasing is paused."))
+        : _subscription?.CreateCheckoutAsync(_lifetimeToken) ?? Task.FromException<Uri>(new InvalidOperationException(_subscriptionUnavailable));
+    public Task<Uri> CustomerPortalAsync() => !ReadyForInput() ? Task.FromCanceled<Uri>(new CancellationToken(true))
+        : _subscription?.CreatePortalAsync(_lifetimeToken) ?? Task.FromException<Uri>(new InvalidOperationException(_subscriptionUnavailable));
+    public void SignOut()
+    {
+        if (!ReadyForInput()) return;
+        try { _subscription?.SignOut(); }
+        finally { ReconcileEntitlement(force: true); NotifyAccountConnectionChanged(); }
+    }
+    public async Task SignOutAsync()
+    {
+        if (!ReadyForInput()) return;
+        var signOut = _subscription?.SignOutAsync(_lifetimeToken);
+        ReconcileEntitlement(force: true); NotifyAccountConnectionChanged();
+        try { if (signOut is not null) await signOut; }
+        finally { ReconcileEntitlement(force: true); }
+    }
+    private void NotifyAccountConnectionChanged()
+    {
+        if (_disposed) return;
+        Invalidate(_weatherRequest);
+        TryOptionalService(() => InvalidateConnection("weather"));
+        TryOptionalService(() => Notify(nameof(CanRefreshWeather)));
+        TryOptionalService(() => Notify(nameof(WeatherConnectionGuidance)));
+    }
     public void AddNote(string title, string text)
     {
         if (!ReadyForWorkspaceInput() || !RequirePremium(ModuleId.Notes)) return;
@@ -990,6 +1074,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         _tick.Stop(); _stopwatchTick.Stop(); _saveDelay?.Cancel(); _volumeDelay?.Cancel();
         _lifetime.Cancel();
         InvalidateRequests();
+        if (_connectionCheckTask is { } connectionCheck)
+            try { await connectionCheck; } catch (Exception error) when (Recoverable(error)) { }
         // No new refresh can acquire the gate after _disposed is set under _shutdownGate.
         // Acquire it once more so the current reader releases it before services are disposed.
         await _refreshLock.WaitAsync();

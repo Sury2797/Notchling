@@ -33,6 +33,9 @@ public sealed partial class UtilityToolsView : UserControl
     private TextBlock? _saveStateText;
     private TextBlock? _updateStatusText;
     private TextBlock? _screenTimeText;
+    private TextBlock? _subscriptionStatusText;
+    private readonly Dictionary<string, (TextBlock State, TextBlock Detail)> _connectionRows = [];
+    private Button? _checkConnectionsButton;
     private readonly Dictionary<string, ToggleSwitch> _settingsToggles = [];
     private bool _updatingSettingsToggles;
     private readonly Dictionary<string, bool> _expandedSettings = [];
@@ -48,7 +51,7 @@ public sealed partial class UtilityToolsView : UserControl
     private void Changed(object? sender, PropertyChangedEventArgs args)
     {
         if (args.PropertyName == nameof(MainViewModel.SelectedModule)) { if (_renderedModule != _vm.SelectedModule) Render(); }
-        else if (args.PropertyName == nameof(MainViewModel.IsReady) || args.PropertyName == nameof(MainViewModel.IsPremium)) Render();
+        else if (args.PropertyName == nameof(MainViewModel.IsReady) || args.PropertyName == nameof(MainViewModel.CanUseExtendedTools)) Render();
         else if (args.PropertyName == nameof(MainViewModel.Preferences)) { if (_vm.SelectedModule == ModuleId.Settings) UpdateSettingsToggles(); else Render(); }
         else if (_vm.SelectedModule == ModuleId.System && args.PropertyName == nameof(MainViewModel.System)) UpdateSystemPanel();
         else if (_vm.SelectedModule == ModuleId.Servers && args.PropertyName == nameof(MainViewModel.ListeningPorts)) Render();
@@ -68,7 +71,8 @@ public sealed partial class UtilityToolsView : UserControl
                 peer?.RaiseAutomationEvent(Microsoft.UI.Xaml.Automation.Peers.AutomationEvents.LiveRegionChanged);
             }
         }
-        else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName == nameof(MainViewModel.SubscriptionStatus)) Render();
+        else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName == nameof(MainViewModel.SubscriptionStatus) && _subscriptionStatusText is not null) _subscriptionStatusText.Text = _vm.SubscriptionStatus;
+        else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName is nameof(MainViewModel.ConnectionStatuses) or nameof(MainViewModel.IsCheckingConnections)) UpdateConnectionStatus();
     }
     private TextBlock Text(string value, double size = 13, bool muted = false) => new()
     {
@@ -80,7 +84,9 @@ public sealed partial class UtilityToolsView : UserControl
         var button = new Button
         {
             Content = new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center },
-            Style = (Style)Application.Current.Resources[primary ? "NotchPrimaryButtonStyle" : "NotchButtonStyle"],
+            Style = (Style)Application.Current.Resources[_vm.SelectedModule == ModuleId.Settings
+                ? primary ? "NotchFormPrimaryButtonStyle" : "NotchFormButtonStyle"
+                : primary ? "NotchPrimaryButtonStyle" : "NotchButtonStyle"],
             MinWidth = 0,
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, title);
@@ -88,12 +94,74 @@ public sealed partial class UtilityToolsView : UserControl
         return button;
     }
     private Button Button(string title, Action action, bool primary = false) => Button(title, () => { action(); return Task.CompletedTask; }, primary);
+    private static Grid FormRow(FrameworkElement input, params Button[] actions)
+    {
+        // Keep action buttons at their natural size instead of distributing the
+        // entire row among star cells. Labels live outside this row so fields and
+        // actions share a baseline, including PasswordBox and NumberBox inputs.
+        var row = new Grid { ColumnSpacing = 10, RowSpacing = 8, HorizontalAlignment = HorizontalAlignment.Stretch };
+        input.MinWidth = 0; input.Width = double.NaN; input.HorizontalAlignment = HorizontalAlignment.Stretch;
+        var actionGroup = new Grid { ColumnSpacing = 8, RowSpacing = 8, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var action in actions)
+        {
+            action.MinWidth = 64; action.Width = double.NaN;
+            action.HorizontalAlignment = HorizontalAlignment.Stretch;
+            action.VerticalAlignment = VerticalAlignment.Center;
+            actionGroup.Children.Add(action);
+        }
+        row.Children.Add(input); row.Children.Add(actionGroup);
+        bool? stacked = null;
+        bool? actionsStacked = null;
+        void Arrange()
+        {
+            if (row.ActualWidth <= 0) return;
+            var scale = Math.Max(1, NativeTheme.TextScaleFactor);
+            var actionWidth = actions.Sum(action => Math.Clamp((action.Content as TextBlock)?.Text.Length * 6.5 * scale + 24 ?? 80, 68, 210 * scale)) + Math.Max(0, actions.Length - 1) * 8;
+            var next = row.ActualWidth < 180 * scale + actionWidth + 10;
+            if (stacked != next)
+            {
+                stacked = next; row.ColumnDefinitions.Clear(); row.RowDefinitions.Clear();
+                row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+                row.RowDefinitions.Add(new() { Height = GridLength.Auto });
+                if (next)
+                {
+                    row.RowDefinitions.Add(new() { Height = GridLength.Auto });
+                    Grid.SetColumn(actionGroup, 0); Grid.SetRow(actionGroup, 1);
+                }
+                else
+                {
+                    row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+                    Grid.SetColumn(actionGroup, 1); Grid.SetRow(actionGroup, 0);
+                }
+            }
+            var stackActions = row.ActualWidth < actionWidth;
+            if (actionsStacked == stackActions) return;
+            actionsStacked = stackActions;
+            actionGroup.ColumnDefinitions.Clear(); actionGroup.RowDefinitions.Clear();
+            for (var i = 0; i < actions.Length; i++)
+            {
+                if (stackActions) actionGroup.RowDefinitions.Add(new() { Height = GridLength.Auto });
+                else actionGroup.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+                Grid.SetColumn(actions[i], stackActions ? 0 : i); Grid.SetRow(actions[i], stackActions ? i : 0);
+            }
+        }
+        row.Loaded += (_, _) => Arrange(); row.SizeChanged += (_, _) => Arrange();
+        return row;
+    }
+    private StackPanel FormField(string label, FrameworkElement input, params Button[] actions)
+    {
+        var panel = new StackPanel { Spacing = 6 };
+        panel.Children.Add(Text(label, 12));
+        panel.Children.Add(FormRow(input, actions));
+        return panel;
+    }
     private static Grid Row(params UIElement[] elements)
     {
         // A horizontal StackPanel measures children with infinite width. That defeated
         // text wrapping and made Settings wider than the notch. Use finite star cells,
         // then stack complete controls when there is insufficient room for a row.
         var row = new Grid { ColumnSpacing = 10, RowSpacing = 10, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var actionsOnly = elements.All(element => element is Button);
         var preferred = elements.Select(element => element switch
         {
             FrameworkElement control when double.IsFinite(control.Width) => control.Width,
@@ -103,7 +171,7 @@ public sealed partial class UtilityToolsView : UserControl
         }).ToArray();
         foreach (var element in elements)
         {
-            if (element is FrameworkElement control) { control.Width = double.NaN; control.MinWidth = 0; control.HorizontalAlignment = HorizontalAlignment.Stretch; }
+            if (element is FrameworkElement control) { control.Width = double.NaN; control.MinWidth = 0; control.HorizontalAlignment = actionsOnly ? HorizontalAlignment.Left : HorizontalAlignment.Stretch; }
             row.Children.Add(element);
         }
         bool? stacked = null;
@@ -122,7 +190,7 @@ public sealed partial class UtilityToolsView : UserControl
             else
             {
                 row.RowDefinitions.Add(new() { Height = GridLength.Auto });
-                for (var i = 0; i < elements.Length; i++) { row.ColumnDefinitions.Add(new() { Width = new GridLength(preferred[i], GridUnitType.Star) }); Grid.SetColumn((FrameworkElement)elements[i], i); Grid.SetRow((FrameworkElement)elements[i], 0); }
+                for (var i = 0; i < elements.Length; i++) { row.ColumnDefinitions.Add(new() { Width = actionsOnly ? GridLength.Auto : new GridLength(preferred[i], GridUnitType.Star) }); Grid.SetColumn((FrameworkElement)elements[i], i); Grid.SetRow((FrameworkElement)elements[i], 0); }
             }
         }
         row.SizeChanged += (_, _) => Arrange();
@@ -146,11 +214,15 @@ public sealed partial class UtilityToolsView : UserControl
         Arrange(); grid.SizeChanged += (_, _) => Arrange(); grid.Loaded += (_, _) => Arrange();
         return grid;
     }
-    private Border Card(UIElement child) => new() { Style = (Style)Application.Current.Resources["NotchCardStyle"], Child = child, Padding = new Thickness(16) };
+    private Border Card(UIElement child) => new()
+    {
+        Style = (Style)Application.Current.Resources[_vm.SelectedModule == ModuleId.Settings ? "NotchFormCardStyle" : "NotchCardStyle"],
+        Child = child,
+    };
     private TextBox Input(string placeholder, string value = "", bool multiline = false) => new()
     {
         PlaceholderText = placeholder, Text = value, AcceptsReturn = multiline, TextWrapping = multiline ? TextWrapping.Wrap : TextWrapping.NoWrap,
-        Style = (Style)Application.Current.Resources["NotchTextBoxStyle"], MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Stretch,
+        Style = (Style)Application.Current.Resources[_vm.SelectedModule == ModuleId.Settings ? "NotchFormTextBoxStyle" : "NotchTextBoxStyle"], MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Stretch,
     };
     private TextBox DraftInput(string key, string placeholder, string value = "", bool multiline = false)
     {
@@ -172,6 +244,8 @@ public sealed partial class UtilityToolsView : UserControl
         ContentStack.Children.Clear();
         _settingsToggles.Clear();
         _updateStatusText = null;
+        _subscriptionStatusText = null;
+        _connectionRows.Clear(); _checkConnectionsButton = null;
         var definition = ModuleCatalog.Get(_vm.SelectedModule);
         Header(definition.Title, _vm.SelectedModule == ModuleId.Tools ? "Choose a tool. Availability and connection requirements are shown below." : definition.Description);
         switch (_vm.SelectedModule)
@@ -209,10 +283,10 @@ public sealed partial class UtilityToolsView : UserControl
     private void Tools()
     {
         var modules = ModuleCatalog.All.Where(item => item.Id is not ModuleId.Tools and not ModuleId.Settings).ToArray();
-        AddToolGroup("Included in Free", "Basic music controls, one Pomodoro and your scratchpad.", modules.Where(module => !Notch.Core.Commerce.FeaturePolicy.RequiresPremium(module.Id)));
-        AddToolGroup("Premium utilities", _vm.IsPremium ? "Your extended local tools are available." : "US$2/month. " + (_vm.BillingConfigured ? "Open Settings to purchase or restore access." : "Purchasing will open when subscriptions launch."), modules.Where(module => Notch.Core.Commerce.FeaturePolicy.RequiresPremium(module.Id) && !NeedsConnection(module.Id)));
-        AddToolGroup("Connected tools", "Premium access plus your own provider connection or imported file. No sample data is shown unless you enable the preview.", modules.Where(module => NeedsConnection(module.Id)));
-        ContentStack.Children.Add(Text("Your local data stays available for export in Settings, including after Premium expires.", 12, true));
+        AddToolGroup("Everyday tools", "Music controls, focus sessions and your scratchpad.", modules.Where(module => !Notch.Core.Commerce.FeaturePolicy.RequiresPremium(module.Id)));
+        AddToolGroup(_vm.IsPublicTesting ? "Local utilities" : "Premium utilities", _vm.IsPublicTesting ? "All tools are free during public testing. No subscription is needed." : _vm.CanUseExtendedTools ? "Your extended local tools are available." : "US$2/month. " + (_vm.BillingConfigured ? "Open Settings to purchase or restore access." : "Purchasing will open when subscriptions launch."), modules.Where(module => Notch.Core.Commerce.FeaturePolicy.RequiresPremium(module.Id) && !NeedsConnection(module.Id)));
+        AddToolGroup("Connected tools", _vm.IsPublicTesting ? "Access is unlocked. Connect your own provider or import a file to see real data." : "Premium access plus your own provider connection or imported file. No sample data is shown unless you enable the preview.", modules.Where(module => NeedsConnection(module.Id)));
+        ContentStack.Children.Add(Text("Export and recovery are always available in Settings. Samples appear only in the explicit preview.", 12, true));
     }
     private void AddToolGroup(string title, string description, IEnumerable<ModuleDefinition> modules)
     {
@@ -231,13 +305,14 @@ public sealed partial class UtilityToolsView : UserControl
             heading.Children.Add(icon);
             var name = Text(module.Title, 14); name.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             Grid.SetColumn(name, 1); heading.Children.Add(name); content.Children.Add(heading);
-            var badge = Text(!premium ? "Free" : available ? (_vm.IsDevelopmentBuild ? "Premium · development access" : "Premium") : "Premium · locked", 11, !available);
+            var badge = Text(_vm.IsPublicTesting ? "Public testing · unlocked" : !premium ? "Free" : available ? (_vm.IsDevelopmentBuild ? "Premium · development access" : "Premium") : "Premium · locked", 11, !available);
             badge.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold; content.Children.Add(badge);
             content.Children.Add(Text(ConnectionRequirement(module.Id), 11, true));
             var button = Button(module.Title, () => _vm.SelectModule(available ? module.Id : ModuleId.Settings));
             button.Style = (Style)Application.Current.Resources["NotchCardButtonStyle"];
             button.Content = content; button.MinHeight = 116; button.MinWidth = 0;
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, module.Title + ". " + badge.Text + ". " + ConnectionRequirement(module.Id) + (available ? "" : ". Opens plan settings."));
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(button, "Tool" + module.Id);
             ToolTipService.SetToolTip(button, available ? ConnectionRequirement(module.Id) : "Premium access required. View plan details in Settings.");
             return (UIElement)button;
         }).ToArray();
@@ -258,6 +333,8 @@ public sealed partial class UtilityToolsView : UserControl
         var initial = _noteDrafts.GetValueOrDefault(draftKey, (selected?.Title ?? "", selected?.Text ?? ""));
         var editor = new StackPanel { Spacing = 10 };
         _noteTitle = Input("Title", initial.Item1); _noteBody = Input("A thought worth keeping…", initial.Item2, true); _noteBody.Height = 144;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_noteTitle, "Note title");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_noteBody, "Note body");
         var titleInput = _noteTitle; var bodyInput = _noteBody;
         titleInput.TextChanged += (_, _) => _noteDrafts[draftKey] = (titleInput.Text, bodyInput.Text);
         bodyInput.TextChanged += (_, _) => _noteDrafts[draftKey] = (titleInput.Text, bodyInput.Text);
@@ -357,11 +434,8 @@ public sealed partial class UtilityToolsView : UserControl
     private void SystemPanel()
     {
         var system = _vm.System;
-        var cards = new Grid { ColumnSpacing = 10 };
-        for (var i = 0; i < 3; i++) cards.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
         var metrics = new[] { Metric("CPU", out _cpuText), Metric("Memory", out _memoryText), Metric("Battery", out _batteryText) };
-        for (var i = 0; i < metrics.Length; i++) { Grid.SetColumn(metrics[i], i); cards.Children.Add(metrics[i]); }
-        ContentStack.Children.Add(cards);
+        ContentStack.Children.Add(AdaptiveGrid(3, 132, metrics));
         _outputText = Text(system?.OutputDevice ?? "Audio output unavailable", 13, true); ContentStack.Children.Add(_outputText);
         var volume = _systemVolume = new Slider { Minimum = 0, Maximum = 1, StepFrequency = .01, Value = system?.Volume ?? 0, IsEnabled = system is not null && system.OutputDevice != "Audio output unavailable" };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(volume, "System volume");
@@ -463,7 +537,7 @@ public sealed partial class UtilityToolsView : UserControl
     }
     private Border SettingsSection(string title, string description, params UIElement[] controls)
     {
-        var panel = new StackPanel { Spacing = 14 };
+        var panel = new StackPanel { Spacing = 12 };
         var heading = Text(title, 15); heading.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
         panel.Children.Add(heading);
         if (!string.IsNullOrWhiteSpace(description)) panel.Children.Add(Text(description, 12, true));
@@ -475,12 +549,13 @@ public sealed partial class UtilityToolsView : UserControl
         var heading = new StackPanel { Spacing = 4 };
         var label = Text(title, 14); label.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold; heading.Children.Add(label);
         heading.Children.Add(Text(description, 12, true));
-        var panel = new StackPanel { Spacing = 14, Padding = new Thickness(0, 8, 0, 0) };
+        var panel = new StackPanel { Spacing = 12, Padding = new Thickness(0, 4, 0, 0) };
         foreach (var control in controls) panel.Children.Add(control);
         var expander = new Expander
         {
             Header = heading, Content = panel, IsExpanded = _expandedSettings.GetValueOrDefault(key),
             HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            CornerRadius = new CornerRadius(14),
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(expander, title);
         expander.Expanding += (_, _) => _expandedSettings[key] = true;
@@ -507,19 +582,26 @@ public sealed partial class UtilityToolsView : UserControl
         about.Children.Add(Text("Native desktop notch · " + typeof(App).Assembly.GetName().Version?.ToString(3), 12, true));
         Grid.SetColumn(about, 1); identity.Children.Add(about); ContentStack.Children.Add(Card(identity));
 
-        ContentStack.Children.Add(SettingsSection(_vm.IsDevelopmentBuild ? "Development access" : _vm.IsPremium ? "Your Premium plan" : "Your Free plan",
-            _vm.IsDevelopmentBuild ? "All tools are enabled for development. This build does not establish a paid subscription." : _vm.IsPremium ? "US$2/month · Your verified access unlocks the extended tool suite." : "Basic music playback, one Pomodoro and a local scratchpad. No account needed.",
-            Text(_vm.SubscriptionStatus, 12, true),
-            Text(_vm.BillingConfigured ? "Premium is US$2/month. Purchase, restore and cancellation are available below." : "Premium is planned at US$2/month. Purchasing is not available in this build yet.", 12, true)));
+        _subscriptionStatusText = Text(_vm.SubscriptionStatus, 12, true);
+        ContentStack.Children.Add(SettingsSection(_vm.IsPublicTesting ? "Public testing · All tools unlocked" : _vm.IsDevelopmentBuild ? "Development access" : _vm.IsPremium ? "Your Premium plan" : "Your Free plan",
+            _vm.IsPublicTesting ? "Try every local and connected tool for free. Provider setup and Windows permissions still apply." : _vm.IsDevelopmentBuild ? "All tools are enabled for development. This build does not establish a paid subscription." : _vm.IsPremium ? "US$2/month · Your verified access unlocks the extended tool suite." : "Basic music playback, one Pomodoro and a local scratchpad. No account needed.",
+            _subscriptionStatusText,
+            Text(_vm.IsPublicTesting ? "Purchasing is paused during public testing. Billing can be introduced in a later release." : _vm.BillingConfigured ? "Premium is US$2/month. Purchase, restore and cancellation are available below." : "Premium is planned at US$2/month. Purchasing is not available in this build yet.", 12, true)));
         if (_vm.BillingConfigured)
         {
-            var email = DraftInput("billing-email", "Email for purchase or restore");
+            var email = DraftInput("billing-email", _vm.IsPublicTesting ? "Email for online services" : "Email for purchase or restore");
             var code = DraftInput("billing-code", "One-time email code");
-            ContentStack.Children.Add(SettingsDetails("account", "Account and subscription", "Sign in, restore purchases or manage renewal.",
-                Row(email, Button("Send sign-in code", () => _vm.RequestLoginAsync(email.Text))),
-                Row(code, Button("Sign in / restore", async () => { await _vm.VerifyLoginAsync(email.Text, code.Text); _formDrafts.Remove("billing-code"); Render(); })),
-                Row(Button("Upgrade — US$2/month", async () => { var uri = await _vm.CheckoutAsync(); await global::Windows.System.Launcher.LaunchUriAsync(uri); }), Button("Manage / cancel", async () => { var uri = await _vm.CustomerPortalAsync(); await global::Windows.System.Launcher.LaunchUriAsync(uri); })),
-                Row(Button("Refresh access", _vm.RefreshSubscriptionAsync), Button("Sign out", async () => { await _vm.SignOutAsync(); Render(); }))));
+            var accountControls = new List<UIElement>
+            {
+                FormField("Account email", email, Button("Send sign-in code", () => _vm.RequestLoginAsync(email.Text))),
+                FormField("Email verification code", code, Button(_vm.IsPublicTesting ? "Sign in" : "Sign in / restore", async () => { await _vm.VerifyLoginAsync(email.Text, code.Text); _formDrafts.Remove("billing-code"); Render(); })),
+            };
+            if (_vm.PurchasingAvailable)
+                accountControls.Add(Row(Button("Upgrade — US$2/month", async () => { var uri = await _vm.CheckoutAsync(); await global::Windows.System.Launcher.LaunchUriAsync(uri); }), Button("Manage / cancel", async () => { var uri = await _vm.CustomerPortalAsync(); await global::Windows.System.Launcher.LaunchUriAsync(uri); })));
+            var signOut = Button("Sign out", async () => { await _vm.SignOutAsync(); Render(); });
+            accountControls.Add(_vm.IsPublicTesting ? signOut : Row(Button("Refresh access", _vm.RefreshSubscriptionAsync), signOut));
+            ContentStack.Children.Add(SettingsDetails("account", _vm.IsPublicTesting ? "Service account" : "Account and subscription",
+                _vm.IsPublicTesting ? "Optional sign-in for configured online services. Local tools do not require an account." : "Sign in, restore purchases or manage renewal.", accountControls.ToArray()));
         }
 
         ContentStack.Children.Add(SettingsSection("Appearance and behavior", "Set how the notch responds while you work.",
@@ -529,9 +611,9 @@ public sealed partial class UtilityToolsView : UserControl
             Toggle("Hide during fullscreen apps", "Give games and presentations the full display.", preferences.HideInFullscreen, value => _vm.Preferences with { HideInFullscreen = value })));
 
         var focus = SettingsNumber("focus-minutes", "Pomodoro length (minutes)", preferences.FocusMinutes, 1, 180);
-        var hydration = SettingsNumber("hydration-minutes", "Hydration interval (minutes) · Premium", preferences.HydrationMinutes, 5, 180);
-        hydration.IsEnabled = _vm.IsPremium;
-        ContentStack.Children.Add(SettingsSection("Focus", "Set your Pomodoro length. Hydration reminders are included in Premium.",
+        var hydration = SettingsNumber("hydration-minutes", _vm.IsPublicTesting ? "Hydration interval (minutes)" : "Hydration interval (minutes) · Premium", preferences.HydrationMinutes, 5, 180);
+        hydration.IsEnabled = _vm.CanUseExtendedTools;
+        ContentStack.Children.Add(SettingsSection("Focus", _vm.IsPublicTesting ? "Set your Pomodoro length and hydration reminder interval." : "Set your Pomodoro length. Hydration reminders are included in Premium.",
             AdaptiveGrid(2, 190, focus, hydration),
             Button("Save intervals", () => _vm.SetPreferencesAsync(_vm.Preferences with { FocusMinutes = double.IsFinite(focus.Value) ? (int)focus.Value : 25, HydrationMinutes = double.IsFinite(hydration.Value) ? (int)hydration.Value : preferences.HydrationMinutes }))));
 
@@ -542,25 +624,56 @@ public sealed partial class UtilityToolsView : UserControl
         if (!_vm.WorkspaceReadable)
             ContentStack.Children.Add(SettingsSection("Notebook needs recovery", "Preserve the unreadable file before starting a recovered notebook.", Button("Preserve file and start recovery", _vm.RecoverWorkspaceAsync, true)));
 
-        ContentStack.Children.Add(SettingsSection("Clipboard privacy", "Premium clipboard history is opt-in. Up to 50 plain-text items stay in memory and clear on exit.",
-            Toggle("Capture clipboard text · Premium", "Only enabled while Premium access is active.", preferences.CaptureClipboard && _vm.IsPremium, value => _vm.Preferences with { CaptureClipboard = value }, _vm.IsPremium),
+        ContentStack.Children.Add(SettingsSection("Clipboard privacy", "Clipboard history is opt-in. Up to 50 plain-text items stay in memory and clear on exit.",
+            Toggle(_vm.IsPublicTesting ? "Capture clipboard text" : "Capture clipboard text · Premium", "Capture plain text only. Turning this off clears the saved history.", preferences.CaptureClipboard && _vm.CanUseExtendedTools, value => _vm.Preferences with { CaptureClipboard = value }, _vm.CanUseExtendedTools),
             Button("Clear clipboard history", () => _vm.ClipboardService.Clear())));
 
         var monitor = SettingsNumber("monitor", "Display number (0 is primary)", preferences.ActiveMonitor, 0, 16);
         var horizontal = SettingsNumber("offset-x", "Horizontal adjustment", preferences.HorizontalOffset, -1000, 1000);
         var top = SettingsNumber("offset-y", "Distance from top", preferences.TopOffset, 0, 1000);
+        monitor.Header = null;
         ContentStack.Children.Add(SettingsDetails("position", "Display and position", "Choose a display or fine-tune the notch placement.",
-            Row(monitor, Button("Move to display", () => _vm.SetPreferencesAsync(_vm.Preferences with { ActiveMonitor = double.IsFinite(monitor.Value) ? (int)monitor.Value : 0, MonitorDeviceId = null }))),
+            FormField("Display number (0 is primary)", monitor, Button("Move to display", () => _vm.SetPreferencesAsync(_vm.Preferences with { ActiveMonitor = double.IsFinite(monitor.Value) ? (int)monitor.Value : 0, MonitorDeviceId = null }))),
             AdaptiveGrid(2, 180, horizontal, top),
             Text("Position adjustments use Windows logical pixels and adapt to display scaling.", 11, true),
-            Button("Apply position", () => _vm.SetPreferencesAsync(_vm.Preferences with { HorizontalOffset = horizontal.Value, TopOffset = top.Value }))));
+            Row(Button("Apply position", () => _vm.SetPreferencesAsync(_vm.Preferences with { HorizontalOffset = horizontal.Value, TopOffset = top.Value })),
+                Button("Reset placement", async () =>
+                {
+                    monitor.Value = 0; horizontal.Value = 0; top.Value = 0;
+                    await _vm.SetPreferencesAsync(_vm.Preferences with { ActiveMonitor = 0, MonitorDeviceId = null, HorizontalOffset = 0, TopOffset = 0 });
+                }))));
 
         var endpoint = DraftInput("analytics-endpoint", "HTTPS analytics endpoint", preferences.AnalyticsEndpoint ?? "");
-        ContentStack.Children.Add(SettingsDetails("connections", "Advanced connections · Premium", "Optional credentials for your own reporting providers.",
-            Text("Revenue reads your Stripe reporting account. Analytics requires a compatible JSON endpoint. These connections do not purchase or activate Notchling Premium.", 12, true),
-            Credential("Stripe read-only key", "stripe"), Credential("Analytics bearer token", "analytics"),
-            Row(endpoint, Button("Save endpoint", () => _vm.SetPreferencesAsync(_vm.Preferences with { AnalyticsEndpoint = endpoint.Text }))),
-            Text("Provider credentials are stored using Windows protection. Coding and calendar accept imported files in their tools. Weather requires a configured licensed service.", 12, true)));
+        ContentStack.Children.Add(SettingsDetails("connections", _vm.IsPublicTesting ? "Provider connections" : "Advanced connections · Premium", "Connect your own reporting providers. Keys stay hidden.",
+            Text("Revenue reads your Stripe reporting account with a restricted read-only key. Analytics requires a compatible JSON endpoint. These credentials connect data, not billing.", 12, true),
+            Credential("Stripe read-only key", "stripe"),
+            Text("Give the Stripe restricted key permission to read charges. A test-mode key reports test payments.", 11, true),
+            Credential("Analytics bearer token", "analytics"),
+            FormField("Analytics HTTPS endpoint", endpoint, Button("Save endpoint", () => _vm.SetPreferencesAsync(_vm.Preferences with { AnalyticsEndpoint = endpoint.Text }))),
+            Text("Provider credentials are stored using Windows protection. Coding and calendar accept imported files in their tools. Weather requires a configured licensed service.", 12, true),
+            Button("Provider setup guide", () => OpenLink("https://github.com/Sury2797/Notchling/blob/main/src/Notch.Core/Providers/README.md"))));
+
+        var connections = new StackPanel { Spacing = 12 };
+        foreach (var connection in _vm.ConnectionStatuses)
+        {
+            var status = Text("", 11); status.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(status, "ConnectionState" + connection.Id);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(status, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
+            var detail = Text("", 12, true);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(detail, "ConnectionDetail" + connection.Id);
+            var heading = new Grid { ColumnSpacing = 10 };
+            heading.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+            heading.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            var name = Text(connection.Name, 13); name.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold; heading.Children.Add(name);
+            Grid.SetColumn(status, 1); heading.Children.Add(status);
+            var entry = new StackPanel { Spacing = 5 }; entry.Children.Add(heading); entry.Children.Add(detail);
+            connections.Children.Add(entry); _connectionRows[connection.Id] = (status, detail);
+        }
+        _checkConnectionsButton = Button("Check connections", _vm.RefreshConnectionsAsync);
+        ContentStack.Children.Add(SettingsDetails("connection-status", "Connection status", "Check real media, local imports and configured providers.",
+            connections, _checkConnectionsButton,
+            Text("A configured key is not proof of a working connection. Checks use your saved setup; no sample data is used.", 11, true)));
+        UpdateConnectionStatus();
 
         ContentStack.Children.Add(SettingsDetails("preview", "Sample-data preview", "See labeled sample states without connecting an account.",
             Toggle("Preview sample data for this session", "Samples are labeled. This does not start music or control your real player.", preferences.DemoMode, value => _vm.Preferences with { DemoMode = value })));
@@ -595,21 +708,53 @@ public sealed partial class UtilityToolsView : UserControl
         {
             ("Keep expanded", preferences.Pinned), ("Switch tools on hover", preferences.HoverNavigation),
             ("Reduce motion", preferences.ReducedMotion), ("Hide during fullscreen apps", preferences.HideInFullscreen),
-            ("Capture clipboard text · Premium", preferences.CaptureClipboard && _vm.IsPremium),
+            (_vm.IsPublicTesting ? "Capture clipboard text" : "Capture clipboard text · Premium", preferences.CaptureClipboard && _vm.CanUseExtendedTools),
             ("Preview sample data for this session", preferences.DemoMode),
         };
         _updatingSettingsToggles = true;
         try { foreach (var (name, value) in values) if (_settingsToggles.TryGetValue(name, out var toggle)) toggle.IsOn = value; }
         finally { _updatingSettingsToggles = false; }
     }
-    private Grid Credential(string label, string provider)
+    private void UpdateConnectionStatus()
     {
-        var password = new PasswordBox { Header = Text(label, 12), MinWidth = 0, PasswordRevealMode = PasswordRevealMode.Hidden, Password = _credentialDrafts.GetValueOrDefault(provider, "") };
+        foreach (var connection in _vm.ConnectionStatuses)
+        {
+            if (!_connectionRows.TryGetValue(connection.Id, out var row)) continue;
+            var state = connection.State switch
+            {
+                ConnectionState.NotChecked => "Not checked",
+                ConnectionState.Checking => "Checking…",
+                ConnectionState.NeedsSetup => "Setup needed",
+                ConnectionState.Ready => "Ready",
+                ConnectionState.Connected => "Connected",
+                ConnectionState.Unavailable => "Unavailable",
+                ConnectionState.Failed => "Needs attention",
+                _ => "Not checked",
+            };
+            if (row.State.Text != state) row.State.Text = state;
+            var foreground = connection.State switch
+            {
+                ConnectionState.Ready or ConnectionState.Connected => NativeTheme.Brush("#68D391"),
+                ConnectionState.Failed => NativeTheme.Brush("#FFA6A6"),
+                _ => NativeTheme.Muted,
+            };
+            if (!ReferenceEquals(row.State.Foreground, foreground)) row.State.Foreground = foreground;
+            if (row.Detail.Text != connection.Detail) row.Detail.Text = connection.Detail;
+        }
+        if (_checkConnectionsButton is not null) _checkConnectionsButton.IsEnabled = !_vm.IsCheckingConnections;
+    }
+    private StackPanel Credential(string label, string provider)
+    {
+        var password = new PasswordBox { Style = (Style)Application.Current.Resources["NotchFormPasswordBoxStyle"], MinWidth = 0, PasswordRevealMode = PasswordRevealMode.Hidden, Password = _credentialDrafts.GetValueOrDefault(provider, ""), PlaceholderText = "Enter a new key to save or replace" };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(password, label);
         password.PasswordChanged += (_, _) => _credentialDrafts[provider] = password.Password;
-        return Row(password,
-            Button("Save", () => { _vm.SaveCredential(provider, password.Password); password.Password = ""; _credentialDrafts.Remove(provider); }),
-            Button("Remove", () => { _vm.DeleteCredential(provider); password.Password = ""; _credentialDrafts.Remove(provider); }));
+        var save = Button("Save", () => { _vm.SaveCredential(provider, password.Password); password.Password = ""; _credentialDrafts.Remove(provider); });
+        var remove = Button("Remove", () => { _vm.DeleteCredential(provider); password.Password = ""; _credentialDrafts.Remove(provider); });
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(save, "Save " + label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, "Remove " + label);
+        ToolTipService.SetToolTip(save, "Save or replace this provider credential in Windows Credential Locker.");
+        ToolTipService.SetToolTip(remove, "Delete the stored credential for this provider.");
+        return FormField(label, password, save, remove);
     }
     private static void OpenFile(string path)
     {

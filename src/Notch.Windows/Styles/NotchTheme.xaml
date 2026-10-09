@@ -121,6 +121,10 @@
         <Setter Property="Padding" Value="16" />
     </Style>
     <Style x:Key="CardStyle" TargetType="Border" BasedOn="{StaticResource NotchCardStyle}" />
+    <Style x:Key="NotchFormCardStyle" TargetType="Border" BasedOn="{StaticResource NotchCardStyle}">
+        <Setter Property="CornerRadius" Value="14" />
+        <Setter Property="Padding" Value="14" />
+    </Style>
     <Style x:Key="NotchButtonStyle" TargetType="Button">
         <Setter Property="Background" Value="{ThemeResource ButtonBackground}" />
         <Setter Property="Foreground" Value="{ThemeResource ButtonForeground}" />
@@ -136,6 +140,20 @@
     </Style>
     <Style x:Key="ButtonStyle" TargetType="Button" BasedOn="{StaticResource NotchButtonStyle}" />
     <Style x:Key="NotchPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource NotchButtonStyle}">
+        <Setter Property="Background" Value="{ThemeResource NotchPrimaryBackgroundBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource NotchPrimaryForegroundBrush}" />
+    </Style>
+    <!-- Forms use compact actions, separate from the rounded media transport. -->
+    <Style x:Key="NotchFormButtonStyle" TargetType="Button" BasedOn="{StaticResource NotchButtonStyle}">
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="12,7" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="MinWidth" Value="64" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style x:Key="NotchFormPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource NotchFormButtonStyle}">
         <Setter Property="Background" Value="{ThemeResource NotchPrimaryBackgroundBrush}" />
         <Setter Property="Foreground" Value="{ThemeResource NotchPrimaryForegroundBrush}" />
     </Style>
@@ -169,6 +187,20 @@
         <Setter Property="MinHeight" Value="40" />
     </Style>
     <Style x:Key="TextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource NotchTextBoxStyle}" />
+    <Style x:Key="NotchFormTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource NotchTextBoxStyle}">
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Padding" Value="10,7" />
+    </Style>
+    <Style x:Key="NotchFormPasswordBoxStyle" TargetType="PasswordBox">
+        <Setter Property="Background" Value="{ThemeResource TextControlBackground}" />
+        <Setter Property="Foreground" Value="{ThemeResource NotchTextBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource TextControlBorderBrush}" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Padding" Value="10,7" />
+    </Style>
     <Style x:Key="NotchTitleStyle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="Segoe UI" />
         <Setter Property="FontSize" Value="28" />

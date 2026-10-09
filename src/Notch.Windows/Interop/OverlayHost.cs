@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 using Notch.Core;
 using Notch.Windows.Services;
 
@@ -24,14 +25,15 @@ public sealed class OverlayHost : IDisposable
     private bool _displayChangePending;
     private readonly DispatcherTimer _displayRetry = new();
     private readonly DispatcherTimer _fullscreenCheck = new() { Interval = TimeSpan.FromSeconds(1) };
-    private readonly DispatcherTimer _resizeAnimation = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private Monitor? _placementMonitor;
     private bool _animationRunning;
     private long _animationStarted;
-    private double _animationStartWidth;
-    private double _animationStartHeight;
-    private double _animatedWidth;
-    private double _animatedHeight;
+    private bool _animateNextLayout;
+    private double _animationProgress;
+    private double? _placementScale;
+    private OverlayLayout? _animationStart;
+    private OverlayLayout? _targetLayout;
+    private OverlayLayout? _currentLayout;
     private Action? _geometryChanged;
     private int _retryCount;
     private bool _hidden;
@@ -73,13 +75,18 @@ public sealed class OverlayHost : IDisposable
     public bool IsShown => _shown;
     public bool IsVisible => _shown && !_hidden && !_fullscreenSuppressed;
     public bool IsFullscreenSuppressed => _fullscreenSuppressed;
-    // Include the transparent gap between the body and dock. Crossing this short gap
-    // is part of the same interaction, rather than a request to collapse the window.
-    public bool IsPointerInsideWindow => !_disposed && IsVisible
-        && NativeMethods.GetCursorPos(out var point)
-        && NativeMethods.GetWindowRect(_handle, out var bounds)
-        && point.X >= bounds.Left && point.X < bounds.Right
-        && point.Y >= bounds.Top && point.Y < bounds.Bottom;
+    public bool IsPointerInsideWindow
+    {
+        get
+        {
+            if (_disposed || !IsVisible || _currentLayout is not { } layout || _placementScale is not { } scale
+                || !NativeMethods.GetCursorPos(out var point)) return false;
+            return OverlayGeometry.ContainsInteractionPoint((point.X - (double)layout.X) / scale,
+                (point.Y - (double)layout.Y) / scale, layout.Width / scale,
+                layout.LogicalBodyHeight, _expanded && layout.ToolbarVisible,
+                _toolbarWidth, _expanded ? 26 : 20);
+        }
+    }
 
     public OverlayHost(Window window)
     {
@@ -113,7 +120,6 @@ public sealed class OverlayHost : IDisposable
         HotkeyRegistered = NativeMethods.RegisterHotKey(_handle, HotkeyId, 0x0002 | 0x0004 | 0x4000, 0x20);
         _displayRetry.Tick += OnDisplayRetry;
         _fullscreenCheck.Tick += (_, _) => UpdateVisibility();
-        _resizeAnimation.Tick += OnResizeAnimation;
     }
 
     /// <param name="width">Actual expanded window width in device-independent pixels, including its content margins.</param>
@@ -162,29 +168,25 @@ public sealed class OverlayHost : IDisposable
         _horizontalOffset = nextHorizontalOffset;
         _topOffset = nextTopOffset;
         _hasLayoutRequest = true;
-        _resizeAnimation.Stop();
-        if (monitorChanged) _placementMonitor = null;
-        _animationRunning = animate && IsVisible &&
-            (Math.Abs(LogicalWidth - width) > .5 || Math.Abs(LogicalPanelHeight - panelHeight) > .5);
-        if (_animationRunning)
-        {
-            _animationStartWidth = _animatedWidth = LogicalWidth;
-            _animationStartHeight = _animatedHeight = LogicalPanelHeight;
-            _animationStarted = Stopwatch.GetTimestamp();
-        }
+        StopResizeAnimation();
+        if (monitorChanged) { _placementMonitor = null; _placementScale = null; }
+        _targetLayout = null;
+        _animateNextLayout = animate && IsVisible && !monitorChanged;
         TryPlace();
+        // XAML takes its final layout once. Rendering frames only update the native
+        // boundary; no frame callback rebuilds controls or reassigns XAML row sizes.
         NotifyGeometryChanged();
-        if (_animationRunning) _resizeAnimation.Start();
+        if (_animationRunning) CompositionTarget.Rendering += OnResizeAnimation;
     }
 
-    private bool TryPlace()
+    private bool TryPlace(bool refreshVisibility = true)
     {
         try
         {
             PlaceCore();
             _displayRetry.Stop();
             _retryCount = 0;
-            UpdateVisibility();
+            if (refreshVisibility) UpdateVisibility();
             return true;
         }
         catch (Win32Exception exception)
@@ -217,14 +219,30 @@ public sealed class OverlayHost : IDisposable
                 : monitors[Math.Clamp(_monitorIndex, 0, monitors.Count - 1)];
         }
         var monitor = _placementMonitor;
-        var scale = NativeMethods.GetMonitorDpi(monitor.Handle, _handle) / 96.0;
+        var scale = _placementScale ??= NativeMethods.GetMonitorDpi(monitor.Handle, _handle) / 96.0;
         var workArea = monitor.WorkArea;
         if (workArea.Width <= 0 || workArea.Bottom <= workArea.Top)
             throw new Win32Exception("The selected monitor has no usable work area.");
-        var layout = OverlayGeometry.Calculate(_animationRunning ? _animatedWidth : _width,
-            _animationRunning ? _animatedHeight : _panelHeight, _expanded || _animationRunning,
-            _expanded && _showToolbar, workArea.Left, workArea.Top, workArea.Width,
-            workArea.Bottom - workArea.Top, scale, _horizontalOffset, _topOffset);
+        if (_targetLayout is null)
+        {
+            _targetLayout = OverlayGeometry.Calculate(_width, _panelHeight, _expanded,
+                _expanded && _showToolbar, workArea.Left, workArea.Top, workArea.Width,
+                workArea.Bottom - workArea.Top, scale, _horizontalOffset, _topOffset);
+            var target = _targetLayout;
+            LogicalWidth = target.LogicalWidth;
+            LogicalPanelHeight = target.LogicalBodyHeight;
+            ToolbarVisible = target.ToolbarVisible;
+            if (_animateNextLayout && _currentLayout is { } previous && previous != target)
+            {
+                _animationStart = previous;
+                _animationProgress = 0;
+                _animationStarted = Stopwatch.GetTimestamp();
+                _animationRunning = true;
+            }
+            _animateNextLayout = false;
+        }
+        var layout = _animationRunning && _animationStart is { } start
+            ? OverlayGeometry.Interpolate(start, _targetLayout, _animationProgress) : _targetLayout;
         var nativeLayout = (layout.X, layout.Y, layout.Width, layout.Height);
         if (_nativeLayout != nativeLayout)
         {
@@ -234,10 +252,9 @@ public sealed class OverlayHost : IDisposable
             _nativeLayout = nativeLayout;
         }
 
-        ApplyRegion(layout.LogicalWidth, layout.LogicalBodyHeight, _expanded, layout.ToolbarVisible, scale);
-        LogicalWidth = layout.LogicalWidth;
-        LogicalPanelHeight = layout.LogicalBodyHeight;
-        ToolbarVisible = layout.ToolbarVisible;
+        ApplyRegion(layout.Width / scale, layout.LogicalBodyHeight, _expanded,
+            layout.ToolbarVisible, scale, _targetLayout.LogicalBodyHeight, _targetLayout.LogicalWidth);
+        _currentLayout = layout;
         ActiveMonitorDeviceId = monitor.DeviceName;
         _monitorBounds = monitor.Bounds;
     }
@@ -245,19 +262,16 @@ public sealed class OverlayHost : IDisposable
     private void OnResizeAnimation(object? sender, object args)
     {
         if (_disposed || !_animationRunning) { StopResizeAnimation(); return; }
-        var progress = Math.Clamp(Stopwatch.GetElapsedTime(_animationStarted).TotalMilliseconds / 180, 0, 1);
-        // Cubic ease out keeps response immediate and decelerates without an overshoot.
-        var eased = 1 - Math.Pow(1 - progress, 3);
-        _animatedWidth = _animationStartWidth + (_width - _animationStartWidth) * eased;
-        _animatedHeight = _animationStartHeight + (_panelHeight - _animationStartHeight) * eased;
-        if (progress >= 1) StopResizeAnimation();
-        if (TryPlace()) NotifyGeometryChanged();
+        _animationProgress = Math.Clamp(Stopwatch.GetElapsedTime(_animationStarted).TotalMilliseconds / 180, 0, 1);
+        if (_animationProgress >= 1) StopResizeAnimation();
+        TryPlace(refreshVisibility: false);
     }
 
     private void StopResizeAnimation()
     {
-        _resizeAnimation.Stop();
+        if (_animationRunning) CompositionTarget.Rendering -= OnResizeAnimation;
         _animationRunning = false;
+        _animateNextLayout = false;
     }
 
     private void NotifyGeometryChanged()
@@ -279,6 +293,8 @@ public sealed class OverlayHost : IDisposable
             _fullscreenCheck.Stop();
             NativeMethods.ShowWindow(_handle, NativeMethods.SwHide);
             _nativeVisible = false;
+            if (_targetLayout is not null && _currentLayout != _targetLayout)
+                TryPlace(refreshVisibility: false);
         }
     }
 
@@ -290,7 +306,8 @@ public sealed class OverlayHost : IDisposable
         {
             _hidden = false;
             _fullscreenOverride = NativeMethods.GetForegroundWindow();
-            if (_retryCount >= 3) { _retryCount = 0; TryPlace(); }
+            if (_retryCount >= 3 || _targetLayout is not null && _currentLayout != _targetLayout)
+            { _retryCount = 0; TryPlace(); }
         }
         if (!_hidden) _fullscreenCheck.Start();
         UpdateVisibility();
@@ -305,8 +322,14 @@ public sealed class OverlayHost : IDisposable
         if (IsVisible == _nativeVisible) return;
         if (!IsVisible)
         {
+            // Hidden WinUI surfaces need not receive further Rendering callbacks.
+            // Release the static subscription and finish geometry while hidden so
+            // fullscreen suppression cannot retain a half-open transition forever.
+            StopResizeAnimation();
             NativeMethods.ShowWindow(_handle, NativeMethods.SwHide);
             _nativeVisible = false;
+            if (_targetLayout is not null && _currentLayout != _targetLayout)
+                TryPlace(refreshVisibility: false);
             return;
         }
         NativeMethods.ShowWindow(_handle, NativeMethods.SwShowNoActivate);
@@ -341,15 +364,18 @@ public sealed class OverlayHost : IDisposable
     private static int Pixels(double logicalPixels, double scale) =>
         checked((int)Math.Round(logicalPixels * scale, MidpointRounding.AwayFromZero));
 
-    private void ApplyRegion(double width, double bodyHeight, bool expanded, bool showToolbar, double scale)
+    private void ApplyRegion(double width, double bodyHeight, bool expanded, bool showToolbar, double scale,
+        double toolbarBodyHeight, double targetWidth)
     {
         var right = Pixels(width, scale);
         var bottom = Pixels(bodyHeight, scale);
         var radius = Pixels(Math.Min(expanded ? 26 : 20, bodyHeight / 2), scale);
-        var toolbarWidth = Math.Min(_toolbarWidth, width);
+        // Keep the dock region at the same final coordinates as its stable XAML
+        // layout; an animated body must not create empty capsules travelling below it.
+        var toolbarWidth = Math.Min(_toolbarWidth, targetWidth);
         var toolbarLeft = (width - toolbarWidth) / 2;
-        var toolbarTop = Pixels(bodyHeight + 10, scale);
-        var toolbarBottom = Pixels(bodyHeight + 58, scale);
+        var toolbarTop = Pixels(toolbarBodyHeight + 10, scale);
+        var toolbarBottom = Pixels(toolbarBodyHeight + 58, scale);
         var diameter = Pixels(48, scale);
         var geometry = new RegionGeometry(right, bottom, radius, expanded && showToolbar,
             Pixels(toolbarLeft, scale), Pixels(toolbarLeft + toolbarWidth - 112, scale),
@@ -472,6 +498,8 @@ public sealed class OverlayHost : IDisposable
                     return;
                 StopResizeAnimation();
                 _placementMonitor = null;
+                _placementScale = null;
+                _targetLayout = null;
                 _nativeLayout = null;
                 _nativeRegion = null;
                 _retryCount = 0;
@@ -484,6 +512,8 @@ public sealed class OverlayHost : IDisposable
     {
         _displayRetry.Stop();
         _placementMonitor = null;
+        _placementScale = null;
+        _targetLayout = null;
         if (!_disposed && TryPlace()) PublishDisplayChanged();
     }
 
@@ -531,7 +561,6 @@ public sealed class OverlayHost : IDisposable
         _fullscreenCheck.Stop();
         StopResizeAnimation();
         _displayRetry.Tick -= OnDisplayRetry;
-        _resizeAnimation.Tick -= OnResizeAnimation;
         if (HotkeyRegistered)
             NativeMethods.UnregisterHotKey(_handle, HotkeyId);
         NativeMethods.RemoveWindowSubclass(_handle, _callback, _subclassId);

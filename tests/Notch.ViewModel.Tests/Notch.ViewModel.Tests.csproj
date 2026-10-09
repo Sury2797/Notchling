@@ -6,6 +6,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Notch.Core/Notch.Core.csproj" />
     <Compile Include="../../src/Notch.Windows/ViewModels/MainViewModel.cs" Link="MainViewModel.cs" />
+    <Compile Include="../../src/Notch.Windows/ViewModels/MainViewModel.Connections.cs" Link="MainViewModel.Connections.cs" />
     <Compile Include="../../src/Notch.Windows/ViewModels/ObservableObject.cs" Link="ObservableObject.cs" />
     <Compile Include="../../src/Notch.Windows/Services/SubscriptionService.cs" Link="SubscriptionService.cs" />
     <Compile Include="../../src/Notch.Windows/Services/ProductConfiguration.cs" Link="ProductConfiguration.cs" />

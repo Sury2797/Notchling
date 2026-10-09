@@ -109,6 +109,57 @@ internal static class OverlayGeometryCases
             Check.Throws<ArgumentOutOfRangeException>(() => OverlayGeometry.Calculate(640, 540, true, true, 0, 0, 0, 720, 1));
             Check.Throws<ArgumentOutOfRangeException>(() => OverlayGeometry.Calculate(640, 540, true, true, 0, 0, 1280, -1, 1));
         });
+        suite.Add("Collapse animation moves toward its actual compact target instead of snapping from expanded dimensions", () =>
+        {
+            var expanded = OverlayGeometry.Calculate(640, 540, true, true, 0, 0, 1920, 1040, 1);
+            var collapsed = OverlayGeometry.Calculate(640, 540, false, true, 0, 0, 1920, 1040, 1);
+            var midpoint = OverlayGeometry.Interpolate(expanded, collapsed, .5);
+            Check.True(midpoint.Width < expanded.Width && midpoint.Width > collapsed.Width);
+            Check.True(midpoint.Height < expanded.Height && midpoint.Height > collapsed.Height);
+            var nearEnd = OverlayGeometry.Interpolate(expanded, collapsed, .99);
+            Check.Equal(collapsed.Width, nearEnd.Width); Check.Equal(collapsed.Height, nearEnd.Height);
+            Check.Equal(collapsed, OverlayGeometry.Interpolate(expanded, collapsed, 1));
+        });
+        suite.Add("Every native transition frame remains within a small high-DPI monitor work area", () =>
+        {
+            var first = OverlayGeometry.Calculate(760, 410, true, true, -900, -700, 900, 600, 1.5);
+            var second = OverlayGeometry.Calculate(900, 540, true, true, -900, -700, 900, 600, 1.5, 500, 20);
+            for (var frame = 0; frame <= 60; frame++)
+            {
+                var current = OverlayGeometry.Interpolate(first, second, frame / 60d);
+                Check.True(current.Width > 0 && current.Height > 0);
+                Check.True(current.X >= -900 && current.Y >= -700);
+                Check.True(current.X + current.Width <= 0 && current.Y + current.Height <= -100);
+            }
+        });
+        suite.Add("Interrupted transitions can restart from their visible native frame without returning to stale geometry", () =>
+        {
+            var compact = OverlayGeometry.Calculate(640, 540, false, true, 0, 0, 1920, 1040, 1);
+            var media = OverlayGeometry.Calculate(600, 336, true, true, 0, 0, 1920, 1040, 1);
+            var settings = OverlayGeometry.Calculate(640, 540, true, true, 0, 0, 1920, 1040, 1);
+            var visible = OverlayGeometry.Interpolate(compact, media, .4);
+            Check.Equal(visible, OverlayGeometry.Interpolate(visible, settings, 0));
+            Check.Equal(settings, OverlayGeometry.Interpolate(visible, settings, 1));
+            Check.Throws<ArgumentOutOfRangeException>(() => OverlayGeometry.Interpolate(visible, settings, double.NaN));
+        });
+        suite.Add("Body-to-dock corridor preserves hover while invisible bottom flanks and tail dismiss", () =>
+        {
+            Check.True(OverlayGeometry.ContainsInteractionPoint(300, 305, 600, 300, true, 496));
+            Check.True(OverlayGeometry.ContainsInteractionPoint(300, 334, 600, 300, true, 496));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(12, 334, 600, 300, true, 496));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(590, 305, 600, 300, true, 496));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(300, 364, 600, 300, true, 496));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(300, 305, 600, 300, false, 496));
+        });
+        suite.Add("Native interaction bounds exclude rounded panel corners and invalid pointer positions", () =>
+        {
+            Check.True(OverlayGeometry.ContainsInteractionPoint(1, 1, 600, 300, true, 496));
+            Check.True(OverlayGeometry.ContainsInteractionPoint(26, 299, 600, 300, true, 496));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(1, 299, 600, 300, true, 496));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(600, 12, 600, 300, true, 496));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(10, -1, 600, 300, true, 496));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(double.NaN, 1, 600, 300, true, 496));
+        });
     }
 
     private static void Inside(OverlayLayout layout, int left, int top, int width, int height, double scale)

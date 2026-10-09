@@ -4,9 +4,10 @@ public enum ModuleId { Home, Media, Revenue, Analytics, Coding, Calendar, Weathe
 public enum OverlayMode { Collapsed, Expanded, Activity }
 public enum ActivityKind { Sale, Meeting, Agent, Focus, Information }
 public enum RevenueProvider { Stripe, Polar, Dodo, AdSense }
+public enum MediaPlaybackState { Unknown, Playing, Paused, Stopped, Loading }
 public sealed record ModuleDefinition(ModuleId Id, string Title, string Glyph, double Width, double Height, string Description);
-public sealed record MediaSnapshot(string Title, string Artist, string? ArtworkPath, bool IsPlaying, TimeSpan Position, TimeSpan Duration, string Source, bool CanSeek, bool CanPlay = true, bool CanPause = true, bool CanPrevious = true, bool CanNext = true, DateTimeOffset? PositionUpdatedAt = null, double PlaybackRate = 1);
-public sealed record SystemSnapshot(double CpuPercent, double MemoryPercent, int? BatteryPercent, double Volume, string OutputDevice, TimeSpan SessionScreenTime);
+public sealed record MediaSnapshot(string Title, string Artist, string? ArtworkPath, bool IsPlaying, TimeSpan Position, TimeSpan Duration, string Source, bool CanSeek, bool CanPlay = true, bool CanPause = true, bool CanPrevious = true, bool CanNext = true, DateTimeOffset? PositionUpdatedAt = null, double PlaybackRate = 1, string? AlbumTitle = null, string? SourceDisplayName = null, string? SourceIconPath = null, MediaPlaybackState PlaybackState = MediaPlaybackState.Unknown);
+public sealed record SystemSnapshot(double CpuPercent, double MemoryPercent, int? BatteryPercent, double Volume, string OutputDevice, TimeSpan SessionScreenTime, bool AudioAvailable = true);
 public sealed record ClipboardItem(Guid Id, string Text, DateTimeOffset CapturedAt);
 public sealed record SavedNote(Guid Id, string Title, string Text, DateTimeOffset UpdatedAt);
 public sealed record ReminderItem(Guid Id, string Title, DateTimeOffset DueAt, bool Completed);

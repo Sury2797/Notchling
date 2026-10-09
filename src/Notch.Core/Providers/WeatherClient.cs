@@ -16,6 +16,16 @@ public sealed class WeatherClient(HttpClient client, WeatherServiceConfiguration
 
     public async Task<WeatherSnapshot> ReadAsync(string city, CancellationToken cancellationToken = default)
     {
+        using var operation = new ProviderOperation(client, cancellationToken);
+        try { return await ReadForecastAsync(city, operation.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("The forecast did not finish responding in time. Check the connection and try again.");
+        }
+    }
+
+    private async Task<WeatherSnapshot> ReadForecastAsync(string city, CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(city) || city.Trim().Length > 80)
             throw new ArgumentException("Enter a city name up to 80 characters.", nameof(city));
         if (!service.IsDevelopment && service.ProxyEndpoint is null)
@@ -26,7 +36,8 @@ public sealed class WeatherClient(HttpClient client, WeatherServiceConfiguration
         {
             token = accessTokenProvider?.Invoke();
             if (string.IsNullOrWhiteSpace(token)) throw new InvalidOperationException("Sign in to Premium before refreshing weather.");
-            if (token.Contains('\r') || token.Contains('\n')) throw new InvalidOperationException("The weather session credential is invalid. Sign in again.");
+            try { token = ProviderCredential.Normalize(token); }
+            catch (ArgumentException) { throw new InvalidOperationException("The weather session credential is invalid. Sign in again."); }
         }
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try

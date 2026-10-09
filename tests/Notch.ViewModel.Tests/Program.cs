@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Notch.Core;
+using Notch.Core.Commerce;
 using Notch.Windows.Services;
 using Notch.Windows.ViewModels;
 
@@ -23,9 +24,9 @@ async Task Case(string name, Func<Task> run)
     catch (Exception error) { failures.Add(name + ": " + error); Console.WriteLine("FAIL " + name + ": " + error.Message); }
 }
 static void Assert(bool result, string message) { if (!result) throw new InvalidOperationException(message); }
+static DispatcherTimer Tick() => DispatcherTimer.Instances.Single(timer => timer.Interval == TimeSpan.FromSeconds(1));
 #if DEBUG
 static bool Loaded(MainViewModel vm) => (bool)typeof(MainViewModel).GetField("_loaded", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(vm)!;
-static DispatcherTimer Tick() => DispatcherTimer.Instances.Single(timer => timer.Interval == TimeSpan.FromSeconds(1));
 MainViewModel ViewModel() => new(new DispatcherQueue(), dataDirectory: data);
 void SelectWithoutAutomaticRefresh(MainViewModel vm, ModuleId module)
 {
@@ -45,6 +46,204 @@ Task BeginRefreshOnContext(MainViewModel vm, SynchronizationContext context)
 #else
 MainViewModel ViewModel() => new(new DispatcherQueue(), dataDirectory: data);
 #endif
+
+await ConnectionStatusCases.RegisterAsync(Case, data);
+
+await Case("Public testing grants every tool without inventing a paid entitlement", async () =>
+{
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    Assert(vm.IsPublicTesting && vm.CanUseExtendedTools && !vm.IsPremium && !vm.PurchasingAvailable,
+        "Public testing was unavailable or falsely reported a verified purchase.");
+    Assert(vm.PlanStatus.Contains("all tools free") && vm.SubscriptionStatus.Contains("No subscription required"),
+        "Public testing did not explain its free access.");
+    foreach (var module in Enum.GetValues<ModuleId>())
+    {
+        Assert(vm.CanAccessModule(module), $"Public testing locked {module}.");
+        vm.SelectModule(module);
+        Assert(vm.SelectedModule == module, $"Public testing redirected {module} to a paywall.");
+    }
+    vm.Overlay.Collapse();
+    vm.AddNote("Available without purchase", "Keep this real note");
+    vm.AddReminder("Available reminder", DateTimeOffset.Now.AddHours(1));
+    vm.AddLink("Available link", "https://example.com/");
+    var shelfPath = Path.Combine(data, "shelf.txt");
+    await File.WriteAllTextAsync(shelfPath, "real local item");
+    vm.AddShelf(shelfPath);
+    WindowsMediaService.Latest.Publish(new("Real player", "Real artist", null, false, TimeSpan.Zero, TimeSpan.FromMinutes(4), "Player", true));
+    var transportCommands = WindowsMediaService.Latest.PlaybackCommands;
+    await vm.SeekMediaAsync(.5);
+    await vm.SetVolumeAsync(.8);
+    vm.SetAwake(true); vm.StartCountdown(5); vm.ToggleStopwatch(); vm.LapStopwatch(); vm.DrankWater();
+    await vm.SetPreferencesAsync(vm.Preferences with { CaptureClipboard = true });
+    Assert(vm.Notes.Count == 1 && vm.Reminders.Count == 1 && vm.Shelf.Count == 1 && vm.Links.Count == 1,
+        "Direct local editing commands remained locked during public testing.");
+    Assert(vm.Awake && vm.StopwatchRunning && vm.StopwatchLaps.Count == 1 && vm.CountdownTime is "05:00" or "04:59",
+        "Awake or extended timers remained locked during public testing.");
+    Assert(WindowsMediaService.Latest.PlaybackCommands == transportCommands + 1
+        && WindowsSystemService.Latest.VolumeRequests.SequenceEqual([.8])
+        && vm.ClipboardService.Enabled && vm.HydrationTime != "Nudges paused" && !vm.IsPremium,
+        "Seek, audio, clipboard or hydration required a fabricated subscription.");
+    var checkoutBlocked = false;
+    try { await vm.CheckoutAsync(); }
+    catch (InvalidOperationException error) { checkoutBlocked = error.Message.Contains("Purchasing is paused"); }
+    Assert(checkoutBlocked, "Public testing offered an unnecessary paid checkout.");
+    vm.SetAwake(false);
+});
+await Case("Public testing survives verified subscription expiry and sign-out without stopping tools", async () =>
+{
+    using var handler = new PausedBillingHandler();
+    using var http = new HttpClient(handler);
+    using var key = global::System.Security.Cryptography.RSA.Create(2048);
+    var vault = new WindowsSecretVault();
+    var device = Guid.NewGuid().ToString("D");
+    var now = DateTimeOffset.UtcNow;
+    vault.Save("notch-billing-device", device);
+    vault.Save("notch-billing-session", "Fixture session");
+    var claims = new EntitlementClaims(EntitlementTokens.Issuer, EntitlementTokens.Audience, "fixture-account", device,
+        PlanTier.Premium, now.AddMinutes(-1), now.AddHours(1), now.AddHours(2), now.AddHours(3));
+    vault.Save("notch-billing-proof", EntitlementTokens.Sign(claims, key));
+    var subscription = new SubscriptionService(http, vault, new Uri("https://billing.example.invalid/"), key.ExportSubjectPublicKeyInfoPem());
+    await using var vm = ViewModel();
+    typeof(MainViewModel).GetField("_subscription", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(vm, subscription);
+    await vm.InitializeAsync();
+    Assert(vm.IsPremium, "The fixture's genuine signed proof was not recognized.");
+    vm.SelectModule(ModuleId.Notes); vm.AddNote("Retained", "Do not relock this notebook");
+    vm.SetAwake(true); vm.StartCountdown(5); vm.ToggleStopwatch();
+    await vm.SetPreferencesAsync(vm.Preferences with { CaptureClipboard = true });
+    var expired = claims with { IssuedAt = now.AddHours(-3), RefreshAfter = now.AddHours(-2), ExpiresAt = now.AddHours(-1), PaidThrough = now.AddHours(-1) };
+    typeof(SubscriptionService).GetField("_verified", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(subscription,
+        EntitlementTokens.ReadVerified(EntitlementTokens.Sign(expired, key), key.ExportSubjectPublicKeyInfoPem()));
+    Tick().Fire();
+    Assert(!vm.IsPremium && vm.CanUseExtendedTools && vm.SelectedModule == ModuleId.Notes && vm.Awake
+        && vm.StopwatchRunning && vm.ClipboardService.Enabled && vm.HydrationTime != "Nudges paused",
+        "Expiry of a real subscription stopped publicly available tools.");
+    vm.SignOut();
+    for (var tick = 0; tick < 300; tick++) Tick().Fire();
+    await vm.RefreshSubscriptionAsync();
+    Assert(!handler.Started.Task.IsCompleted && vm.CanUseExtendedTools && !vm.IsPremium
+        && vm.Awake && vm.StopwatchRunning && vm.ClipboardService.Enabled && vm.Notes.Count == 1,
+        "Sign-out, periodic ticks or restore contacted billing or relocked public testing.");
+    vm.AddNote("Still available", "No account required");
+    Assert(vm.Notes.Count == 2, "A public tool could not edit after a subscription expired.");
+    vm.SetAwake(false);
+});
+await Case("Release phase policy can restore freemium without fabricating a paid entitlement", () =>
+{
+    var free = EntitlementDecision.Free();
+    Assert(Enum.GetValues<ModuleId>().All(module => ProductAccessPolicy.CanUse(module, false)),
+        "The current release policy did not make every desktop tool available.");
+    Assert(!ProductAccessPolicy.CanUseExtendedTools(false, phase: ProductAccessPhase.Freemium)
+        && !ProductAccessPolicy.CanUse(ModuleId.Notes, false, phase: ProductAccessPhase.Freemium)
+        && ProductAccessPolicy.CanUse(ModuleId.Media, false, phase: ProductAccessPhase.Freemium)
+        && ProductAccessPolicy.CanUseExtendedTools(true, phase: ProductAccessPhase.Freemium)
+        && ProductAccessPolicy.CanUseExtendedTools(false, true, ProductAccessPhase.Freemium),
+        "Changing the central phase would not restore the original paid-tool policy.");
+    Assert(!FeaturePolicy.CanUse(ModuleId.Weather, free) && !free.IsPremium,
+        "Public desktop availability altered the legacy paid-entitlement decision.");
+    return Task.CompletedTask;
+});
+await Case("Public testing restores real calendar and coding connections without a paid proof", async () =>
+{
+    var calendarPath = Path.Combine(data, "testing-calendar.ics");
+    var codingPath = Path.Combine(data, "testing-coding.jsonl");
+    var start = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 15, 12, 0, 0, DateTimeKind.Utc);
+    await File.WriteAllTextAsync(calendarPath, $"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:testing-calendar\r\nDTSTART:{start:yyyyMMddTHHmmss}Z\r\nDTEND:{start.AddHours(1):yyyyMMddTHHmmss}Z\r\nSUMMARY:Actual imported meeting\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+    await File.WriteAllTextAsync(codingPath, JsonSerializer.Serialize(new
+    {
+        type = "assistant", sessionId = "real-import", timestamp = start,
+        message = new { id = "real-message", usage = new { input_tokens = 123, output_tokens = 45 } }
+    }) + "\n");
+    await File.WriteAllTextAsync(Path.Combine(data, "preferences.json"), JsonSerializer.Serialize(new AppPreferences
+        { CalendarPath = calendarPath, CodingPath = codingPath, CaptureClipboard = true }));
+    await using var vm = ViewModel();
+    await vm.InitializeAsync();
+    Assert(vm.IsReady && !vm.IsDemo && !vm.IsPremium && vm.Error == "" && vm.ClipboardService.Enabled,
+        "A configured public-testing connection was blocked or confused with a paid purchase.");
+    Assert(vm.CalendarEvents.Single().Title == "Actual imported meeting"
+        && vm.Coding is { InputTokens: 123, OutputTokens: 45 },
+        "The production Release did not restore real imported connections during public testing.");
+});
+await Case("Public testing preserves optional provider-account login and explicit restore without purchasing", async () =>
+{
+    using var key = global::System.Security.Cryptography.RSA.Create(2048);
+    using var handler = new PublicTestingAccountHandler(key);
+    using var http = new HttpClient(handler);
+    var subscription = new SubscriptionService(http, new WindowsSecretVault(), new Uri("https://billing.example.invalid/"), key.ExportSubjectPublicKeyInfoPem());
+    await using var vm = ViewModel();
+    typeof(MainViewModel).GetField("_subscription", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(vm, subscription);
+    await vm.InitializeAsync();
+    for (var tick = 0; tick < 300; tick++) Tick().Fire();
+    Assert(handler.LoginRequests == 0 && handler.VerifyRequests == 0 && handler.RestoreRequests == 0,
+        "Public testing contacted an optional account service during startup or idle ticks.");
+    await vm.RequestLoginAsync("tester@example.invalid");
+    await vm.VerifyLoginAsync("tester@example.invalid", "12345678");
+    Assert(handler.LoginRequests == 1 && handler.VerifyRequests == 1 && handler.RestoreRequests == 0
+        && subscription.SessionToken == "testing-session" && !vm.IsPremium && vm.CanUseExtendedTools && !vm.PurchasingAvailable,
+        "Optional account verification was blocked, refreshed redundantly, or confused with a paid purchase.");
+    await vm.RefreshSubscriptionAsync();
+    Assert(handler.RestoreRequests == 1 && !vm.IsPremium && vm.CanUseExtendedTools,
+        "An explicit account restore did not work or relocked public desktop tools.");
+});
+await Case("Provider-account commands respect loading and disposed boundaries without losing a saved login", async () =>
+{
+    using var key = global::System.Security.Cryptography.RSA.Create(2048);
+    using var handler = new PublicTestingAccountHandler(key);
+    using var http = new HttpClient(handler);
+    var vault = new WindowsSecretVault();
+    var subscription = new SubscriptionService(http, vault, new Uri("https://billing.example.invalid/"), key.ExportSubjectPublicKeyInfoPem());
+    var vm = ViewModel();
+    typeof(MainViewModel).GetField("_subscription", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(vm, subscription);
+    async Task RejectedLinks()
+    {
+        var rejected = 0;
+        foreach (var request in new Func<Task<Uri>>[] { vm.CheckoutAsync, vm.CustomerPortalAsync })
+            try { await request(); } catch (OperationCanceledException) { rejected++; }
+        Assert(rejected == 2, "A link request ignored an unavailable application boundary.");
+    }
+    await vm.RequestLoginAsync("tester@example.invalid");
+    await vm.VerifyLoginAsync("tester@example.invalid", "12345678");
+    vm.SignOut(); await vm.SignOutAsync(); await RejectedLinks();
+    Assert(handler.LoginRequests == 0 && handler.VerifyRequests == 0 && handler.RestoreRequests == 0,
+        "An account command reached a provider before application initialization.");
+    await vm.InitializeAsync();
+    await vm.RequestLoginAsync("tester@example.invalid");
+    await vm.VerifyLoginAsync("tester@example.invalid", "12345678");
+    var savedProof = vault.Read("notch-billing-proof");
+    Assert(savedProof is not null && subscription.SessionToken == "testing-session", "The fixture did not persist a real signed login proof.");
+    await vm.DisposeAsync();
+    var notifications = 0;
+    vm.PropertyChanged += (_, _) => notifications++;
+    await vm.RequestLoginAsync("tester@example.invalid");
+    await vm.VerifyLoginAsync("tester@example.invalid", "12345678");
+    vm.SignOut(); await vm.SignOutAsync(); await RejectedLinks(); await vm.RefreshSubscriptionAsync();
+    Assert(handler.LoginRequests == 1 && handler.VerifyRequests == 1 && handler.RestoreRequests == 0
+        && notifications == 0 && vault.Read("notch-billing-proof") == savedProof && subscription.SessionToken == "testing-session",
+        "A disposed command contacted a provider, published state or deleted the user's valid saved login.");
+});
+await Case("Shutdown cancels an in-flight provider account verification before saving a late proof", async () =>
+{
+    using var key = global::System.Security.Cryptography.RSA.Create(2048);
+    using var handler = new PublicTestingAccountHandler(key) { PauseVerify = true };
+    using var http = new HttpClient(handler);
+    var vault = new WindowsSecretVault();
+    var subscription = new SubscriptionService(http, vault, new Uri("https://billing.example.invalid/"), key.ExportSubjectPublicKeyInfoPem());
+    var vm = ViewModel();
+    typeof(MainViewModel).GetField("_subscription", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(vm, subscription);
+    await vm.InitializeAsync();
+    var verifying = vm.VerifyLoginAsync("tester@example.invalid", "12345678");
+    await handler.VerifyStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    var notificationsAfterExit = 0;
+    vm.PropertyChanged += (_, args) => { if (!vm.IsReady && args.PropertyName != nameof(vm.IsReady)) notificationsAfterExit++; };
+    await vm.DisposeAsync();
+    var cancelled = false;
+    try { await verifying.WaitAsync(TimeSpan.FromSeconds(5)); }
+    catch (OperationCanceledException) { cancelled = true; }
+    finally { handler.VerifyRelease.TrySetResult(); }
+    Assert(cancelled && handler.VerifyCancelled && subscription.SessionToken is null
+        && vault.Read("notch-billing-proof") is null && notificationsAfterExit == 0,
+        "Shutdown left account verification alive, saved a late proof or published state to released views.");
+});
 
 await Case("Unsigned evaluation update check gives manual guidance without saving existing data", async () =>
 {
@@ -99,9 +298,9 @@ await Case("Update checks respect loading and disposed command boundaries", asyn
 });
 
 #if !DEBUG
-await Case("Release starts Free and refuses extended tools and direct commands", async () =>
+await Case("Freemium Release starts Free and refuses extended tools and direct commands", async () =>
 {
-    await using var vm = ViewModel();
+    await using var vm = new MainViewModel(new DispatcherQueue(), dataDirectory: data) { AccessPhase = ProductAccessPhase.Freemium };
     await vm.InitializeAsync();
     Assert(!vm.IsDevelopmentBuild && !vm.IsPremium, "Unconfigured Release granted development or Premium access.");
     vm.SelectModule(ModuleId.Notes);
@@ -122,11 +321,11 @@ await Case("Release starts Free and refuses extended tools and direct commands",
     await vm.SetPreferencesAsync(vm.Preferences with { DemoMode = true });
     Assert(!vm.IsPremium, "Demo mode granted paid access.");
 });
-await Case("Release Free startup skips previously configured paid integrations", async () =>
+await Case("Freemium Release startup skips previously configured paid integrations", async () =>
 {
     await File.WriteAllTextAsync(Path.Combine(data, "preferences.json"), JsonSerializer.Serialize(new AppPreferences
         { CalendarPath = Path.Combine(data, "previous.ics"), CodingPath = Path.Combine(data, "previous.jsonl"), DemoMode = true }));
-    await using var vm = ViewModel();
+    await using var vm = new MainViewModel(new DispatcherQueue(), dataDirectory: data) { AccessPhase = ProductAccessPhase.Freemium };
     await vm.InitializeAsync();
     Assert(vm.IsReady && !vm.IsDemo && !vm.IsPremium && vm.Error == "", "Saved paid connections or preview made Free startup appear broken.");
     Assert(vm.CalendarEvents.Count == 0 && vm.Coding is null && !vm.Status.Contains("Premium"), "Startup attempted unavailable paid connections.");
@@ -954,12 +1153,13 @@ await Case("Optional service shutdown errors still release every remaining resou
     var saved = JsonSerializer.Deserialize<MainViewModel.LocalData>(await File.ReadAllTextAsync(Path.Combine(data, "workspace.json")));
     Assert(saved?.Scratchpad == "Saved before optional cleanup failures", "Cleanup handling lost accepted edits.");
 });
-await Case("Transient clipboard enrollment cannot escape the UI dispatcher timer", async () =>
+await Case("Transient clipboard enrollment cannot escape a retry followed by the UI dispatcher timer", async () =>
 {
     await using var vm = ViewModel();
     await vm.InitializeAsync();
     await vm.SetPreferencesAsync(vm.Preferences with { CaptureClipboard = true });
     vm.ClipboardService.EnableFailure = new IOException("Clipboard service temporarily unavailable");
+    await vm.RetryNativeServicesAsync();
     Tick().Fire();
     Assert(vm.IsReady && Tick().IsEnabled && vm.Error.Contains("temporarily unavailable"), "Clipboard enrollment failure terminated the periodic UI path.");
     vm.ToggleFocus();
@@ -992,7 +1192,7 @@ await Case("Slow entitlement refresh does not delay local readiness and is cance
     var vault = new WindowsSecretVault();
     vault.Save("notch-billing-session", "Fixture session");
     var subscription = new SubscriptionService(http, vault, new Uri("https://billing.example.invalid/"), signingKey.ExportSubjectPublicKeyInfoPem());
-    var vm = ViewModel();
+    var vm = new MainViewModel(new DispatcherQueue(), dataDirectory: data) { AccessPhase = ProductAccessPhase.Freemium };
     // Supply an already configured optional integration without making a real network request.
     typeof(MainViewModel).GetField("_subscription", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(vm, subscription);
     var initializing = vm.InitializeAsync();
@@ -1027,6 +1227,7 @@ await Case("Entitlement notification failures do not escape the periodic UI path
         if (args.PropertyName is nameof(vm.IsPremium) or nameof(vm.Error)) throw new IOException("Native plan view temporarily unavailable");
         if (args.PropertyName is nameof(vm.PlanStatus) or nameof(vm.SubscriptionStatus)) remainingPlanNotifications++;
     };
+    vm.SignOut();
     Tick().Fire();
     Assert(vm.IsReady && Tick().IsEnabled && vm.Error.Contains("plan view temporarily unavailable") && remainingPlanNotifications == 2,
         "An entitlement or error view callback escaped the dispatcher or stopped remaining plan state publication.");

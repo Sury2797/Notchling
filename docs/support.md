@@ -4,6 +4,8 @@
 
 **Premium price:** US$2/month, billed monthly once the configured service launches. Both Windows 10 22H2 x64 and supported Windows 11 x64 releases are equal qualification targets. Linux desktop support is not part of the current subscription promise.
 
+The v0.3.0 candidate is a free public-testing phase with all catalog tools open to everyone and checkout paused. The planned Premium price does not apply to testing access. Optional providers still require their own setup; testing does not supply an undeployed weather service or unsupported adapters. Publication and consumer-hardware qualification remain separate gates.
+
 ## Customer actions after billing launches
 
 | Action | Required channel / behavior |

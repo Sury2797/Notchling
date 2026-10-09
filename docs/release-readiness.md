@@ -57,9 +57,10 @@ Record the revision, build URL, OS build, GPU, monitor configuration and observe
 
 ## Subscription and commercial release
 
-Release enforces basic Free access and Premium at US$2 per month through signed subscription proofs. Checkout is disabled unless the owner configures the secure service; native and live sandbox evidence are required. See [pricing](pricing.md) for the planned feature boundaries and subscription lifecycle.
+The current v0.3.0 candidate opens all supported tools free to everyone for public testing in Release and Debug; checkout is paused. Qualification must exercise that full catalog and verify honest disconnected/unsupported states. Actual Premium proofs remain strict, and a future commercial phase may restore the basic Free/US$2 monthly Premium split after an owner decision, secure service configuration and native/live sandbox evidence. The following subscription checks apply before that commercial activation; see [pricing](pricing.md).
 
-- [ ] Free exposes the compact notch, basic play/pause/previous/next, one Pomodoro and one Scratchpad; Premium exposes the full supported catalog.
+- [ ] Public-testing Release exposes every supported catalog tool without an owner-only or paid gate; no fake paid entitlement is created and checkout remains paused.
+- [ ] Before commercial activation, Free exposes basic play/pause/previous/next, one Pomodoro and one Scratchpad; verified Premium exposes the supported extended catalog.
 - [ ] Privacy controls, keyboard access, reduced motion and local data-integrity protections remain available in both editions.
 - [ ] Checkout clearly displays the monthly price, recurring billing, applicable taxes and cancellation terms before payment.
 - [ ] Purchase and renewal state are verified by a secure service; billing secrets do not travel in the desktop binary.

@@ -105,12 +105,13 @@ namespace Windows.Media.Control
         public Exception? PlaybackFailure { get; set; }
         public Exception? TimelineFailure { get; set; }
         public Exception? EventFailure { get; set; }
+        public Func<Task<GlobalSystemMediaTransportControlsSessionMediaProperties>>? PropertiesReader { get; set; }
         public string SourceAppUserModelId { get; set; } = "Test.player";
         public int PlayCalls { get; private set; }
         public int PauseCalls { get; private set; }
         public long? SeekTicks { get; private set; }
         public bool AcceptControl { get; set; } = true;
-        public Task<GlobalSystemMediaTransportControlsSessionMediaProperties> TryGetMediaPropertiesAsync() => Task.FromResult(Properties);
+        public Task<GlobalSystemMediaTransportControlsSessionMediaProperties> TryGetMediaPropertiesAsync() => PropertiesReader?.Invoke() ?? Task.FromResult(Properties);
         public GlobalSystemMediaTransportControlsSessionPlaybackInfo GetPlaybackInfo() => PlaybackFailure is null ? Playback : throw PlaybackFailure;
         public GlobalSystemMediaTransportControlsSessionTimelineProperties GetTimelineProperties() => TimelineFailure is null ? Timeline : throw TimelineFailure;
         public Task<bool> TryPauseAsync() { PauseCalls++; return Task.FromResult(AcceptControl); }
@@ -134,6 +135,8 @@ namespace Windows.Media.Control
             remove { if (EventFailure is not null) throw EventFailure; _timelineChanged -= value; }
         }
         public void NotifyPlayback() => _playbackChanged?.Invoke(this, new());
+        public void NotifyProperties() => _propertiesChanged?.Invoke(this, new());
+        public void NotifyTimeline() => _timelineChanged?.Invoke(this, new());
     }
     public sealed class GlobalSystemMediaTransportControlsSessionManager
     {
@@ -175,6 +178,35 @@ namespace Windows.Storage.Streams
     public sealed class FailingArtwork(Exception error) : IRandomAccessStreamReference
     {
         public Task<RandomAccessStream> OpenReadAsync() => Task.FromException<RandomAccessStream>(error);
+    }
+    public sealed class Artwork(Func<Task<RandomAccessStream>> read) : IRandomAccessStreamReference
+    {
+        public Task<RandomAccessStream> OpenReadAsync() => read();
+    }
+    public sealed class StalledArtworkStream : MemoryStream
+    {
+        public StalledArtworkStream() : base(new byte[] { 1 }) { }
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            new(new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously).Task);
+    }
+}
+namespace Windows.Foundation
+{
+    public readonly record struct Size(double Width, double Height);
+}
+namespace Windows.ApplicationModel
+{
+    public sealed class AppInfo
+    {
+        public static Func<string, AppInfo?> Resolver { get; set; } = _ => null;
+        public AppDisplayInfo DisplayInfo { get; } = new();
+        public static AppInfo? GetFromAppUserModelId(string id) => Resolver(id);
+    }
+    public sealed class AppDisplayInfo
+    {
+        public string DisplayName { get; set; } = "";
+        public Windows.Storage.Streams.IRandomAccessStreamReference? Logo { get; set; }
+        public Windows.Storage.Streams.IRandomAccessStreamReference? GetLogo(Windows.Foundation.Size size) => Logo;
     }
 }
 namespace Windows.Storage

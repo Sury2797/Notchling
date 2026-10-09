@@ -77,7 +77,7 @@ app.MapPost("/v1/stripe/webhook", async (HttpContext context, BillingEngine engi
     return Results.Ok();
 });
 app.MapGet("/v1/weather", async (string city, HttpContext context, BillingEngine engine, WeatherProxy proxy, CancellationToken token) =>
-    await engine.RequirePremiumAsync(Session(context), token) ? Results.Ok(await proxy.ReadAsync(city, token)) : Results.StatusCode(403))
+    await engine.RequireWeatherAccessAsync(Session(context), token) ? Results.Ok(await proxy.ReadAsync(city, token)) : Results.StatusCode(403))
     .RequireRateLimiting("api");
 app.Run();
 

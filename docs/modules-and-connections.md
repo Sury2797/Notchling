@@ -2,40 +2,42 @@
 
 Notchling has three presentation states: a collapsed strip, an expanded selected tool and a temporary live activity. The separate dock changes tools. Pinning keeps a panel open; dismissing an activity restores the previous panel. Activities are deduplicated and use a bounded queue.
 
-The catalog below describes the implemented development build and the planned commercial split. **Release enforces Free/Premium access; billing is available only after secure publisher-service configuration. Debug builds visibly enable development tools.** Native behavior and external connections still require the [release checks](release-readiness.md).
+The v0.3.0 candidate enables the complete catalog for **public testing in Release and Debug, free for everyone**. No owner-only unlock or paid account is required for local tools, and checkout is paused. Provider setup and native capabilities remain real requirements. The last verified v0.2.11 download predates this phase until a qualified replacement is published. Native behavior and external connections still require the [release checks](release-readiness.md).
 
 ## Tool catalog
 
-| Tool | Data and behavior | Planned edition and implementation limits |
+| Tool | Data and behavior | Public-testing access and implementation limits |
 | --- | --- | --- |
-| Home | Summary of connected tools and local state | Available navigation summary in both plans; extended dashboard data requires Premium. Empty states precede optional labeled demo data |
-| Media | Windows media sessions, playback, artwork, timeline and volume | Basic play/pause/previous/next in Free; full panel in Premium. The player must expose a system media session; seeking and transport availability depend on that session |
-| Revenue | Read-only Stripe captured successful charges after refunds; daily totals and recent payments | Premium. Requires a restricted Stripe credential. Totals are payment revenue, not subscription MRR; mixed currencies are not summed. Polar, Dodo and AdSense are unsupported |
-| Analytics | Configured HTTPS endpoint using a normalized JSON response | Premium. Requires a bearer credential and the adapter schema below; no built-in website tracking or provider OAuth |
-| Coding | Import local Claude or Codex session JSONL usage records | Premium. User-selected file only. Repeated Claude messages and cumulative Codex counters avoid double-counting; no inferred subscription quotas |
-| Calendar | Imported iCalendar events, recognized meeting links and local reminders | Premium. Single events, DAILY/WEEKLY rules, exclusions and OS time zones. Unsupported recurrence fails explicitly; no Google/Outlook OAuth or background account sync |
-| Weather | City geocoding, current conditions, hourly and daily forecasts | Premium. Explicit city, no GPS lookup; short-lived cache. Release requires the authenticated licensed weather proxy and attribution; there is no silent public-endpoint fallback |
-| Focus | Pomodoro, countdown, stopwatch/laps and hydration timers | One Pomodoro in Free; expanded controls in Premium. Deadlines account for missed UI ticks; restart and sleep/resume behavior need Windows QA |
-| Shelf | Saved file references | Premium. Files remain in their original locations; moved/deleted-file recovery needs validation |
-| Clipboard | Text history | Premium. Off by default; memory-only plain text, capped at 50 items and 100,000 characters per item; disabling clears captured history |
-| Servers | Listening local TCP ports | Premium. Read-only system information; does not stop servers or execute commands |
-| System | CPU, memory, battery and volume | Premium. Battery can be unavailable; endpoint changes and missing audio devices need Windows QA |
-| Screen time | Active desktop time since the app launched | Premium. Excludes idle periods over 60 seconds and caps long sampling gaps; not a historical per-application usage database |
-| Notes | Local notes | Premium. Atomic UTF-8 JSON storage; no cloud sync |
-| Scratchpad | Single local scratch text | Free and Premium. No cloud sync |
-| Files | Saved local file shortcuts | Premium. Existing paths; no remote file service |
-| Links | Saved web links | Premium. Opens URLs through the OS; no remote link index |
-| Emoji | Native emoji picker and copy action | Premium. Windows input/clipboard behavior needs interactive QA |
-| Sounds | Local ambient sound controls | Premium. Locally generated sound; no streaming service |
-| Convert | Length, mass, temperature and decimal/binary data conversion | Premium. Rejects mixed categories, nonfinite input, overflow and temperatures below absolute zero |
-| Awake | Prevent idle sleep while explicitly active | Premium. Does not defeat explicit user sleep; cleanup and resume behavior need Windows QA |
-| Settings | Preferences, privacy, connections and demo mode | Privacy, reduced motion and basic preferences in both editions. Secrets use the OS vault; configured service login, signed plan state and billing portal; unavailable setup stays explicit |
+| Home | Summary of connected tools and local state | Unlocked. Empty states precede optional, explicitly labeled sample data |
+| Media | Windows media sessions, playback, artwork, timeline and volume | Full panel unlocked. Metadata comes from the selected player; seeking and transport depend on its exposed capabilities, and volume requires a usable Windows audio endpoint |
+| Revenue | Read-only Stripe captured successful charges after refunds; daily totals and recent payments | Unlocked; requires a restricted Stripe credential. Totals are payment revenue, not subscription MRR; mixed currencies are not summed. Polar, Dodo and AdSense are unsupported |
+| Analytics | Configured HTTPS endpoint using a normalized JSON response | Unlocked; requires a bearer credential and the adapter schema below. No built-in website tracking or provider OAuth |
+| Coding | Import local Claude or Codex session JSONL usage records | Unlocked; user-selected file only. Repeated Claude messages and cumulative Codex counters avoid double-counting; no inferred subscription quotas |
+| Calendar | Imported iCalendar events, recognized meeting links and local reminders | Unlocked. Single events, DAILY/WEEKLY rules, exclusions and OS time zones. Unsupported recurrence fails explicitly; no Google/Outlook OAuth or background account sync |
+| Weather | City geocoding, current conditions, hourly and daily forecasts | Tool unlocked; real data still requires the authenticated licensed weather proxy, which is not configured yet. Explicit city, no GPS lookup; attribution required and no silent public-endpoint fallback |
+| Focus | Pomodoro, countdown, stopwatch/laps and hydration timers | All controls unlocked. Deadlines account for missed UI ticks; restart and sleep/resume behavior need Windows QA |
+| Shelf | Saved file references | Unlocked. Files remain in their original locations; moved/deleted-file recovery needs validation |
+| Clipboard | Text history | Unlocked; off by default. Memory-only plain text, capped at 50 items and 100,000 characters per item; disabling clears captured history |
+| Servers | Listening local TCP ports | Unlocked. Read-only system information; does not stop servers or execute commands |
+| System | CPU, memory, battery and volume | Unlocked. Battery can be unavailable; endpoint changes and missing audio devices need Windows QA |
+| Screen time | Active desktop time since the app launched | Unlocked. Excludes idle periods over 60 seconds and caps long sampling gaps; not a historical per-application usage database |
+| Notes | Local notes | Unlocked. Atomic UTF-8 JSON storage; no cloud sync |
+| Scratchpad | Single local scratch text | Unlocked. No cloud sync |
+| Files | Saved local file shortcuts | Unlocked. Existing paths; no remote file service |
+| Links | Saved web links | Unlocked. Opens URLs through the OS; no remote link index |
+| Emoji | Native emoji picker and copy action | Unlocked. Windows input/clipboard behavior needs interactive QA |
+| Sounds | Local ambient sound controls | Unlocked. Locally generated sound; no streaming service; optional Windows media components must be available |
+| Convert | Length, mass, temperature and decimal/binary data conversion | Unlocked. Rejects mixed categories, nonfinite input, overflow and temperatures below absolute zero |
+| Awake | Prevent idle sleep while explicitly active | Unlocked. Does not defeat explicit user sleep; cleanup and resume behavior need Windows QA |
+| Settings | Preferences, privacy, connections and sample preview | Available to all testers. Secrets use the OS vault; optional service login remains available when configured; purchase controls stay paused |
 
-The catalog contains Home plus 20 tool panels. Settings handles configuration; All tools is a navigation index. The Free surface is intentionally limited to the compact notch, basic transport, one Pomodoro and one Scratchpad. See [pricing](pricing.md) for subscription policy.
+The catalog contains Home plus 20 tool panels. Settings handles configuration; All tools is a navigation index. The later commercial model is a light Free edition and US$2/month Premium. Its feature restrictions are inactive during public testing; see [pricing](pricing.md).
 
 ## Connection behavior
 
 Connections are optional. A missing account produces an unconfigured state, and a failed request produces an error rather than an unlabeled demo result. Imports operate on files the user chooses. Provider credentials belong in Windows Credential Locker, separately from local workspace JSON.
+
+Use **Settings → Provider connections** to save/remove the Stripe reporting key or analytics bearer token and endpoint. Compact action rows align fields and buttons; drafts survive navigation and status updates. **Settings → Connection status → Check connections** inspects the real media/audio services, clipboard opt-in, configured providers and selected imports. Missing setup is not contacted. A successful provider read is distinct from merely saving a key; checks report each source independently without exposing secrets. Exit sample-data preview before checking real connections.
 
 Disconnecting a service must remove its saved credential and invalidate in-flight results. Never include credential values in setup scripts, examples, test output or screenshots. The Revenue adapter's Stripe credential is separate from the Notchling subscription service.
 
@@ -71,4 +73,4 @@ Core tests use fixtures and do not contact these services. Optional live connect
 | SDK bootstrap | `builds.dotnet.microsoft.com` and the official artifact origin in release metadata |
 | Native dependency restore | NuGet endpoints, including `api.nuget.org` |
 
-Production weather uses the configured owner-operated HTTPS service and licensed external endpoints. Subscription requests use that same explicitly configured service; hosted payment/management links are accepted only at Stripe checkout/billing HTTPS hosts. See [billing setup](billing.md).
+Weather uses the configured owner-operated HTTPS service and licensed external endpoints; an authenticated service session remains required even while product access is free. That backend is currently absent. Optional service login uses the same explicitly configured origin; purchasing is paused during testing. Future hosted payment/management links are accepted only at Stripe checkout/billing HTTPS hosts. See [billing setup](billing.md).

@@ -1,4 +1,5 @@
 using Notch.Core;
+using Notch.Core.Providers;
 using Windows.Security.Credentials;
 
 namespace Notch.Windows.Services;
@@ -14,7 +15,7 @@ public sealed class WindowsSecretVault : ISecretVault
     public void Save(string name, string value)
     {
         ValidateName(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        value = ProviderCredential.Normalize(value);
         lock (_gate)
         {
             // Preserve the existing credential if Windows rejects the replacement.

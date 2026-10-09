@@ -24,6 +24,8 @@ Connected tools send requests only for their configured function. Weather sends 
 
 If the owner configures commercial billing, the application contacts that HTTPS service for checkout, portal access and signed entitlement validation. The billing provider processes payment information in its hosted checkout; the desktop application never embeds Stripe secret keys or webhook-signing secrets. Exact server logs, storage locations, processors and retention must be disclosed before that service launches.
 
+Public testing unlocks the catalog without a subscription and pauses checkout. It does not enable hidden provider requests or upload workspace material. Optional sign-in to a configured service can still be required for the licensed weather proxy; current configuration has no deployed backend. **Check connections** explicitly inspects supported services using the credentials/imports you configured, reports each source independently and does not display credential values.
+
 Update checking is explicit. The signed-update helper contacts GitHub for a public release manifest and installer. It verifies the hash, trusted Authenticode signature and publisher key before opening Setup. GitHub's own network privacy policy applies. There is no mandatory unattended update daemon.
 
 ## Your controls

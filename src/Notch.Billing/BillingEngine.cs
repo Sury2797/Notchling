@@ -7,7 +7,8 @@ using Notch.Core.Commerce;
 
 namespace Notch.Billing;
 
-public sealed class BillingEngine(BillingOptions options, BillingStore store, IStripeBilling stripe, ILoginEmailSender email)
+public sealed class BillingEngine(BillingOptions options, BillingStore store, IStripeBilling stripe, ILoginEmailSender email,
+    ProductAccessPhase accessPhase = ProductAccessPolicy.CurrentPhase)
 {
     public async Task RequestLoginAsync(LoginRequest input, CancellationToken token)
     {
@@ -62,6 +63,8 @@ public sealed class BillingEngine(BillingOptions options, BillingStore store, IS
     public Task<string> CheckoutAsync(string session, CancellationToken token) => store.TransactionAsync(async state =>
     {
         var (account, _) = Authorize(state, session);
+        if (accessPhase == ProductAccessPhase.PublicTesting)
+            throw new BillingValidationException("All tools are free during public testing. Purchasing is paused.");
         if (account.CustomerId is null)
         {
             var id = await stripe.CreateCustomerAsync(account, token);
@@ -82,6 +85,15 @@ public sealed class BillingEngine(BillingOptions options, BillingStore store, IS
     public Task<bool> RequirePremiumAsync(string session, CancellationToken token) => store.TransactionAsync(async state =>
     {
         var (account, _) = Authorize(state, session); account = await RefreshAccountAsync(state, account, token);
+        return account.PaidThrough > DateTimeOffset.UtcNow;
+    }, token);
+    public Task<bool> RequireWeatherAccessAsync(string session, CancellationToken token) => store.TransactionAsync(async state =>
+    {
+        // Testing removes the product paywall, not authentication, device/session
+        // expiry, rate limits or the configured provider's commercial license.
+        var (account, _) = Authorize(state, session);
+        if (accessPhase == ProductAccessPhase.PublicTesting) return true;
+        account = await RefreshAccountAsync(state, account, token);
         return account.PaidThrough > DateTimeOffset.UtcNow;
     }, token);
     public async Task ProcessWebhookAsync(byte[] body, string signature, CancellationToken token)

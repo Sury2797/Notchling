@@ -35,7 +35,7 @@ jobs:
         run: dotnet run --project tests/Notch.Commerce.Tests/Notch.Commerce.Tests.csproj --configuration Release
       - name: Execute simulated view-model lifecycle regressions
         run: dotnet run --project tests/Notch.ViewModel.Tests/Notch.ViewModel.Tests.csproj --configuration Debug
-      - name: Verify Release defaults to Free and gates direct commands
+      - name: Verify public-testing Release and future Freemium enforcement
         run: dotnet run --project tests/Notch.ViewModel.Tests/Notch.ViewModel.Tests.csproj --configuration Release
       - name: Execute linked native service scenarios with platform doubles
         run: dotnet run --project tests/Notch.Native.Tests/Notch.Native.Tests.csproj --configuration Release
@@ -205,6 +205,7 @@ jobs:
             artifacts/installer-smoke.log
             artifacts/setup-prerequisites.log
             artifacts/prerequisite-tests/
+            artifacts/screenshots/
           if-no-files-found: warn
           retention-days: 14
 
@@ -242,7 +243,9 @@ jobs:
           cat > evaluation-notes.md <<EOF
           Download **$NOTCH_SETUP_NAME** below and run Setup. No developer SDK or manual dependency setup is required.
 
-          This unsigned Windows x64 evaluation passed native installation, launch, Free media empty-state controls, Pomodoro start/pause/reset, scratchpad persistence, and uninstall in [cloud CI](https://github.com/$GH_REPO/actions/runs/$NOTCH_EVALUATION_RUN). Source: $NOTCH_EVALUATION_REVISION.
+          **All 21 tools are free for everyone during public testing.** Checkout is paused. Provider credentials and optional service setup are still needed for external data; public access does not create a paid subscription.
+
+          This unsigned Windows x64 evaluation passed native installation, launch, all-tool navigation, hover/typing collapse recovery, eight connection states, compact credential alignment, media empty-state controls, notes/Awake, Pomodoro, scratchpad persistence, and uninstall in [cloud CI](https://github.com/$GH_REPO/actions/runs/$NOTCH_EVALUATION_RUN). Source: $NOTCH_EVALUATION_REVISION.
 
           Setup installs missing shared .NET and Windows App Runtime components automatically. This app installer is **$NOTCH_SETUP_MEGABYTES MB**. Missing components require additional one-time downloads; [runtime estimates and cloud measurements](https://github.com/$GH_REPO/blob/$NOTCH_EVALUATION_REVISION/docs/release-delivery.md) explain the first-install cost. Existing compatible components are reused.
 
