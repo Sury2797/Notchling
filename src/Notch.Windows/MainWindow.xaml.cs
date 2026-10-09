@@ -42,6 +42,7 @@ public sealed partial class MainWindow : Window
     private bool _explicitOpening;
     private string? _compactArtworkPath;
     private long _compactArtworkRequest;
+    private int _hoverDiagnosticCount;
     public MainWindow()
     {
         InitializeComponent();
@@ -87,11 +88,21 @@ public sealed partial class MainWindow : Window
         _openDelay.Tick += (_, _) =>
         {
             _openDelay.Stop();
+            TraceHover("OpenDelayTick");
             if (_vm.Overlay.Mode == OverlayMode.Collapsed && _host.IsPointerInsideWindow && !_quitting)
                 Open(hover: true);
         };
         _hoverMonitor.Tick += (_, _) => CheckHoverDismissal();
         RootGrid.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnKeyboardInteraction), true);
+        // Native buttons may class-handle pointer events before an ordinary XAML
+        // handler on their ancestor receives them. Observe handled events too and
+        // bind the compact target directly; hovering must not depend on bubbling.
+        RootGrid.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(OnPointerEntered), true);
+        RootGrid.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler(OnPointerExited), true);
+        RootGrid.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(OnPointerMoved), true);
+        CompactButton.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(OnPointerEntered), true);
+        CompactButton.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler(OnPointerExited), true);
+        CompactButton.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(OnPointerMoved), true);
         _switchDelay.Tick += (_, _) =>
         {
             _switchDelay.Stop();
@@ -384,14 +395,34 @@ public sealed partial class MainWindow : Window
     }
     private void OnPointerEntered(object sender, PointerRoutedEventArgs args)
     {
-        if (_host.IsPointerInsideWindow)
-            _hoverInteraction.ShouldCollapse(true, _vm.Preferences.Pinned, false, false);
-        if (_vm.Overlay.Mode == OverlayMode.Collapsed) { _openDelay.Stop(); _openDelay.Start(); }
+        var inside = _host.IsPointerInsideWindow;
+        if (inside) _hoverInteraction.ShouldCollapse(true, _vm.Preferences.Pinned, false, false);
+        if (_vm.Overlay.Mode == OverlayMode.Collapsed && inside && !_openDelay.IsEnabled) _openDelay.Start();
+        TraceHover("PointerEntered");
+    }
+    private void OnPointerMoved(object sender, PointerRoutedEventArgs args)
+    {
+        if (_vm.Overlay.Mode != OverlayMode.Collapsed || _openDelay.IsEnabled
+            || !_host.IsPointerInsideWindow) return;
+        // Movement also covers re-entering a native region after a resize when
+        // WinUI retains its previous pointer-over target and emits no new enter.
+        _openDelay.Start();
+        TraceHover("PointerMoved");
     }
     private void OnPointerExited(object sender, PointerRoutedEventArgs args)
     {
         if (!_host.IsPointerInsideWindow) _openDelay.Stop();
+        TraceHover("PointerExited");
         CheckHoverDismissal();
+    }
+    private void TraceHover(string stage)
+    {
+        if (_quitting || _hoverDiagnosticCount >= 24
+            || _vm.Overlay.Mode != OverlayMode.Collapsed && stage != "OpenDelayTick") return;
+        _hoverDiagnosticCount++;
+        StartupDiagnostics.Write("MainWindow.Hover." + stage, null,
+            $"Mode: {_vm.Overlay.Mode}; pointer inside: {_host.IsPointerInsideWindow}; visible: {_host.IsVisible}; " +
+            $"logical target: {_host.LogicalWidth:0.##}x{_host.LogicalPanelHeight:0.##}; pending open: {_openDelay.IsEnabled}");
     }
     private void OnKeyDown(object sender, KeyRoutedEventArgs args)
     {

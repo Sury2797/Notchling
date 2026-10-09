@@ -1,6 +1,6 @@
 # Product and platform roadmap
 
-Notchling is a Windows-first native desktop notch inspired by Dynamic Island, built around expandable controls, live activities, quick access, and local utility. The current v0.3.0 candidate opens **all tools free to everyone for public testing**. A lightweight Free edition and **Premium at US$2 per month** remain the later commercial plan. Linux desktop support follows the Windows release.
+Notchling is a Windows-first native desktop notch inspired by Dynamic Island, built around expandable controls, live activities, quick access, and local utility. The current v0.3.2 candidate opens **all tools free to everyone for public testing**. A lightweight Free edition and **Premium at US$2 per month** remain the later commercial plan. Linux desktop support follows the Windows release.
 
 Release and Debug both enable the complete public-testing catalog; checkout is paused. Actual paid subscriptions still require signed verification, separate from testing access. The repository does not activate a production payment service. The previous verified v0.2.11 download retains its older access policy until the new candidate passes qualification. See [pricing and subscription policy](pricing.md).
 
