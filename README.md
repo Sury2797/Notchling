@@ -9,15 +9,15 @@
 <p align="center">A native Windows notch for media, focus, notes, and everyday controls. Linux support is planned.</p>
 
 <p align="center">
-  <a href="https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.2.11/Notchling-0.2.11-windows-x64-evaluation-setup.exe"><img src="docs/assets/badges/windows11-download.svg" alt="Download Notchling Setup EXE for Windows 11 x64" /></a>
-  <a href="https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.2.11/Notchling-0.2.11-windows-x64-evaluation-setup.exe"><img src="docs/assets/badges/windows10-download.svg" alt="Download Notchling Setup EXE for Windows 10 22H2 x64" /></a>
+  <a href="https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.3.4/Notchling-0.3.4-windows-x64-evaluation-setup.exe"><img src="docs/assets/badges/windows11-download.svg" alt="Download Notchling Setup EXE for Windows 11 x64" /></a>
+  <a href="https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.3.4/Notchling-0.3.4-windows-x64-evaluation-setup.exe"><img src="docs/assets/badges/windows10-download.svg" alt="Download Notchling Setup EXE for Windows 10 22H2 x64" /></a>
   <a href="#platform-targets"><img src="docs/assets/badges/linux-planned.svg" alt="Linux native app planned; no download available yet" /></a>
 </p>
 
-<p align="center">Windows buttons download the same <a href="https://github.com/Sury2797/Notchling/releases/tag/notchling-evaluation-0.2.11">v0.2.11 evaluation installer</a> · 8.9 MB · unsigned · missing shared runtimes download during setup.</p>
+<p align="center">Windows buttons download the same <a href="https://github.com/Sury2797/Notchling/releases/tag/notchling-evaluation-0.3.4">v0.3.4 evaluation installer</a> · 8.9 MB · unsigned · missing shared runtimes download during setup.</p>
 
 <p align="center">
-  <a href="https://github.com/Sury2797/Notchling/actions/workflows/build.yml"><img src="https://github.com/Sury2797/Notchling/actions/workflows/build.yml/badge.svg?branch=main&amp;event=push" alt="Main branch Windows build and cross-platform checks" /></a>
+  <a href="https://github.com/Sury2797/Notchling/actions/runs/37944357692"><img src="https://github.com/Sury2797/Notchling/actions/workflows/build.yml/badge.svg?branch=notchling-evaluation-0.3.4&amp;event=push" alt="v0.3.4 Windows installation, public-testing UI and cross-platform checks" /></a>
   <a href="https://github.com/Sury2797/Notchling/actions/workflows/build.yml"><img src="docs/assets/badges/build-app.svg" height="20" alt="Open GitHub Actions to build the Windows app" /></a>
   <a href="https://github.com/Sury2797/Notchling/actions/workflows/release.yml"><img src="docs/assets/badges/signed-release.svg" height="20" alt="Open signed release candidate workflow; production signing setup required" /></a>
 </p>
@@ -37,9 +37,9 @@ The **Pixel Dragon** is Notchling’s app icon. The Windows application uses **C
 
 ## Current status
 
-**v0.3.0 public-testing candidate · Windows qualification pending.** The current source unlocks **all 21 catalog panels for everyone**, with no subscription or purchase required. This includes the extended media, focus, notes, clipboard and system controls. External connections still need compatible players, your own provider setup or selected files. Purchasing is paused.
+**v0.3.4 public testing · Windows cloud qualification passed.** The current source unlocks **all 21 catalog panels for everyone**, with no subscription or purchase required. This includes the extended media, focus, notes, clipboard and system controls. External connections still need compatible players, your own provider setup or selected files. Purchasing is paused.
 
-The download buttons currently retain the last verified **v0.2.11** installer; that older release still uses the previous access policy. Its actual setup, installed app, Free controls, Settings scrolling/drafts, evaluation update guidance, preview exit and dock interactions [passed on two Windows cloud hosts](https://github.com/Sury2797/Notchling/actions/runs/37735689610). The upcoming v0.3.0 installer will replace those links after Windows qualification succeeds.
+The download buttons install [v0.3.4](https://github.com/Sury2797/Notchling/releases/tag/notchling-evaluation-0.3.4), with all tools unlocked. [The exact release run](https://github.com/Sury2797/Notchling/actions/runs/37944357692) passed **345 regression checks per Windows/Linux host**, native WinUI build and installation, all 21 panels, hover/leave, Settings alignment and drafts, eight connection states, notes/Awake controls, preview, evaluation update guidance, existing-instance reopening and uninstall on two Windows cloud hosts. The published EXE's size, Windows PE header and SHA-256 were independently verified.
 
 This refinement targets the reported sticky hover state, oversized connection buttons, media metadata/artwork and uneven layouts. It uses shape-aware pointer checks, bounded editing leases, rendering-frame shell transitions, retained media controls and compact responsive settings forms. **Settings → Connection status** checks each supported source and distinguishes setup needed, successful reads and failures. Smoothness and consumer Windows 10/11 behavior still require measured hardware results.
 
@@ -48,7 +48,7 @@ The [validation notes](docs/validation-notes.md) record the exact revision, meas
 | Area | Current source | Before a stable paid release |
 | --- | --- | --- |
 | Desktop | Native Windows app; all catalog tools unlocked for public testing; adaptive panels and reduced motion | Independent Windows 10/11 interaction, accessibility, and hardware profiling |
-| Distribution | Single evaluation setup EXE; installed launch and Free controls tested in Windows CI; automatic shared prerequisites | Publisher certificate and consumer Windows 10/11 clean install/upgrade/update qualification |
+| Distribution | Single evaluation setup EXE; installed public-testing catalog and controls verified on two Windows cloud hosts; automatic shared prerequisites | Publisher certificate and consumer Windows 10/11 clean install/upgrade/update qualification |
 | Access and subscriptions | Public testing is free for everyone; signed paid-entitlement validation retained; checkout paused | Owner decision to restore Free/Premium, production domain, Stripe, email delivery, customer policies, and sandbox acceptance |
 | Linux | Portable core and automated checks | Native interface and Linux operating-system adapters |
 
@@ -80,7 +80,7 @@ Panel transitions respect reduced motion and Windows animation preferences. The 
 
 ## What’s inside
 
-The catalog contains **Home and 20 tools**, plus Settings and an All tools index. The v0.3.0 public-testing source enables the entire catalog in both Release and Debug. Provider setup and native capabilities determine which data and controls are available; unlocking a tool does not fabricate a connection.
+The catalog contains **Home and 20 tools**, plus Settings and an All tools index. The v0.3.4 public-testing release enables the entire catalog in both Release and Debug. Provider setup and native capabilities determine which data and controls are available; unlocking a tool does not fabricate a connection.
 
 | Purpose | Tools | Details |
 | --- | --- | --- |
@@ -110,7 +110,7 @@ Polar, Dodo, and AdSense reporting are not connected. Built-in analytics OAuth, 
 
 ## Free and Premium
 
-**Public testing: all tools are free for everyone.** No owner-only unlock, paid account or fake Premium proof is required. Checkout is paused, and testing access does not automatically become a subscription. This is the current v0.3.4 source policy; the linked v0.2.11 installer predates it until a qualified replacement is published.
+**Public testing: all tools are free for everyone.** No owner-only unlock, paid account or fake Premium proof is required. Checkout is paused, and testing access does not automatically become a subscription. The published v0.3.4 installer uses this policy.
 
 The intended later commercial model remains a deliberately light **Free** edition and **Premium for US$2 per month**. The following split is a future plan, not an active paywall during public testing:
 
@@ -151,8 +151,8 @@ Workspace limits include a 10 MB serialized file ceiling, bounded text, and up t
 
 | Your device or package | What to choose | Where to get it |
 | --- | --- | --- |
-| Windows 11 x64 | **Setup `.exe` — recommended** | [Download the evaluation installer](https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.2.11/Notchling-0.2.11-windows-x64-evaluation-setup.exe) |
-| Windows 10 22H2 x64, build 19045 | **The same Setup `.exe`** | [Download the evaluation installer](https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.2.11/Notchling-0.2.11-windows-x64-evaluation-setup.exe) |
+| Windows 11 x64 | **Setup `.exe` — recommended** | [Download the evaluation installer](https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.3.4/Notchling-0.3.4-windows-x64-evaluation-setup.exe) |
+| Windows 10 22H2 x64, build 19045 | **The same Setup `.exe`** | [Download the evaluation installer](https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.3.4/Notchling-0.3.4-windows-x64-evaluation-setup.exe) |
 | Windows app-only folder | Advanced evaluation with compatible shared runtimes already installed; keep all files together | `notchling-windows-x64-app-only` in [successful build runs](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) |
 | Windows `.msi` / `.msix` | No package currently produced; use Setup `.exe` | — |
 | Linux `.AppImage` / `.deb` / `.rpm` | Native application planned; no Linux app download yet | [Linux roadmap](docs/product-roadmap.md) |
@@ -162,17 +162,17 @@ The app-only folder is an advanced distribution of the same Windows app, not a s
 
 ### Evaluation builds
 
-1. [Download Notchling Setup for Windows](https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.2.11/Notchling-0.2.11-windows-x64-evaluation-setup.exe). This direct `.exe` download requires no GitHub sign-in or ZIP extraction.
-2. Run **`Notchling-0.2.11-windows-x64-evaluation-setup.exe`**.
+1. [Download Notchling Setup for Windows](https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-0.3.4/Notchling-0.3.4-windows-x64-evaluation-setup.exe). This direct `.exe` download requires no GitHub sign-in or ZIP extraction.
+2. Run **`Notchling-0.3.4-windows-x64-evaluation-setup.exe`**.
 3. Open **Notchling** from the Start menu.
 
 Evaluation releases appear in [Releases](https://github.com/Sury2797/Notchling/releases). Development snapshots also appear as **`notchling-windows-x64-installer`** in successful [GitHub Actions runs](https://github.com/Sury2797/Notchling/actions/workflows/build.yml); those artifacts require sign-in, arrive inside a ZIP, and expire after 14 days.
 
 **One installer is the normal download.** Setup installs the app and checks for the shared .NET and Windows App SDK runtimes. If either is missing, Setup downloads its official installer and installs it; an Internet connection is required, and the .NET installer may request administrator approval. Existing compatible runtimes are reused. No SDK, developer tools, or manual DLL copying is required.
 
-The last verified v0.2.11 setup EXE is **8,890,277 bytes (8.48 MiB)**; its extracted app files total **40,694,898 bytes (38.81 MiB)**. Separate cloud fixtures exercised real missing-runtime installation and signed-resource recovery; the final app Setup reused the verified runtimes. The official Windows App Runtime download remains approximately **106.9 MB**. A machine missing both runtimes needs roughly **147 MB total** for first-install downloads at current versions, including the estimated .NET download. Later installs reuse compatible shared runtimes. See [delivery measurements and limits](docs/release-delivery.md).
+The verified v0.3.4 setup EXE is **8,923,610 bytes (8.51 MiB)**; its extracted app files total **40,784,258 bytes (38.89 MiB)**. Separate cloud fixtures exercised real missing-runtime installation and signed-resource recovery; the final app Setup reused the verified runtimes. The official Windows App Runtime download remains approximately **106.9 MB**. A machine missing both runtimes needs roughly **147 MB total** for first-install downloads at current versions, including the estimated .NET download. Later installs reuse compatible shared runtimes. See [delivery measurements and limits](docs/release-delivery.md).
 
-This evaluation installer is unsigned and intended for review and development under the source license. Cloud checks on two Windows hosts cover prerequisite recovery, installation, launch, pinning, no-player media state, Pomodoro, scratchpad persistence, Settings scrolling/drafts, preview exit, pointer interaction, reopening an existing instance, and uninstall; full Windows 10/11 hardware and accessibility qualification remains open.
+This evaluation installer is unsigned and intended for review and development under the source license. Cloud checks on two Windows hosts cover prerequisite recovery, installation, launch, all 21 unlocked panels, hover/leave and editing-lease expiry, compact credential alignment, eight connection states, notes/Awake, no-player media state, Pomodoro, scratchpad persistence, Settings scrolling/drafts, preview exit, reopening an existing instance, and uninstall; full Windows 10/11 hardware and accessibility qualification remains open.
 
 An optional **`notchling-windows-x64-app-only`** artifact provides the extracted application folder for advanced evaluation. It requires the shared runtimes to be installed already; keep its files together and run `Notchling.Windows.exe`. See [Windows support](docs/windows-support.md) for exact prerequisites.
 
@@ -197,9 +197,9 @@ Use the download buttons above to install the published evaluation. For a fresh 
 
 | Pipeline | Open in GitHub Actions | Trigger and output |
 | --- | --- | --- |
-| Build and checks | [Notchling native build and core checks](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) | Push, pull request, or **Run workflow**. Runs Windows/Linux regression checks; builds the native Windows x64 app and Setup EXE; tests the installed app's Free controls and uninstall. |
+| Build and checks | [Notchling native build and core checks](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) | Push, pull request, or **Run workflow**. Runs Windows/Linux regression checks; builds the native Windows x64 app and Setup EXE; tests the installed public-testing catalog, controls and uninstall. |
 | Public evaluation release | [The same build workflow](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) | Push a `notchling-evaluation-<version>` tag matching the desktop project's version. After all build/check jobs succeed, publishes an unsigned GitHub prerelease with a direct Setup EXE download. |
-| Signed release candidate | [Notchling signed release candidate](https://github.com/Sury2797/Notchling/actions/workflows/release.yml) | **Run workflow** with a `major.minor.patch` version such as `0.2.11`. Requires production signing configuration; creates signed delivery files and a GitHub release **draft** for qualification and review. |
+| Signed release candidate | [Notchling signed release candidate](https://github.com/Sury2797/Notchling/actions/workflows/release.yml) | **Run workflow** with a `major.minor.patch` version such as `0.3.4`. Requires production signing configuration; creates signed delivery files and a GitHub release **draft** for qualification and review. |
 
 To build a development installer in the cloud:
 
@@ -226,7 +226,7 @@ dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:P
 dotnet run --project src/Notch.Windows/Notch.Windows.csproj --configuration Debug -p:Platform=x64
 ```
 
-Debug exposes labeled development access. Use Release to verify Free defaults and configured signed Premium access.
+Release and Debug both expose all tools during public testing. The regression suite separately exercises the future Freemium policy and verified signed Premium access.
 
 ### Publish an app-only folder
 
@@ -282,7 +282,7 @@ flowchart LR
 
 One desktop process hosts the app; the billing server is deployed separately and never runs inside it. The [architecture guide](docs/architecture.md) explains scheduling, ownership, cancellation, and storage boundaries.
 
-The published evaluation's [successful CI run](https://github.com/Sury2797/Notchling/actions/runs/37735689610) passed **250 regression checks per Windows/Linux host**, plus the real Windows WinUI build/publish and installed-app checks. Portable fixtures and native service doubles are distinct from the actual Windows UI tests. The [validation record](docs/validation-notes.md) ties results to named revisions and records measurements and test limits. The [audit](flaws.md) preserves original findings and records their repairs and remaining acceptance work.
+The published evaluation's [successful CI run](https://github.com/Sury2797/Notchling/actions/runs/37944357692) passed **345 regression checks per Windows/Linux host**, plus the real Windows WinUI build/publish and installed-app checks. Portable fixtures and native service doubles are distinct from the actual Windows UI tests. The [validation record](docs/validation-notes.md) ties results to named revisions and records measurements and test limits. The [audit](flaws.md) preserves original findings and records their repairs and remaining acceptance work.
 
 Before paid distribution, qualify the same signed artifact separately on Windows 10/11, measure modest-hardware responsiveness, verify install/upgrade/update recovery, exercise Stripe/SMTP/weather staging, and approve publisher/support/customer policies. For a basic resource sample:
 

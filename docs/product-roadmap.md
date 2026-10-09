@@ -1,8 +1,8 @@
 # Product and platform roadmap
 
-Notchling is a Windows-first native desktop notch inspired by Dynamic Island, built around expandable controls, live activities, quick access, and local utility. The current v0.3.4 candidate opens **all tools free to everyone for public testing**. A lightweight Free edition and **Premium at US$2 per month** remain the later commercial plan. Linux desktop support follows the Windows release.
+Notchling is a Windows-first native desktop notch inspired by Dynamic Island, built around expandable controls, live activities, quick access, and local utility. The published v0.3.4 evaluation opens **all tools free to everyone for public testing**. A lightweight Free edition and **Premium at US$2 per month** remain the later commercial plan. Linux desktop support follows the Windows release.
 
-Release and Debug both enable the complete public-testing catalog; checkout is paused. Actual paid subscriptions still require signed verification, separate from testing access. The repository does not activate a production payment service. The previous verified v0.2.11 download retains its older access policy until the new candidate passes qualification. See [pricing and subscription policy](pricing.md).
+Release and Debug both enable the complete public-testing catalog; checkout is paused. Actual paid subscriptions still require signed verification, separate from testing access. The repository does not activate a production payment service. The [v0.3.4 release](https://github.com/Sury2797/Notchling/releases/tag/notchling-evaluation-0.3.4) passed its own Windows cloud qualification. See [pricing and subscription policy](pricing.md).
 
 ## Current foundation
 
@@ -11,8 +11,8 @@ Release and Debug both enable the complete public-testing catalog; checkout is p
 | Native Windows application | C#/WinUI 3 with Windows App SDK; tray, global shortcut, native overlay placement and local tools implemented |
 | Portable core | Timers, state machine, local storage, conversions and provider/import adapters; checks run on Windows and Linux |
 | Connected data | Read-only Stripe reporting, configured HTTPS analytics and explicit calendar/coding imports; licensed weather backend still unconfigured |
-| Build and packaging | Single Windows x64 Setup EXE with automatic shared prerequisites; last qualified v0.2.11 delivery in [CI](https://github.com/Sury2797/Notchling/actions/runs/37735689610); v0.3.0 qualification pending |
-| Interactive release QA | Windows launch, accessibility, monitor behavior, live service checks and performance measurement remain required |
+| Build and packaging | Single Windows x64 Setup EXE with automatic shared prerequisites; qualified v0.3.4 delivery and full public-testing UI in [CI](https://github.com/Sury2797/Notchling/actions/runs/37944357692) |
+| Interactive release QA | Both hosted Windows installations and full public-testing UI passed; consumer accessibility, monitor behavior, live services and performance measurement remain required |
 | Access and subscriptions | Entire catalog free during public testing; checkout paused; future Free/Premium gates and signed entitlement validation retained; production activation and live sandbox validation pending |
 | Linux desktop | Planned; the core is portable, while the UI and operating-system services are Windows-specific |
 
@@ -36,7 +36,7 @@ Ship the entire supported catalog without an application account for local testi
 
 When the owner decides to restore the commercial split, configure and verify the implemented US$2 monthly Premium purchase flow, signed subscription state and commercial Release gates. Define cancellation, payment failure, offline validation and account recovery before taking payment. Public testing does not automatically enroll anyone in that plan.
 
-Upgrading must preserve local data. A subscription ending must return access to Free without silently deleting Premium-created notes or file references. Validate the implemented recovery/export path as part of downgrade handling. The in-app read-only Stripe dashboard remains separate from the system used to bill Notchling customers.
+Upgrading must preserve local data. In the future commercial phase, a subscription ending must return access to Free without silently deleting Premium-created notes or file references. Public-testing access remains open independently of subscription state. Validate the implemented recovery/export path as part of downgrade handling. The in-app read-only Stripe dashboard remains separate from the system used to bill Notchling customers.
 
 ### 4. Prepare paid distribution
 

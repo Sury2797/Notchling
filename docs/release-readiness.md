@@ -1,23 +1,24 @@
 # Notchling Windows release readiness
 
-This checklist defines acceptance for a public Windows release and the planned US$2/month Premium subscription. The current framework-dependent evaluation installer passed build, package auditing, actual installation, native launch, Free controls, and uninstall for [`fafa2cc`](https://github.com/Sury2797/Notchling/commit/fafa2ccac2c34e6b464a1254d637164df59b50ee) in [CI run 37203173532](https://github.com/Sury2797/Notchling/actions/runs/37203173532). Consumer Windows 10/11 native qualification and commercial-release work remain open. Earlier bundled-runtime results remain historical evidence in [validation notes](validation-notes.md).
+This checklist records **v0.3.4 public-testing release** acceptance and the remaining work for the later planned US$2/month Premium subscription. Source [`8ad94ce`](https://github.com/Sury2797/Notchling/commit/8ad94cefcbd6417a24312edd4c761d0de2fa28d5) passed all jobs in [CI run 37944357692](https://github.com/Sury2797/Notchling/actions/runs/37944357692), including installed-app qualification on both hosted Windows desktops and publication of the unsigned evaluation EXE. All 21 catalog panels are available free for public testing; checkout is paused. The direct public download's Windows PE header, exact size, and published SHA-256 were verified. Historical baselines remain in [validation notes](validation-notes.md). Consumer Windows 10/11 hardware qualification and stable commercial-release work remain open.
 
 Record the revision, build URL, OS build, GPU, monitor configuration and observed result for each subsequent validation. A Linux host can test portable logic and inspect source; full WinUI builds and native interaction require Windows.
 
 ## Build and deployment
 
-- [x] Windows x64 Release build and self-contained unpackaged publish succeeded for the baseline commit linked above.
-- [x] Evaluation CI succeeds for exact source revision `fafa2cc`; a signed production candidate remains a separate gate.
-- [x] One evaluation setup EXE builds and is the normal download; the advanced app-only folder remains secondary.
-- [x] Setup EXE, extracted application, and actual Windows App Runtime transfer sizes recorded; missing-.NET transfer is explicitly an estimate.
-- [x] Runtime payload is absent; the published runtime configuration uses installed .NET 10 and Windows App SDK 1.8 packages.
+- [x] Historical baseline `fafa2cc`: Windows x64 Release build and **framework-dependent** publish passed; this was not a self-contained package.
+- [x] Evaluation CI passes for exact source `8ad94ce`, with 345 regression checks per Windows/Linux host and installed-app qualification on `windows-latest` and `windows-2022`. A signed production candidate remains a separate gate.
+- [x] One v0.3.4 evaluation setup EXE builds and is the normal download; the advanced app-only folder remains secondary.
+- [x] Released Setup EXE is 8,923,610 bytes (8.51 MiB); extracted app is 40,784,258 bytes (38.89 MiB). Final Setup downloaded zero prerequisite bytes on both prepared runners; missing-runtime estimates remain separate.
+- [x] The published payload omits bundled runtimes and declares shared .NET 10 and Windows App SDK 1.8 requirements.
 - [ ] Clean Windows 10 22H2 x64 and Windows 11 x64 machines launch with the documented shared x64 runtimes installed, without a developer SDK.
 - [ ] Setup detects existing shared runtimes and downloads/installs missing official prerequisites on both OS targets; test Internet failure, cancellation, denied UAC, and rerunning Setup.
-- [x] Installed app includes required assemblies, bootstrapper, and nonempty compiled-XAML PRI; it launches using the shared runtimes prepared by Setup.
-- [x] Hosted Windows desktop: actual evaluation setup, visible window/icon, bounded responsiveness, Free pin/media/Pomodoro/scratchpad UI interaction, and silent uninstall pass.
+- [x] Installed v0.3.4 includes required assemblies, bootstrapper, and nonempty compiled-XAML PRI; it launches using the verified shared runtimes.
+- [x] Both hosted Windows desktops pass actual setup, visible window/icon, bounded responsiveness, 21-tool access/navigation, real `SendInput` pointer hover/leave, finite typing lease, compact credential alignment, eight connection states, retained drafts, disposable-data controls, reopening, and uninstall.
+- [x] The public v0.3.4 EXE was downloaded without authentication; its Windows PE header, 8,923,610-byte size, and published SHA-256 matched before default links changed.
 - [ ] Single-instance/startup behavior, tray menu, close-to-tray and explicit Quit behave consistently.
 - [ ] App/taskbar/tray icons, installer, Start menu shortcuts, window titles and Settings use Notchling and the Pixel Dragon assets; small/high-DPI icons remain readable.
-- [ ] A signed installer, updates, rollback, upgrade and uninstallation are validated before public distribution. Build CI produces an explicitly unsigned evaluation setup; the manual signed-candidate workflow requires publisher credentials.
+- [ ] A signed installer, updates, rollback, upgrade and uninstallation are validated before a stable commercial release. Authorized public testing uses the explicitly unsigned evaluation setup; the manual signed-candidate workflow requires publisher credentials.
 - [ ] Restore versions, source/distribution permissions, third-party notices and service attribution are reviewed for the release package.
 
 ## Interaction and display matrix
@@ -38,6 +39,7 @@ Record the revision, build URL, OS build, GPU, monitor configuration and observe
 
 ## Modules and real services
 
+- [x] Hosted v0.3.4 qualification navigates all 21 unlocked panels, verifies eight unconfigured connection states, and exercises the selected local controls and disposable-data workflows without inventing provider data.
 - [ ] Home and each of the 20 tool panels have a useful connected/local state and a correct empty or unavailable state.
 - [ ] No configured accounts, disabled demo mode and no Internet produce truthful empty/error states.
 - [ ] Explicit demo mode labels illustrative figures and never implies a connection.
@@ -57,9 +59,9 @@ Record the revision, build URL, OS build, GPU, monitor configuration and observe
 
 ## Subscription and commercial release
 
-The current v0.3.0 candidate opens all supported tools free to everyone for public testing in Release and Debug; checkout is paused. Qualification must exercise that full catalog and verify honest disconnected/unsupported states. Actual Premium proofs remain strict, and a future commercial phase may restore the basic Free/US$2 monthly Premium split after an owner decision, secure service configuration and native/live sandbox evidence. The following subscription checks apply before that commercial activation; see [pricing](pricing.md).
+The current v0.3.4 release opens all supported tools free to everyone for public testing in Release and Debug; checkout is paused. Hosted qualification passed full-catalog access/navigation and unconfigured connection states. Actual Premium proofs remain strict, and a future commercial phase may restore the basic Free/US$2 monthly Premium split after an owner decision, secure service configuration and native/live sandbox evidence. The following subscription checks apply before that commercial activation; see [pricing](pricing.md).
 
-- [ ] Public-testing Release exposes every supported catalog tool without an owner-only or paid gate; no fake paid entitlement is created and checkout remains paused.
+- [x] Public-testing Release exposes every supported catalog tool without an owner-only or paid gate; no fake paid entitlement is created and checkout remains paused. Native access assertions and public-testing/future-commercial regression fixtures passed for the released source.
 - [ ] Before commercial activation, Free exposes basic play/pause/previous/next, one Pomodoro and one Scratchpad; verified Premium exposes the supported extended catalog.
 - [ ] Privacy controls, keyboard access, reduced motion and local data-integrity protections remain available in both editions.
 - [ ] Checkout clearly displays the monthly price, recurring billing, applicable taxes and cancellation terms before payment.
@@ -90,11 +92,11 @@ Use `./scripts/measure-windows.ps1 -ProcessName Notchling.Windows -Seconds 60` f
 
 | Evidence | Result |
 | --- | --- |
-| Linux portable core | 58 historical baseline cases; new revision requires fresh results |
-| Windows portable core | Baseline CI green |
-| Windows WinUI build and publish | Current framework-dependent build and compiled-XAML publication passed on `fafa2cc` |
-| Single installer and shared prerequisites | Windows cloud setup passed; missing Windows App Runtime downloaded and installed, .NET reused; sizes recorded. Bare Windows 10/11, missing-.NET, UAC, and offline cases remain open |
-| Native Windows launch and interaction | Hosted window and Free UI checks passed; full consumer-OS matrix above remains required |
+| Linux and Windows regression suites | 345 checks per host passed on `8ad94ce`: 128 Core, 76 Commerce, 74 Debug view-model, 24 Release view-model, 33 native API doubles, and 10 Python release cases; source/XAML projections passed |
+| Windows WinUI build and publish | Framework-dependent build, compiled-XAML publication, and package audit passed on both hosted Windows desktops |
+| Single installer and shared prerequisites | Both hosts passed real prerequisite integration/recovery fixtures, final setup/reopening/uninstall, and package measurement. Final Setup reused verified runtimes with zero additional download bytes; fixtures retained installed SDKs. Bare consumer OS, denied UAC, and offline cases remain open |
+| Native Windows launch and interaction | Both hosts passed 21-tool/public-testing UI assertions, real injected hover, finite editing lease, compact settings, connections, drafts and selected local controls. Full consumer-OS matrix remains required |
+| Public download | Direct unsigned v0.3.4 EXE verified without sign-in: 8,923,610 bytes; Windows PE header and published SHA-256 matched |
 | Real provider accounts | Opt-in connection validation required |
 | Linux native UI | Planned later; unavailable in this implementation |
 | Billing and subscriptions | Release gates and configurable billing service implemented; production activation/live sandbox validation pending |
