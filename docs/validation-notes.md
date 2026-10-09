@@ -257,3 +257,36 @@ Immutable source [`8ad94ce`](https://github.com/Sury2797/Notchling/commit/8ad94c
 The verified public installer SHA-256 is `13e4cd031568aa166bb2aa5e002f7887cd76b2c57c3d6a48cbb1abedbfd7bc3a`. Installer compression and build metadata can differ between hosts; artifact-archive digests must not be confused with this enclosed EXE checksum. Both diagnostics artifacts contain per-run JSON, prerequisite results and logs, plus available native captures; their retention is 14 days.
 
 The owner's Windows 10 Pro 22H2 build 19045.7725 must still be retested with this release. Real browser/desktop-player metadata and artwork depend on the actual Windows media session supplied by each player. Consumer Windows 10/11, Narrator/high contrast/text scaling, mixed-monitor/fullscreen/sleep behavior, sustained resources and frame pacing remain open. Live Stripe/analytics and the undeployed licensed weather service require their own setup and verification. No owner-only bypass, fake paid proof, signing certificate or production connection was created. Linux native desktop remains planned.
+
+## Icon, motion, source and architecture candidate — v0.4.1
+
+**Status: follow-up candidate; qualification pending.** The current source addresses the latest screenshots: missing Weather glyphs, strong grey catalog feedback, a video thumbnail shown as compact source identity, dense reporting/settings layouts and stale hydration feedback on other tools. The source also adds read-only evaluation release discovery, quiet update history/indicator, explicit signed installation controls and native x86/ARM64 package paths. The preceding v0.4.0 passed the checks below but failed native installation/launch; v0.4.1 requires a new full run. The published v0.3.4 links and measurements above remain the current qualified download.
+
+| v0.4.0 regression evidence | Result and limit |
+| --- | --- |
+| Core | **141 passed**; includes media identity, temporary provider-choice expiry and distance/reduced-motion geometry cases |
+| Commerce | **76 passed**; public-testing access remains separate from strict paid proofs; checkout remains paused |
+| View model | **81 Debug + 31 Release passed**; discovery/install separation, cancellation/disposal, opt-in interval, notice deduplication, save failure, scoped feedback and session-choice fencing |
+| Native orchestration doubles | **65 passed**, including 31 updater cases; official metadata boundaries, schema/architecture/version checks, deadlines, bounded/hash/publisher-verified downloads, progress/cancel/concurrency and prepared-file tampering |
+| Python release fixtures | **13 passed**; package architecture/runtime configuration and notices remain checked |
+| Compilation and syntax | Native source/XAML projections compiled with **zero warnings/errors**; PowerShell scripts and workflow YAML parsed |
+| Total executed checks | **407 passed** locally and on each Windows/Linux regression host; these execute portable logic and platform/HTTP doubles, not the real WinUI renderer, Windows package deployment or live provider accounts |
+
+The configured installed-app matrix is x64 on `windows-latest` and `windows-2022`, x86 on x64 `windows-2022`, and native ARM64 on `windows-11-arm`. Evaluation publication requires all four jobs and both regression jobs to pass. Each architecture's emitted PE/bootstrapper/runtime contract and actual launched process must match; installer wrapper architecture alone is insufficient. Setup's runtime plan distinguishes app-architecture Framework/DDLM from native-host Main/Singleton and the native Framework dependency.
+
+The candidate has 48 bundled vector control icons and separate source logos. Automatic identity uses Windows-provided app metadata only; generic browsers keep their own brand until the user chooses a provider for the current track. A native session revision invalidates that choice even if replacement-session text is identical. No browsing history, tab scan or remote favicon lookup is introduced.
+
+Unsigned release checks read only official metadata; they never download or execute an evaluation installer. Optional daily checks are off by default and run only inside the app, at most once per 24 hours within its session. Notifications are bounded and do not replace the current panel. Signed installation requires an explicit action and preserved installed-publisher trust; no production signing configuration or end-to-end signed-update result exists yet.
+
+Consumer 32-bit Windows 10 and Windows 10 ARM64, real media/providers, Narrator/high contrast/text scaling, mixed-DPI/hot-plug/sleep behavior and measured 60/120/144 Hz frame pacing remain open. Native ARM64 runner success, if recorded, will establish that exact Windows 11 hosted configuration only. Do not reuse v0.3.4 package sizes, hashes or startup observations as this candidate's measurements.
+
+### Withheld v0.4.0 candidate
+
+Immutable source [`899d27d`](https://github.com/Sury2797/Notchling/commit/899d27d8b9c2084dc1090fd2bd5a882ef15c5193) ran in [CI 37979741879](https://github.com/Sury2797/Notchling/actions/runs/37979741879). Both regression jobs passed 407 cases. All four Windows jobs passed native build/publish and the official prerequisite fixtures. Installed qualification then failed, so publication did not run.
+
+| Actual failure | Following repair and gate |
+| --- | --- |
+| x64 on both hosts and native ARM64 aborted launch with a WinUI `Path.Data` argument exception | A cached geometry dependency object had been assigned to multiple Paths. Immutable token caching with new per-control geometry replaces that ownership violation; a fresh installed launch is required |
+| x86 Setup failed before prerequisite handling while compiling its resource reader with an external Framework64 compiler | Prepare the AnyCPU resource-reader helper during the build and package it in Setup, removing runtime compilation from the installer context; x86 actual setup/launch must pass |
+
+No v0.4.0 evaluation was published. The new candidate preserves the installed-app and architecture assertions and must pass them again; successful portable checks or a repaired source projection cannot certify these native failure paths.

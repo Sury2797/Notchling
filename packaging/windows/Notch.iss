@@ -14,6 +14,10 @@
   #error Unsupported AppArchitecture
 #endif
 
+#ifndef NativeInteropPath
+  #error NativeInteropPath is required (the precompiled AnyCPU Setup helper)
+#endif
+
 [Setup]
 AppId={{53529908-CB73-4B48-936A-74B9A6D47B81}
 AppName=Notchling
@@ -65,6 +69,7 @@ AppMutex=Notch.Desktop.Running
 [Files]
 Source: "{#PublishDirectory}\*"; DestDir: "{app}\app\{#AppVersion}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "install-prerequisites.ps1"; Flags: dontcopy
+Source: "{#NativeInteropPath}"; DestName: "Notchling.Setup.Interop.dll"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\Notchling"; Filename: "{app}\app\{#AppVersion}\Notchling.Windows.exe"; WorkingDir: "{app}\app\{#AppVersion}"
@@ -95,9 +100,11 @@ begin
   end;
 
   ExtractTemporaryFile('install-prerequisites.ps1');
+  ExtractTemporaryFile('Notchling.Setup.Interop.dll');
   ResultFile := ExpandConstant('{tmp}\Notchling-prerequisites-result.txt');
   Parameters := '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{tmp}\install-prerequisites.ps1') + '" -Architecture {#AppArchitecture} -ResultPath "' + ResultFile + '"';
+    ExpandConstant('{tmp}\install-prerequisites.ps1') + '" -Architecture {#AppArchitecture} -NativeInteropPath "' +
+    ExpandConstant('{tmp}\Notchling.Setup.Interop.dll') + '" -ResultPath "' + ResultFile + '"';
   if IsWin64 and not Is64BitInstallMode then
     PowerShellPath := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe')
   else

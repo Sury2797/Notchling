@@ -41,6 +41,14 @@ Use **Settings → Provider connections** to save/remove the Stripe reporting ke
 
 Disconnecting a service must remove its saved credential and invalidate in-flight results. Never include credential values in setup scripts, examples, test output or screenshots. The Revenue adapter's Stripe credential is separate from the Notchling subscription service.
 
+## Media source identity in v0.4.1 source
+
+The compact strip shows a **source logo**, while the expanded player keeps artwork/thumbnail and source identity separate. Bundled logos cover YouTube, YouTube Music, Spotify, Chrome, Edge, Firefox, VLC, Apple Music and Media Player. An unknown registered player can retain its Windows-supplied application icon. Metadata remains the selected Windows session's title, artist and album; a logo does not create a playback integration.
+
+Windows often reports a browser without its website. A generic browser keeps its Chrome/Edge/Firefox identity; the app does not infer YouTube from a title or thumbnail. The Media source menu offers an explicit provider choice for that track. Its tooltip identifies the choice as user-selected, and changing title/artist/album/source or replacing the native session clears it. Timeline or artwork refreshes within the same track preserve it. No browser-history access, tab scanning or network favicon fetch is used.
+
+Responsive Revenue, Analytics and Coding summaries in this candidate adapt their card columns to available width and Windows text scale. Candidate visual and provider behavior still needs its own Windows/device qualification; the published v0.3.4 result above does not certify these new views.
+
 ## Analytics adapter schema
 
 The configured HTTPS endpoint returns this normalized shape:
@@ -70,6 +78,8 @@ Core tests use fixtures and do not contact these services. Optional live connect
 | Development weather geocoding | `geocoding-api.open-meteo.com` |
 | Development weather forecast | `api.open-meteo.com` |
 | Analytics | The explicitly configured HTTPS endpoint |
+| Release discovery in v0.4.1 source | Official `api.github.com` release metadata, with the canonical `github.com/Sury2797/Notchling` release feed/asset listing as fallback; explicit action or opt-in daily check |
+| Verified signed updates | Canonical GitHub stable manifest and allowed official GitHub release-asset hosts; explicit install only |
 | SDK bootstrap | `builds.dotnet.microsoft.com` and the official artifact origin in release metadata |
 | Native dependency restore | NuGet endpoints, including `api.nuget.org` |
 

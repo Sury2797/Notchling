@@ -50,6 +50,11 @@ try {
     Invoke-Checked 'dotnet' @('run', '--project', (Join-Path $root 'tests/Notch.ViewModel.Tests/Notch.ViewModel.Tests.csproj'), '--configuration', 'Release')
     Invoke-Checked 'dotnet' @('run', '--project', (Join-Path $root 'tests/Notch.Native.Tests/Notch.Native.Tests.csproj'), '--configuration', 'Release')
     Invoke-Checked 'python' @('-m', 'unittest', 'discover', '-s', (Join-Path $root 'tests/release'), '-v')
+    $setupInteropOutput = Join-Path $publishRoot 'setup-interop'
+    Invoke-Checked 'dotnet' @('build', (Join-Path $root 'packaging/windows/native-interop/Notchling.Setup.Interop.csproj'), '--configuration', 'Release', '--output', $setupInteropOutput)
+    $setupInterop = Join-Path $setupInteropOutput 'Notchling.Setup.Interop.dll'
+    Invoke-Checked $signtool @('sign', '/s', 'My', '/sha1', $certificate.Thumbprint, '/fd', 'SHA256', '/tr', $TimestampUrl, '/td', 'SHA256', $setupInterop)
+    Assert-Signed $setupInterop $certificate.Thumbprint
     $installerLicense = Join-Path (Split-Path -Parent $Iscc) 'license.txt'
     $installerVersion = (Get-Item -LiteralPath $Iscc).VersionInfo.FileVersion
     if (-not (Test-Path $installerLicense)) { throw 'The installed Inno Setup publisher license.txt must be included in release notices.' }
@@ -69,7 +74,7 @@ try {
         Invoke-Checked 'python' @((Join-Path $root 'scripts/bundle-notices.py'), '--publish', $publish, '--assets', (Join-Path $root 'src/Notch.Windows/obj/project.assets.json'), '--strict', '--installer-license', $installerLicense, '--installer-version', $installerVersion)
         $sizeReport = Join-Path $release "package-size-$architecture.json"
         Invoke-Checked 'python' @((Join-Path $root 'scripts/report-package-size.py'), '--publish', $publish, '--architecture', $architecture, '--require-app-only', '--output', $sizeReport)
-        Invoke-Checked $Iscc @("/DAppArchitecture=$architecture", "/DAppVersion=$Version", "/DPublishDirectory=$publish", "/DReleaseDirectory=$release", "/Snotch=$signCommand", (Join-Path $root 'packaging/windows/Notch.iss'))
+        Invoke-Checked $Iscc @("/DAppArchitecture=$architecture", "/DAppVersion=$Version", "/DPublishDirectory=$publish", "/DReleaseDirectory=$release", "/DNativeInteropPath=$setupInterop", "/Snotch=$signCommand", (Join-Path $root 'packaging/windows/Notch.iss'))
         $installer = Join-Path $release "Notchling-$Version-windows-$architecture-setup.exe"
         Assert-Signed $installer $certificate.Thumbprint
         Invoke-Checked 'python' @((Join-Path $root 'scripts/report-package-size.py'), '--publish', $publish, '--architecture', $architecture, '--require-app-only', '--installer', $installer, '--output', $sizeReport)

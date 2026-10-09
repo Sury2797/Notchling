@@ -1,6 +1,6 @@
 # Notchling privacy and data handling
 
-**Development privacy notice — 4 October 2026.** Contact the project maintainer through [GitHub Issues](https://github.com/Sury2797/Notchling/issues). Before operating a paid service, publish the actual controller identity, private contact, hosting/subprocessor details, retention schedule and applicable regional rights. Unconfigured services make no billing requests.
+**Development privacy notice — 9 October 2026 UTC.** Contact the project maintainer through [GitHub Issues](https://github.com/Sury2797/Notchling/issues). Before operating a paid service, publish the actual controller identity, private contact, hosting/subprocessor details, retention schedule and applicable regional rights. Unconfigured services make no billing requests.
 
 ## Data on your device
 
@@ -11,6 +11,8 @@
 | Clipboard | Off by default; when enabled, up to 50 text entries in memory; clears on disable or exit |
 | Calendar and coding imports | Files you choose explicitly; no automatic home-directory scan |
 | System / media data | Windows APIs for current local display; optional services may be unavailable |
+| Media source choice in v0.4.1 source | A user-selected provider label stays in memory for the active track/session. No browser URL, browsing history, tab scan or remote favicon lookup |
+| Notification history | Session-only, capped at 50 notices; Settings shows the latest ten. Update notices do not upload workspace data |
 | Subscription entitlement | Locally cached signed entitlement/credential state for the configured billing service; contains no payment-card details |
 | Startup diagnostics | A local, bounded log in `%LOCALAPPDATA%\Notchling\Diagnostics\startup.log` records initialization errors; it is not uploaded automatically |
 
@@ -26,7 +28,11 @@ If the owner configures commercial billing, the application contacts that HTTPS 
 
 Public testing unlocks the catalog without a subscription and pauses checkout. It does not enable hidden provider requests or upload workspace material. Optional sign-in to a configured service can still be required for the licensed weather proxy; current configuration has no deployed backend. **Check connections** explicitly inspects supported services using the credentials/imports you configured, reports each source independently and does not display credential values.
 
-Update checking is explicit. The signed-update helper contacts GitHub for a public release manifest and installer. It verifies the hash, trusted Authenticode signature and publisher key before opening Setup. GitHub's own network privacy policy applies. There is no mandatory unattended update daemon.
+In the published v0.3.4 evaluation, update checking provides manual-download guidance. The **v0.4.1 source** adds read-only discovery of official GitHub releases, including evaluation prereleases. An explicit check sends the normal HTTPS request metadata and the app's update-client user agent; it does not send notes, clipboard text, provider credentials or a device identifier. GitHub can receive your IP address and normal network metadata under its own policy.
+
+**Check for updates daily** is off by default. When enabled, the source checks at most once per 24 hours while Notchling is running, using a monotonic interval within that session; restarting starts a new interval. There is no separate update daemon. Preview skips real release checks. Checks show availability without downloading or opening an unsigned evaluation installer. The optional fallback reads the repository's public release feed and exact release-asset listing when the API is unavailable.
+
+Signed releases use the official stable manifest for their explicit **Install verified update** action. Download requests go only to the official GitHub release hosts, and the app verifies the size, SHA-256, Windows-trusted Authenticode signature and publisher key before opening Setup. Progress and Cancel are available. Installation is never automatic; failures leave the app and workspace available. No production signing certificate is configured yet.
 
 ## Your controls
 

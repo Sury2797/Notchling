@@ -8,6 +8,8 @@ The collapsed notch presents a short status at the display's top edge. Expanding
 
 Panels use near-black surfaces, charcoal cards, white primary text and muted supporting text. Color carries meaning: playback, progress, a warning or a selected state. Content determines the panel's size; every tool should not have to fill a large dashboard.
 
+The v0.4.1 source uses 48 bundled vector control icons with one stroke vocabulary. Source logos and album artwork have distinct roles: compact Media shows the source, expanded Media shows the track artwork. Browser identities remain truthful; any manually chosen provider is identified as a choice for the current track. Card feedback uses a restrained surface change, and the catalog explains a tool's purpose without repeating testing-access labels on every tile.
+
 The Pixel Dragon gives Notchling a recognizable app icon: a compact dark dragon with expressive eyes. Use the approved assets for the application, installer, tray and documentation; preserve a readable silhouette at small sizes. The icon supports product identity, while the interface centers on controls, content, and live activities. Decorative motion should not compete with those tasks.
 
 Home summarizes a workspace. Media exposes playback. Focus keeps a deadline visible. Notes and Scratchpad hold local text. Connected dashboards expose a specific dataset. Each panel must be useful on its own, with truthful empty, busy, unavailable and failed states.
@@ -24,9 +26,9 @@ Current implementation defaults are 180 ms to open on hover, 100 ms to switch to
 
 ## Motion should explain state
 
-Transitions should make an opening panel, a change of tool or a completed activity easy to follow. Animating decoration continuously adds work without helping the user. Content currently uses compositor opacity and scale transitions and respects the application reduced-motion setting and the Windows animation preference.
+Transitions should make an opening panel, a change of tool or a completed activity easy to follow. Animating decoration continuously adds work without helping the user. The v0.4.1 source uses compositor opacity and small translations, keeping text and vector icons at their final scale. It respects the application reduced-motion setting and the Windows animation preference, including changes during an active transition.
 
-Native panel transitions are designed to interrupt smoothly and respect reduced motion. Their perceived quality and rendered frame pacing remain native qualification work. Performance claims must come from measurements on Windows hardware, including high-refresh-rate displays.
+Native panel transitions retain their current geometry on reversal, use 110–180 ms according to the remaining distance, and settle immediately with reduced motion. Their perceived quality and rendered frame pacing remain native qualification work. Performance claims must come from measurements on Windows hardware, including high-refresh-rate displays.
 
 ## Efficiency through boundaries
 
@@ -47,5 +49,7 @@ The current public-testing phase opens every supported tool to everyone in Relea
 ## Platform discipline
 
 Windows 10 22H2 x64 and supported Windows 11 x64 releases are equal product targets. Native launch, display behavior, input, accessibility and resource use must pass the [Windows release matrix](release-readiness.md). A green build establishes compilation and packaging, not completed interactive QA.
+
+The v0.4.1 source adds native x86 and ARM64 packaging. Qualification must identify the app architecture and the host architecture separately: an x86 app on an x64 runner is not a 32-bit Windows 10 result. Windows 11 has no x86 OS edition. Native ARM64 checks need an ARM64 host; consumer hardware, mixed-DPI and animation results remain separate from runner tests.
 
 Linux can reuse the portable core and provider contracts, but needs a separate native interface and operating-system services. X11 and Wayland behavior must be evaluated independently. The Windows executable is not a Linux desktop release.

@@ -86,6 +86,8 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$parseErrors) | Out-Null
             if ($parseErrors) { throw ($parseErrors | Out-String) }
           }
+      - name: Build precompiled native Setup helper
+        run: dotnet build packaging/windows/native-interop/Notchling.Setup.Interop.csproj --configuration Release --output artifacts/setup-interop
       - name: Exercise prerequisite handling in Windows PowerShell 5.1
         shell: pwsh
         run: ./scripts/invoke-prerequisite-check.ps1 -Mode Unit -AppArchitecture ${{ matrix.arch }}
@@ -132,7 +134,7 @@ jobs:
           $publish = Join-Path $PWD 'artifacts/notchling-windows-${{ matrix.arch }}'
           $output = Join-Path $PWD 'artifacts/installer'
           $PSNativeCommandUseErrorActionPreference = $false
-          $compilerOutput = & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /DEvaluationBuild "/DAppArchitecture=${{ matrix.arch }}" "/DAppVersion=$version" "/DPublishDirectory=$publish" "/DReleaseDirectory=$output" packaging/windows/Notch.iss 2>&1
+          $compilerOutput = & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /DEvaluationBuild "/DAppArchitecture=${{ matrix.arch }}" "/DAppVersion=$version" "/DPublishDirectory=$publish" "/DReleaseDirectory=$output" "/DNativeInteropPath=$PWD/artifacts/setup-interop/Notchling.Setup.Interop.dll" packaging/windows/Notch.iss 2>&1
           $compilerExit = $LASTEXITCODE
           $compilerOutput | Write-Output
           if ($compilerExit -ne 0) {

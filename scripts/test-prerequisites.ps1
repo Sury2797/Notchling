@@ -6,6 +6,7 @@
 param(
     [ValidateSet('Unit', 'Integration', 'RuntimeFallback')][string]$Mode = 'Unit',
     [ValidateSet('x64', 'x86', 'arm64')][string]$AppArchitecture = 'x64',
+    [string]$NativeInteropPath = (Join-Path $PSScriptRoot '..\artifacts\setup-interop\Notchling.Setup.Interop.dll'),
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\artifacts\prerequisite-tests')
 )
 
@@ -23,7 +24,14 @@ $OutputDirectory = (Resolve-Path -LiteralPath $OutputDirectory).Path
 $fixtureLog = Join-Path $OutputDirectory ($Mode.ToLowerInvariant() + '-prerequisites.log')
 $fixtureResult = Join-Path $OutputDirectory ($Mode.ToLowerInvariant() + '-result.txt')
 if (Test-Path -LiteralPath $fixtureLog) { Remove-Item -LiteralPath $fixtureLog -Force }
-. (Join-Path $PSScriptRoot '..\packaging\windows\install-prerequisites.ps1') -Architecture $AppArchitecture -LogPath $fixtureLog -ResultPath $fixtureResult
+. (Join-Path $PSScriptRoot '..\packaging\windows\install-prerequisites.ps1') -Architecture $AppArchitecture -NativeInteropPath $NativeInteropPath -LogPath $fixtureLog -ResultPath $fixtureResult
+
+# The same packaged assembly is loaded by Unit and real recovery fixtures.
+# Its architecture query runs before any test substitutes package responses.
+Import-SetupNativeInterop
+if ((Get-PowerShellProcessArchitecture) -ne (Get-NativeWindowsArchitecture)) {
+    throw 'The prerequisite fixture must use native Windows PowerShell.'
+}
 
 if ($Mode -ne 'Unit') {
     $script:actualDotNetTest = (Get-Item Function:Test-DotNetRuntime).ScriptBlock
@@ -129,6 +137,33 @@ function Invoke-Fixture([string]$Name, [scriptblock]$Action) {
     $script:passed.Add($Name)
     Write-Host "PASS: $Name"
 }
+Invoke-Fixture 'Precompiled AnyCPU helper loads from the packaged assembly' {
+    $assembly = ('Notchling.Setup.MachineInformation' -as [type]).Assembly
+    Assert-Fixture ($assembly.GetName().Name -eq 'Notchling.Setup.Interop') 'The native APIs did not load from the packaged helper.'
+    Assert-Fixture ([string]$assembly.GetName().ProcessorArchitecture -eq 'MSIL') 'The Setup helper requires a fixed process architecture.'
+    Assert-Fixture ($assembly.ImageRuntimeVersion -eq 'v4.0.30319') 'The Setup helper requires the app runtime instead of the existing Windows .NET Framework.'
+}
+Invoke-Fixture 'Missing packaged helper fails with a repair instruction in a fresh process' {
+    $probePath = Join-Path $OutputDirectory 'missing-interop-probe.ps1'
+    $probeSource = @'
+param([string]$PrerequisiteScript, [string]$MissingHelper, [string]$ProbeLog)
+$ErrorActionPreference = 'Stop'
+. $PrerequisiteScript -NativeInteropPath $MissingHelper -LogPath $ProbeLog
+try { Import-SetupNativeInterop }
+catch {
+    if ($_.Exception.Message -match 'packaged Notchling Setup native helper is missing.*Download a fresh installer') {
+        Write-Output 'EXPECTED: missing packaged helper requires a fresh installer.'
+        exit 0
+    }
+    throw
+}
+throw 'The missing packaged helper was accepted.'
+'@
+    [IO.File]::WriteAllText($probePath, $probeSource, [Text.UTF8Encoding]::new($false))
+    $probeOutput = @(& (Join-Path $PSHOME 'powershell.exe') -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePath -PrerequisiteScript (Join-Path $PSScriptRoot '..\packaging\windows\install-prerequisites.ps1') -MissingHelper (Join-Path $OutputDirectory 'missing-interop.dll') -ProbeLog (Join-Path $OutputDirectory 'missing-interop.log') 2>&1)
+    Assert-Fixture ($LASTEXITCODE -eq 0 -and (($probeOutput -join ' ') -match 'EXPECTED: missing packaged helper')) 'Missing-helper failure was not actionable in a fresh Setup process.'
+}
+
 function New-RuntimePackages(
     [ValidateSet('x64', 'x86', 'arm64')][string]$TargetArchitecture = $Architecture,
     [ValidateSet('x64', 'x86', 'arm64')][string]$NativeArchitecture = (Get-NativeWindowsArchitecture)) {

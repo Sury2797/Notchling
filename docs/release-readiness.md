@@ -4,6 +4,27 @@ This checklist records **v0.3.4 public-testing release** acceptance and the rema
 
 Record the revision, build URL, OS build, GPU, monitor configuration and observed result for each subsequent validation. A Linux host can test portable logic and inspect source; full WinUI builds and native interaction require Windows.
 
+## v0.4.1 candidate acceptance
+
+The current source adds vector icons/source logos, responsive reporting layouts, interruptible motion, scoped feedback, read-only evaluation release discovery and native x86/ARM64 delivery paths. **v0.3.4 remains the recommended public download until this candidate passes its own installed-app matrix and each public EXE is verified.** These checks do not inherit a pass from the previous release.
+
+- [x] Preceding v0.4.0 regressions: **407 passed** locally and on both Windows/Linux regression hosts — 141 Core, 76 Commerce, 81 Debug view-model, 31 Release view-model, 65 linked native API-double cases and 13 Python release cases. This candidate's native failures prevented publication.
+- [ ] v0.4.1 reruns those checks after per-control geometry ownership and build-time Setup resource-reader repairs.
+- [x] Native source/XAML projections compiled with zero warnings/errors; PowerShell and workflow YAML syntax parsed. These do not execute the Windows installer or WinUI renderer.
+- [ ] Actual x64 installed app and prerequisites pass on both hosted x64 Windows jobs.
+- [ ] Actual x86 app launches with its mixed app/native runtime-package plan on an x64 Windows host; consumer 32-bit Windows 10 remains a separate record.
+- [ ] Native ARM64 app, prerequisites, full existing UI assertions, reopening and uninstall pass on `windows-11-arm`.
+- [ ] All four installed-app jobs and both regression jobs pass before three-architecture evaluation publication.
+- [ ] Each public x64/x86/ARM64 EXE downloads without authentication and matches its measured size, Windows PE header and published SHA-256.
+- [ ] Stock-font icons, contrast changes, source-logo/thumbnail separation, narrow reporting layouts and no-feedback bleed are checked on consumer machines.
+- [ ] Generic browser identity/manual per-track choice, real source metadata, rapid session changes and unsupported transport are checked with live players.
+- [ ] Normal/reversed transitions and immediate reduced-motion settlement are measured on modest hardware and 60/120/144 Hz displays.
+- [ ] Evaluation release checks remain read-only, daily checks default off, preview makes no release check, and update notices preserve the current editor. Trusted signed installer execution remains a later production-signing gate.
+
+All tools remain free for public testing and checkout stays paused throughout this candidate.
+
+The failed [v0.4.0 run](https://github.com/Sury2797/Notchling/actions/runs/37979741879) passed all four native builds/publishes and prerequisite fixtures, then exposed a shared WinUI geometry ownership exception on x64/ARM64 and runtime compiler failure in x86 Setup. That immutable candidate remains unpublished. The [validation record](validation-notes.md#withheld-v040-candidate) preserves the exact source and repair scope.
+
 ## Build and deployment
 
 - [x] Historical baseline `fafa2cc`: Windows x64 Release build and **framework-dependent** publish passed; this was not a self-contained package.

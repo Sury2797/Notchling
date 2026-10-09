@@ -54,6 +54,25 @@ The [validation notes](docs/validation-notes.md) record the exact revision, meas
 
 The [release checklist](docs/release-readiness.md) tracks acceptance. Build results establish compilation and packaging; measured responsiveness and native usability need their own evidence.
 
+### In development: v0.4.1 refinement
+
+The current source adds the following changes. **v0.3.4 remains the qualified download above until the new installers pass their own checks.**
+
+| Detail | Candidate behavior |
+| --- | --- |
+| Icons and compact state | 48 bundled vector control icons with consistent strokes; approved Pixel Dragon at idle; source logos during playback; softer card feedback |
+| Media identity | Separate source badge and track artwork. YouTube, YouTube Music, Spotify and other recognized players use source logos. A generic Chrome/Edge/Firefox session keeps its browser identity until you explicitly choose a provider for that track |
+| Motion | Short, interruptible geometry transitions; content fades and small translations without scaling text; reduced motion settles immediately |
+| Layout and feedback | Responsive reporting cards and Settings actions, retained drafts, and short feedback tied to its originating tool |
+| Updates | Read-only evaluation release checks, a quiet compact indicator and notification history; optional daily checks are off by default. Signed updates expose explicit Install, progress and Cancel controls |
+| Architecture | Native x64, x86 and ARM64 build/package paths; publication waits for all four installed-app jobs, including a native Windows 11 ARM64 host |
+
+A browser's Windows media session often omits its website. Selecting **YouTube** in the Media source menu gives the current track that logo without reading browser history or guessing from its title. The choice clears when the track or native session changes. Album artwork remains in the expanded player.
+
+Candidate qualification and the remaining device checks are recorded in [validation](docs/validation-notes.md) and [flaws.md](flaws.md). This source work does not establish native x86/ARM64 release success, consumer Windows 10 compatibility or measured frame pacing.
+
+The preceding v0.4.0 candidate was withheld after actual installed-app checks exposed shared WinUI icon-geometry ownership and an x86 Setup runtime-compiler failure. v0.4.1 gives every icon its own geometry and prepares the Setup resource helper at build time; the full matrix must pass again before publication.
+
 ## The experience
 
 ### Small when idle. Useful when open.
@@ -61,6 +80,8 @@ The [release checklist](docs/release-readiness.md) tracks acceptance. Build resu
 Hover over the notch to open it, choose a tool from the separate dock, and leave to collapse. Pinning keeps your current panel open. Placement settings select the monitor and offsets; fullscreen suppression keeps the overlay out of the way when configured.
 
 Recent text input, open dialogs, and active control manipulation defer passive navigation and temporary activities. A previously focused editor does not keep an unpinned island open indefinitely. Timers and reminders use a bounded activity queue; notification history keeps recent deliveries within reach.
+
+In the v0.4.1 source, normal footer feedback expires after eight seconds and follows only its originating tool. Unsaved-work guidance stays visible. Update notices go to history and the compact indicator without replacing the panel you are editing.
 
 | Action | Control |
 | --- | --- |
@@ -108,6 +129,8 @@ Local tools work without an application account during public testing. Connected
 
 Polar, Dodo, and AdSense reporting are not connected. Built-in analytics OAuth, calendar account sync, and cloud workspace sync are not implemented. See the [provider contracts](src/Notch.Core/Providers/README.md) for schemas, attribution, and setup. Third-party accounts, service charges, and availability are separate from Notchling’s testing access or any future subscription.
 
+The v0.4.1 Media source menu separates provider identity from thumbnails. Known sources use bundled logos; other installed players retain their Windows-supplied icon. Browser choices are explicit, temporary labels, and do not create a new playback connection or change the active Windows media session.
+
 ## Free and Premium
 
 **Public testing: all tools are free for everyone.** No owner-only unlock, paid account or fake Premium proof is required. Checkout is paused, and testing access does not automatically become a subscription. The published v0.3.4 installer uses this policy.
@@ -138,6 +161,7 @@ Notchling’s workspace stays on your device. Optional connections make requests
 - **Clipboard:** off by default; when enabled, up to 50 text entries remain in memory and clear on disable or exit.
 - **Imports:** calendar and coding data come from files you choose.
 - **Recovery:** Settings provides export, validated restore, corrupt-file preservation/recovery, and note-deletion undo.
+- **Updates in v0.4.1 source:** explicit checks read official GitHub release metadata. Optional daily checks are off by default, run only while the app is open, and never install an update automatically.
 
 The compatible data folder remains **`%LOCALAPPDATA%\Notch`**. The branding update retains that path and existing vault identities, so it does not create an empty workspace or discard saved connections. Export before making a manual backup; quit the app before copying the data folder. Vault credentials are not part of that folder backup.
 
@@ -156,7 +180,8 @@ Workspace limits include a 10 MB serialized file ceiling, bounded text, and up t
 | Windows app-only folder | Advanced evaluation with compatible shared runtimes already installed; keep all files together | `notchling-windows-x64-app-only` in [successful build runs](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) |
 | Windows `.msi` / `.msix` | No package currently produced; use Setup `.exe` | — |
 | Linux `.AppImage` / `.deb` / `.rpm` | Native application planned; no Linux app download yet | [Linux roadmap](docs/product-roadmap.md) |
-| macOS `.app` / `.dmg`, Windows ARM64 / x86 | No application build configured | — |
+| Windows ARM64 / x86 | Native builds configured in v0.4.1 source; public installers await qualification | [Candidate status](#in-development-v041-refinement) |
+| macOS `.app` / `.dmg` | No application build configured | — |
 
 The app-only folder is an advanced distribution of the same Windows app, not a self-contained single executable. A Linux core test result does not provide a Linux desktop application.
 
@@ -184,8 +209,12 @@ The [signed release workflow](https://github.com/Sury2797/Notchling/actions/work
 | --- | --- |
 | Windows 10 22H2 x64, build 19045 | Equal release target; native qualification required |
 | Supported Windows 11 x64 releases | Equal release target; native qualification required |
+| Windows 10 22H2 x86 | v0.4.1 native app/build target; consumer 32-bit OS qualification pending |
+| Windows 10/11 ARM64 | v0.4.1 native app/build target; ARM64 release qualification pending |
 | Linux | Portable core/checks available; native desktop app planned later |
-| Windows ARM64 / x86 / macOS | No application release target currently configured |
+| macOS / ARM32 / Windows older than build 19045 | No application release target configured |
+
+Windows 11 has no 32-bit x86 edition. The x86 Windows 11 target is a 32-bit application running on a 64-bit OS. Prefer the native x64 or ARM64 installer for your PC. Check **Settings → System → About → System type** before choosing a future architecture-specific download.
 
 Installation retains the compatible **`%LOCALAPPDATA%\Programs\Notch`** directory. Upgrade and uninstall preserve workspace data and vault credentials. Uninstalling does not cancel a subscription. [Windows support](docs/windows-support.md) and [release delivery](docs/release-delivery.md) cover these guarantees and their acceptance tests.
 
@@ -197,15 +226,15 @@ Use the download buttons above to install the published evaluation. For a fresh 
 
 | Pipeline | Open in GitHub Actions | Trigger and output |
 | --- | --- | --- |
-| Build and checks | [Notchling native build and core checks](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) | Push, pull request, or **Run workflow**. Runs Windows/Linux regression checks; builds the native Windows x64 app and Setup EXE; tests the installed public-testing catalog, controls and uninstall. |
-| Public evaluation release | [The same build workflow](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) | Push a `notchling-evaluation-<version>` tag matching the desktop project's version. After all build/check jobs succeed, publishes an unsigned GitHub prerelease with a direct Setup EXE download. |
-| Signed release candidate | [Notchling signed release candidate](https://github.com/Sury2797/Notchling/actions/workflows/release.yml) | **Run workflow** with a `major.minor.patch` version such as `0.3.4`. Requires production signing configuration; creates signed delivery files and a GitHub release **draft** for qualification and review. |
+| Build and checks | [Notchling native build and core checks](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) | Push, pull request, or **Run workflow**. Current source runs Windows/Linux regressions and four installed-app jobs: x64 on two Windows hosts, x86 on x64 Windows, and native ARM64 on Windows 11. Each builds Setup and tests the installed catalog, controls and uninstall. |
+| Public evaluation release | [The same build workflow](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) | Push a `notchling-evaluation-<version>` tag matching the desktop project's version. All checks and four installed-app jobs must pass before publication of the three unsigned x64/x86/ARM64 Setup EXEs. |
+| Signed release candidate | [Notchling signed release candidate](https://github.com/Sury2797/Notchling/actions/workflows/release.yml) | **Run workflow** with a `major.minor.patch` version. Requires production signing configuration; current source builds three architecture-specific installers and a schema-2 update manifest, qualifies the installed apps, then creates a GitHub release **draft**. |
 
 To build a development installer in the cloud:
 
 1. Open the [build workflow](https://github.com/Sury2797/Notchling/actions/workflows/build.yml), sign in with repository write access, and choose **Run workflow → main → Run workflow**.
-2. Open the new run and wait for the Windows and Linux jobs to pass.
-3. Under **Artifacts**, download **`notchling-windows-x64-installer`**, extract its ZIP, and run the Setup `.exe` inside.
+2. Open the new run and wait for all Windows and Linux jobs to pass.
+3. Under **Artifacts**, choose **`notchling-windows-x64-installer`**, **`notchling-windows-x86-installer`** or **`notchling-windows-arm64-installer`** for your PC, extract its ZIP, and run the Setup `.exe` inside. These new architecture paths remain candidates until their own checks pass.
 
 Downloading an existing run's artifact requires GitHub sign-in; triggering a run requires repository write access. Installer and app-only artifacts expire after **14 days**. The published evaluation EXE is a direct download that requires no GitHub account or extraction and does not expire with those artifacts. **Run workflow** on `main` builds artifacts; it does not publish a public release.
 
@@ -214,6 +243,8 @@ For signed candidates, configure `NOTCH_SIGNING_PFX_BASE64` and `NOTCH_SIGNING_P
 ### Build the Windows app
 
 Use Windows 10 22H2 x64 or Windows 11 x64 with .NET 10, the Windows SDK, and the WinUI/C# desktop tools from Visual Studio 2026 or current Visual Studio Build Tools. Restore requires NuGet access.
+
+The current project also accepts `Platform=x86` / `RuntimeIdentifier=win-x86` and `Platform=ARM64` / `RuntimeIdentifier=win-arm64`. Match the platform and runtime; the package audit checks the emitted app's PE architecture and bootstrapper rather than relying on its filename. Run ARM64 qualification on a native ARM64 Windows host. x86-on-x64 CI does not qualify a 32-bit Windows 10 machine.
 
 The repository pins SDK **10.0.100** with compatible feature-band roll-forward in [global.json](global.json), and Windows App SDK **1.8.260921001** in the desktop project. The repository is `Sury2797/Notchling`; source project names remain stable. The application’s displayed brand and emitted executable are Notchling.
 

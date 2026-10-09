@@ -41,3 +41,13 @@ If the process actually exits, share the final startup-log lines and the action 
 Evaluation installers are unsigned. In v0.2.11 and later, **Settings → Updates and troubleshooting → Check for updates** explains manual updates without displaying a signing error. Open **Release page**, download the newest evaluation Setup EXE and run it over the existing installation; your local notebook is retained. Check the app version in Settings after reopening.
 
 The automatic stable updater is reserved for signed releases. It continues to verify the installed publisher, the manifest and installer integrity; evaluation guidance does not bypass those protections.
+
+In the **v0.4.1 source candidate**, **Check for updates** reads official release metadata and offers the compatible release page. The optional **Check for updates daily** switch is off by default. Update availability appears quietly in the compact indicator and Recent notifications; it does not replace your current tool. A failed online check leaves the manual release link available. Cancel stops pending work. Evaluation builds do not download or execute an installer through this action; **Install verified update** becomes available only with trusted signed update eligibility.
+
+## Compact media shows a browser logo
+
+In v0.4.1 source, a source logo appears in the compact strip and the actual cover/video thumbnail stays in expanded Media. If Windows identifies only Chrome, Edge or Firefox, the browser logo is the available automatic identity. Use the Media source menu to select YouTube or another supported provider for that track. The tooltip marks the selection, and a changed track/session clears it. This does not change the Windows player connection or scan browser tabs.
+
+## Choosing an architecture-specific candidate
+
+The published v0.3.4 EXE is x64. The current source configures future x64, x86 and ARM64 installers; check **Settings → System → About → System type** and choose the native architecture after the corresponding release is qualified. A 32-bit x86 app on 64-bit Windows requires its own x86 .NET/runtime packages plus native Windows App Runtime dependencies. Setup checks that mixture. An unrelated installed runtime, a renamed EXE or an extracted app folder does not resolve an architecture mismatch.

@@ -12,6 +12,7 @@ Release and Debug both enable the complete public-testing catalog; checkout is p
 | Portable core | Timers, state machine, local storage, conversions and provider/import adapters; checks run on Windows and Linux |
 | Connected data | Read-only Stripe reporting, configured HTTPS analytics and explicit calendar/coding imports; licensed weather backend still unconfigured |
 | Build and packaging | Single Windows x64 Setup EXE with automatic shared prerequisites; qualified v0.3.4 delivery and full public-testing UI in [CI](https://github.com/Sury2797/Notchling/actions/runs/37944357692) |
+| v0.4.1 source candidate | Bundled vector controls/source logos, responsive reporting forms, interruptible geometry motion, scoped feedback, quiet release discovery and x64/x86/ARM64 packaging; new installed-app qualification pending |
 | Interactive release QA | Both hosted Windows installations and full public-testing UI passed; consumer accessibility, monitor behavior, live services and performance measurement remain required |
 | Access and subscriptions | Entire catalog free during public testing; checkout paused; future Free/Premium gates and signed entitlement validation retained; production activation and live sandbox validation pending |
 | Linux desktop | Planned; the core is portable, while the UI and operating-system services are Windows-specific |
@@ -23,6 +24,8 @@ Release and Debug both enable the complete public-testing catalog; checkout is p
 Validate media, focus, notes, shelf, clipboard and system controls on Windows. Test empty and offline states alongside configured accounts. Refine typography, layout, keyboard focus and dock navigation before adding more integration breadth.
 
 Validate panel-size transitions and measure input response, frame pacing, idle CPU, memory and handle growth. Preserve reduced motion and avoid waking hidden tools to redraw unchanged data.
+
+The current refinement replaces font-dependent icons, distinguishes provider logos from thumbnails, preserves honest browser identity with a temporary source choice, and scopes short footer feedback to its tool. Release discovery is separate from installation: manual metadata checks work for evaluations, opt-in daily checks default off, and update notices stay out of the current editor. Native x86 and ARM64 packaging expands the source target matrix; record actual process/runtime architecture and independent consumer OS results before widening the release promise.
 
 ### 2. Complete service and privacy validation
 

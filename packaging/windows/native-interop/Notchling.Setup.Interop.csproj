@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Windows 10 22H2 and Windows 11 include .NET Framework 4.8 or newer.
+         Setup uses that existing Windows component, not the app's .NET 10 runtime. -->
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>Notchling.Setup.Interop</AssemblyName>
+    <RootNamespace>Notchling.Setup</RootNamespace>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+</Project>

@@ -14,7 +14,7 @@ Write **Notchling** as one word, with an initial capital. Use **Notchling Free**
 
 The app icon is [Notchling.png](../src/Notch.Windows/Assets/Notchling.png). Its Windows counterpart is [Notchling.ico](../src/Notch.Windows/Assets/Notchling.ico). The icon belongs on the executable, window, taskbar, tray, installer, README, compact launcher, and Settings identity card. Preserve the dragon’s proportions and eye placement. Keep decorative artwork away from editable content and essential controls.
 
-The icon’s light tile gives the dark silhouette a clear boundary. Small application controls use the same app artwork with accessible labels on their parent controls; the image itself does not add a duplicate screen-reader announcement.
+The icon’s light tile gives the dark silhouette a clear boundary. Small application controls use the same app artwork with accessible labels on their parent controls; the image itself does not add a duplicate screen-reader announcement. In v0.4.1 source, the compact strip shows Pixel Dragon when idle and the selected player/source logo during playback. Track thumbnails belong in the expanded Media panel. User-selected browser-provider labels remain explicit and expire with the track/session; they never replace the application icon in Windows or the installer.
 
 The 512 × 512 RGBA master isolates the approved tile from the concept sheet, preserves the character’s proportions, and has transparent outer corners. The Windows ICO includes 16, 20, 24, 32, 40, 48, 64, 96, 128, and 256 px frames. The window and notification area select native sizes for the current display scale and refresh when DPI changes. Explorer restart recovery keeps the current tray icon.
 
@@ -27,14 +27,16 @@ To regenerate the ICO from the approved PNG, run `python3 scripts/export-app-ico
 | App/window and Windows product metadata | Notchling |
 | Windows application files | `Notchling.Windows.exe`, `Notchling.Windows.dll` |
 | Start menu and installed-app listing | Notchling |
-| Normal evaluation artifact | `notchling-windows-x64-installer` |
-| Evaluation installer | `Notchling-<version>-windows-x64-evaluation-setup.exe` |
-| Optional application-folder artifact | `notchling-windows-x64-app-only` |
-| Signed installer | `Notchling-<version>-windows-x64-setup.exe` |
+| Normal evaluation artifact | `notchling-windows-<arch>-installer` |
+| Evaluation installer | `Notchling-<version>-windows-<arch>-evaluation-setup.exe` |
+| Optional application-folder artifact | `notchling-windows-<arch>-app-only` |
+| Signed installer | `Notchling-<version>-windows-<arch>-setup.exe` |
 | Stable update manifest | `notchling-update.json` |
 | Pricing | Free; Premium at US$2/month after commercial activation |
 
 Lead ordinary download instructions with the single setup EXE. Setup handles the shared-runtime check and installation; do not send customers through developer build steps or manual DLL copying. App-only describes the application payload without bundled .NET or Windows App SDK runtimes. It does not eliminate shared runtime dependencies or the initial prerequisite downloads documented in [Windows support](windows-support.md). Historical CI records retain the previous artifact names and distribution mode.
+
+The published v0.3.4 download is x64. Current source configures `<arch>` as `x64`, `x86` or `arm64`; new public assets must pass their own qualification before becoming recommended downloads. Architecture is package metadata, not a different product name.
 
 ## Continuity for existing installations
 

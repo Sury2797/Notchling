@@ -24,8 +24,9 @@ public enum VisualIconKind
 }
 
 /// <summary>
-/// A small native vector, rather than a platform font glyph. Geometry is shared on
-/// the UI thread; foreground remains bound so selected, disabled and contrast
+/// A small native vector, rather than a platform font glyph. Immutable path tokens
+/// are cached; each control owns its WinUI geometry. Foreground remains bound so
+/// selected, disabled and contrast
 /// states use the host control's current brush. Icons never receive input or a
 /// separate accessibility stop; the containing control supplies the action name.
 /// </summary>
@@ -37,7 +38,7 @@ public sealed class VisualIcon : UserControl
         nameof(Size), typeof(double), typeof(VisualIcon), new PropertyMetadata(20d, OnSizeChanged));
 
     private readonly Path _path;
-    private static readonly Dictionary<VisualIconKind, Geometry> GeometryCache = new();
+    private static readonly Dictionary<VisualIconKind, string[]> TokenCache = new();
 
     // Every path has an explicit command and stays within the 24-unit optical grid.
     // Rounded terminals and joins remain consistent from compact controls to cards.
@@ -157,8 +158,10 @@ public sealed class VisualIcon : UserControl
 
     private static Geometry GeometryFor(VisualIconKind kind)
     {
-        if (GeometryCache.TryGetValue(kind, out var existing)) return existing;
-        var tokens = Regex.Matches(Paths[kind], @"[MLCQAZ]|-?\d+(?:\.\d+)?").Select(match => match.Value).ToArray();
+        if (!TokenCache.TryGetValue(kind, out var tokens))
+            TokenCache[kind] = tokens = Regex.Matches(Paths[kind], @"[MLCQAZ]|-?\d+(?:\.\d+)?").Select(match => match.Value).ToArray();
+        // WinUI geometry is a DependencyObject with a single owner. Reusing one
+        // PathGeometry across several Path.Data properties fails at native launch.
         var geometry = new PathGeometry();
         PathFigure? figure = null;
         var index = 0;
@@ -189,7 +192,6 @@ public sealed class VisualIcon : UserControl
                 default: throw new InvalidOperationException("Unsupported icon path command.");
             }
         }
-        GeometryCache[kind] = geometry;
         return geometry;
     }
 }
