@@ -27,15 +27,16 @@ Run every row on Windows 10 22H2 x64 and separately on each Windows 11 release s
 | Interruption | Cancel setup; interrupt download; wrong hash and untrusted certificate | Existing app remains usable; update refused; no data loss | Pending |
 | Recovery | Launch compatible previous signed version; restore exported workspace | Documented recovery works with no hand-edited JSON | Pending |
 | Uninstall | Quit, uninstall, inspect installation folder and app-data folder | Application files removed; data/vault retained as disclosed | Pending |
-| Media | Browser and desktop player; disabled seeking; no audio endpoint; unplug/replug | Capability-specific controls; useful unavailable states | Pending |
+| Media | Browser and desktop player; Unicode/long/absent title, artist and album; player switches; missing/changing artwork; pause, 2× and seek; no audio endpoint; unplug/replug | Correct session metadata and source identity; artwork/logo fallback; no late old track; accurate timing and disabled unsupported controls | Pending |
 | Windows N | Test without Media Feature Pack, then with it | Optional media/sounds degrade; local tools still function | Pending |
 | Workspace | Save each tool; exceed limit; corrupt JSON; export/restore; final save fails | No truncation or replacement; visible save/recovery action | Pending |
 | Timers | Multiple simultaneous reminders; suspend beyond deadline; restart | Activities deliver and acknowledge without lost reminders | Pending |
 | Desktop shell | Top/bottom/side taskbars where supported; auto-hide; fullscreen; Explorer restart | Reachable overlay; no obstructed essential shell controls | Pending |
 | Display | 100/125/150/175/200%; secondary left/above; monitor unplug | Sharp text, aligned hit areas, visible controls | Pending |
-| Input | Hover, gaps, pin, hotkey collision, edits, dialogs, 50 rapid switches | No focus theft, editor loss or accidental collapse | Pending |
+| Input | Repeated hover/leave, body-to-dock gap, transparent flanks, Settings leave, six-second typing lease, pin, hotkey collision, edits, dialogs, 50 rapid switches | No stuck expansion, focus theft, editor loss or accidental collapse; pinned and active protected interactions remain usable | Pending |
 | Accessibility | Narrator; keyboard only; high contrast; 125/150% text scaling | Useful names/states; visible focus; no lost content | Pending |
-| Billing | Free Release; signed entitlement; offline expiry; cancellation/refund; duplicate webhooks | Correct access; safe downgrade/export; no desktop secrets | Pending |
+| Testing access | Release without account/purchase; open all 21 tools and direct controls; visit unconfigured dashboards | All tools available; setup states truthful; checkout paused; no fabricated Premium proof | Pending |
+| Future billing | Explicit Freemium phase; signed entitlement; offline expiry; cancellation/refund; duplicate webhooks | Correct access; safe downgrade/export; no desktop secrets | Pending |
 | Providers | Missing account, expired credential, timeout, malformed result, disconnect | Truthful state; no stale account/range values or leaked secrets | Pending |
 | Performance | Cold/warm launch, 60/120/144 Hz trace, idle sample, 100 switches and 30-min soak | Record real values against release-readiness budgets | Pending |
 

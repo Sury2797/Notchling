@@ -17,6 +17,7 @@ $report = [ordered]@{
     Stage = "Initialize owned UI Automation client"
     Operation = $null
     PatternRejections = @()
+    UIStateSnapshots = @()
     Actions = @()
     MediaNoPlayerControlsDisabled = $false
     NoAutomaticSampleData = $false
@@ -102,7 +103,31 @@ function Wait-Control([string]$Name, $ControlType, [bool]$RequireEnabled = $true
         if ($control) { return $control }
         Start-Sleep -Milliseconds 100
     } while ($wait.Elapsed.TotalSeconds -lt 10)
-    throw "An accessible usable control did not appear: $Name ($ControlType; required pattern: $Pattern)."
+    $state = Get-UiStateSnapshot ("Missing control: " + $Name)
+    throw "An accessible usable control did not appear: $Name ($ControlType; required pattern: $Pattern). UI state: $state"
+}
+
+function Get-UiStateSnapshot([string]$Reason) {
+    $snapshot = [ordered]@{ Reason = $Reason; Window = $null; Pointer = $null; ForegroundWindow = $null; VisibleControls = @(); Error = $null }
+    try {
+        $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
+        $snapshot.Window = [ordered]@{ Left = $bounds.Left; Top = $bounds.Top; Width = $bounds.Right - $bounds.Left; Height = $bounds.Bottom - $bounds.Top }
+        $point = [NotchlingUiSmoke.Native+Point]::new()
+        if ([NotchlingUiSmoke.Native]::GetCursorPos([ref]$point)) { $snapshot.Pointer = [ordered]@{ X = $point.X; Y = $point.Y } }
+        $snapshot.ForegroundWindow = [NotchlingUiSmoke.Native]::GetForegroundWindow().ToInt64()
+        foreach ($element in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+            try {
+                $current = $element.Current
+                if ($current.IsOffscreen -or $current.BoundingRectangle.IsEmpty -or [string]::IsNullOrWhiteSpace($current.Name)) { continue }
+                $name = $current.Name
+                if ($name.Length -gt 100) { $name = $name.Substring(0, 100) }
+                $snapshot.VisibleControls += "$name [$($current.ControlType.ProgrammaticName); enabled=$($current.IsEnabled)]"
+                if ($snapshot.VisibleControls.Count -ge 12) { break }
+            } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
+        }
+    } catch { $snapshot.Error = $_.Exception.Message }
+    $report.UIStateSnapshots += [pscustomobject]$snapshot
+    return $snapshot | ConvertTo-Json -Depth 4 -Compress
 }
 
 function Invoke-Button([string]$Name) {
@@ -177,16 +202,26 @@ function Move-Outside {
 
 function Wait-Collapsed {
     $wait = [Diagnostics.Stopwatch]::StartNew()
+    $settledSamples = 0
     do {
         Assert-Budget
         $compact = Find-Control "Open Notchling" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern)
         if ($compact) {
             $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
-            if (($bounds.Bottom - $bounds.Top) -lt 100 * $displayScale) { return }
+            # During collapse the compact button already exists, but its HWND
+            # can still be 90 DIP high. A hover at that moving rectangle's center
+            # would land below the final 40-DIP island and correctly fail to open.
+            if (($bounds.Bottom - $bounds.Top) -le 42 * $displayScale) {
+                $settledSamples++
+                if ($settledSamples -ge 2) { return }
+            } else { $settledSamples = 0 }
+        } else {
+            $settledSamples = 0
         }
         Start-Sleep -Milliseconds 100
     } while ($wait.Elapsed.TotalSeconds -lt 9)
-    throw "The unpinned notch remained expanded after the pointer left and its keyboard editing lease expired."
+    $state = Get-UiStateSnapshot "Unpinned collapse did not settle"
+    throw "The unpinned notch remained expanded after the pointer left and its keyboard editing lease expired. UI state: $state"
 }
 
 function Find-AutomationId([string]$Id, $Pattern = $null) {
@@ -596,8 +631,9 @@ namespace NotchlingUiSmoke {
 
     $report.Stage = "Repeated actual-pointer hover opens and leaves without sticking"
     for ($cycle = 0; $cycle -lt 2; $cycle++) {
-        $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
-        Move-Cursor ([int](($bounds.Left + $bounds.Right) / 2)) ([int](($bounds.Top + $bounds.Bottom) / 2))
+        $compact = Wait-Control "Open Notchling" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern)
+        $compactBounds = $compact.Current.BoundingRectangle
+        Move-Cursor ([int]($compactBounds.Left + $compactBounds.Width / 2)) ([int]($compactBounds.Top + $compactBounds.Height / 2))
         Get-SettingsScroll | Out-Null
         Visit-Panel
         Move-Outside

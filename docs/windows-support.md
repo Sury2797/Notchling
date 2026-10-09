@@ -36,16 +36,19 @@ The overlay, shortcuts, media controls, fonts, accessibility, installation and r
 
 Copy [the native qualification template](native-qualification.md) for each candidate. Record the app version, source commit, installer SHA-256, OS edition/build, GPU/driver, DPI, monitors, text scaling and result. Test Windows 10 separately from Windows 11; do not combine their results into a single passing row.
 
-The interactive cloud workspace is Linux and cannot launch WinUI. The [Windows CI job](../.github/workflows/build.yml) uses a separate hosted Windows Server desktop to install the actual evaluation setup and launch the installed Release app. It checks a visible native window, its icon, bounded message responsiveness, and Free-tier controls through UI Automation:
+The interactive cloud workspace is Linux and cannot launch WinUI. The [Windows CI job](../.github/workflows/build.yml) uses two hosted Windows desktops to install the actual evaluation setup and launch the installed Release app. Its public-testing UI Automation checks a visible native window, its icon and bounded message responsiveness, plus:
 
-- Open and pin the notch; confirm the Free edition.
+- Confirm all 21 catalog tools are unlocked without a purchased entitlement.
+- Exercise real pointer hover/leave, transparent dock flanks, Settings dismissal and the finite keyboard editing lease.
+- Check compact credential alignment, retained drafts/scroll and eight connection-status rows without provider credentials.
+- Navigate every tool, reset featured-panel scroll, save/delete a note and acquire/release the native Awake request.
 - Show the genuine no-player media state and require disabled transport controls.
 - Start, pause, and reset the Pomodoro timer using its visible clock.
 - Edit and save scratchpad text, navigate away and back, and verify clearing the saved text.
 
 The workflow verifies registered Windows App Runtime packages after Setup, records first-window timing and a short CPU/memory sample, then cleans up the owned app process and runs the installed uninstaller. The published payload guard requires the nonempty `resources.pri` produced by the current SDK's compiled-XAML resource pipeline, as well as the app and bootstrapper files; build success alone cannot replace a launch check.
 
-The passing run showed the native window and icon, responded to all five message samples, and passed every listed Free UI interaction. First visible window appeared after **816.2 ms**. The **5.02-second startup sample** averaged **107.35 MiB working set**, **31.36 MiB private memory**, and **0.700% CPU normalized across all logical processors**. Those are hosted-runner startup observations, not settled idle or animation benchmarks.
+Historical runs established narrower Free UI checks. Current immutable versions, exact completed assertions and package measurements are recorded in [validation notes](validation-notes.md); the expanded public-testing candidate must pass its own run. Hosted-runner first-window, five-second CPU/memory and message samples are startup observations, rather than settled idle or animation benchmarks.
 
 The cloud .NET runtime was already available through `setup-dotnet`; missing-.NET download/install and its UAC path were not exercised. The missing Windows App Runtime download/install path passed as part of Setup's cloud smoke. Recorded results, source revisions, and limitations are detailed in [validation notes](validation-notes.md).
 

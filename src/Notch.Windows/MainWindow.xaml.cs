@@ -87,7 +87,8 @@ public sealed partial class MainWindow : Window
         _openDelay.Tick += (_, _) =>
         {
             _openDelay.Stop();
-            if (_host.IsPointerInsideWindow && !_quitting) Open(hover: true);
+            if (_vm.Overlay.Mode == OverlayMode.Collapsed && _host.IsPointerInsideWindow && !_quitting)
+                Open(hover: true);
         };
         _hoverMonitor.Tick += (_, _) => CheckHoverDismissal();
         RootGrid.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnKeyboardInteraction), true);
@@ -322,6 +323,7 @@ public sealed partial class MainWindow : Window
     }
     private void Open(bool hover = false)
     {
+        _openDelay.Stop();
         _host.Show();
         _vm.Overlay.SetInteractionSuppressed(false);
         _explicitOpening = !hover;
@@ -332,6 +334,7 @@ public sealed partial class MainWindow : Window
     }
     private void OpenSettings()
     {
+        _openDelay.Stop();
         _explicitOpening = true;
         _hoverInteraction.Begin(true);
         try { _vm.SelectModule(ModuleId.Settings); }

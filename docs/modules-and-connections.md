@@ -2,7 +2,7 @@
 
 Notchling has three presentation states: a collapsed strip, an expanded selected tool and a temporary live activity. The separate dock changes tools. Pinning keeps a panel open; dismissing an activity restores the previous panel. Activities are deduplicated and use a bounded queue.
 
-The v0.3.0 candidate enables the complete catalog for **public testing in Release and Debug, free for everyone**. No owner-only unlock or paid account is required for local tools, and checkout is paused. Provider setup and native capabilities remain real requirements. The last verified v0.2.11 download predates this phase until a qualified replacement is published. Native behavior and external connections still require the [release checks](release-readiness.md).
+The v0.3.1 candidate enables the complete catalog for **public testing in Release and Debug, free for everyone**. No owner-only unlock or paid account is required for local tools, and checkout is paused. Provider setup and native capabilities remain real requirements. The last verified v0.2.11 download predates this phase until a qualified replacement is published. Native behavior and external connections still require the [release checks](release-readiness.md).
 
 ## Tool catalog
 
