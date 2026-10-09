@@ -3,6 +3,7 @@
 # in every Notchling download. No Microsoft installer runs until it is verified.
 [CmdletBinding()]
 param(
+    [Alias('AppArchitecture')][ValidateSet('x64', 'x86', 'arm64')][string]$Architecture = 'x64',
     [string]$ResultPath,
     [string]$LogPath = (Join-Path $env:LOCALAPPDATA 'Notchling\Setup\Logs\setup-prerequisites.log')
 )
@@ -23,15 +24,134 @@ function Write-SetupResult([string]$Message) {
     if ($ResultPath) { [IO.File]::WriteAllText($ResultPath, $Message, [Text.UTF8Encoding]::new($false)) }
 }
 
-function Test-DotNetRuntime {
+function Get-SetupMachineInformation {
+    # Environment variables can describe an emulated process instead of the
+    # hardware. IsWow64Process2 distinguishes x86/x64/ARM64 process and native
+    # machines on the Windows 10/11 versions supported by Notchling.
+    if (-not ('Notchling.Setup.MachineInformation' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace Notchling.Setup {
+    public static class MachineInformation {
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWow64Process2(IntPtr process, out ushort processMachine, out ushort nativeMachine);
+        public static ushort[] Read() {
+            ushort processMachine;
+            ushort nativeMachine;
+            if (!IsWow64Process2(GetCurrentProcess(), out processMachine, out nativeMachine))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows could not identify the native Setup architecture.");
+            return new ushort[] { processMachine == 0 ? nativeMachine : processMachine, nativeMachine };
+        }
+    }
+}
+'@
+    }
+    return [Notchling.Setup.MachineInformation]::Read()
+}
+
+function Convert-SetupMachineArchitecture([uint16]$Machine) {
+    switch ($Machine) {
+        0x8664 { return 'x64' }
+        0x014C { return 'x86' }
+        0xAA64 { return 'arm64' }
+        default { throw 'Setup could not identify a supported native Windows architecture. ARM32 is not supported.' }
+    }
+}
+
+function Get-NativeWindowsArchitecture {
+    $machines = @(Get-SetupMachineInformation)
+    return Convert-SetupMachineArchitecture $machines[1]
+}
+
+function Get-PowerShellProcessArchitecture {
+    $machines = @(Get-SetupMachineInformation)
+    return Convert-SetupMachineArchitecture $machines[0]
+}
+
+function Get-WindowsAppRuntimeArchitecturePlan(
+    [ValidateSet('x64', 'x86', 'arm64')][string]$TargetArchitecture = $Architecture,
+    [ValidateSet('x64', 'x86', 'arm64')][string]$NativeArchitecture = (Get-NativeWindowsArchitecture)) {
+    # Microsoft treats Framework and DDLM as app-architecture dependencies.
+    # Main and Singleton are non-framework packages deployed for the native OS.
+    # In particular, an x86 app on x64 Windows must not demand x86 Main/Singleton.
+    return @($TargetArchitecture, $NativeArchitecture, $NativeArchitecture, $TargetArchitecture)
+}
+
+function Get-WindowsAppRuntimePackagePlan(
+    [ValidateSet('x64', 'x86', 'arm64')][string]$TargetArchitecture = $Architecture,
+    [ValidateSet('x64', 'x86', 'arm64')][string]$NativeArchitecture = (Get-NativeWindowsArchitecture)) {
+    $architectures = @(Get-WindowsAppRuntimeArchitecturePlan $TargetArchitecture $NativeArchitecture)
+    $names = @('Microsoft.WindowsAppRuntime.1.8', 'MicrosoftCorporationII.WinAppRuntime.Main.1.8',
+        'MicrosoftCorporationII.WinAppRuntime.Singleton', 'DDLM')
+    $prefixes = @('MSIX_FWPACKAGE_', 'MSIX_MAINPACKAGE_', 'MSIX_SINGLETONPACKAGE_', 'MSIX_DDLMPACKAGE_')
+    $plan = @()
+    for ($index = 0; $index -lt $names.Count; $index++) {
+        $plan += [PSCustomObject]@{ Name = $names[$index]; Architecture = $architectures[$index]; Resource = ($prefixes[$index] + $architectures[$index].ToUpperInvariant()) }
+        if ($index -eq 0 -and $TargetArchitecture -ne $NativeArchitecture) {
+            # Native Main/Singleton depend on the native Framework too. Deploy
+            # both frameworks before any dependent package on WOW64 desktops.
+            $plan += [PSCustomObject]@{ Name = $names[0]; Architecture = $NativeArchitecture; Resource = ($prefixes[0] + $NativeArchitecture.ToUpperInvariant()) }
+        }
+    }
+    return $plan
+}
+
+function Assert-SupportedSetupHost(
+    [ValidateSet('x64', 'x86', 'arm64')][string]$TargetArchitecture,
+    [ValidateSet('x64', 'x86', 'arm64')][string]$NativeArchitecture,
+    [int]$WindowsBuild, [bool]$Is64BitProcess) {
+    if ($WindowsBuild -lt 19045) { throw 'Notchling requires Windows 10 22H2 (build 19045) or Windows 11.' }
+    if (($TargetArchitecture -eq 'arm64' -and $NativeArchitecture -ne 'arm64') -or
+        ($TargetArchitecture -eq 'x64' -and $NativeArchitecture -ne 'x64')) {
+        throw "This $TargetArchitecture download does not match your $NativeArchitecture PC. Download the native Notchling installer for your PC."
+    }
+    if (($NativeArchitecture -ne 'x86') -ne $Is64BitProcess) {
+        throw 'Setup must run the native Windows PowerShell component check. Restart the installer for your PC architecture.'
+    }
+}
+
+function Get-PortableExecutableArchitecture([string]$Path) {
+    $stream = $null; $reader = $null
+    try {
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        if ($stream.Length -lt 64) { return '' }
+        $reader = [IO.BinaryReader]::new($stream)
+        if ($reader.ReadUInt16() -ne 0x5A4D) { return '' }
+        $stream.Position = 60
+        $offset = $reader.ReadUInt32()
+        if ($offset -lt 64 -or $offset -gt $stream.Length - 6) { return '' }
+        $stream.Position = $offset
+        if ($reader.ReadUInt32() -ne 0x00004550) { return '' }
+        switch ($reader.ReadUInt16()) {
+            0x014C { return 'x86' }
+            0x8664 { return 'x64' }
+            0xAA64 { return 'arm64' }
+            default { return '' }
+        }
+    }
+    catch [IO.IOException] { return '' }
+    catch [UnauthorizedAccessException] { return '' }
+    finally {
+        if ($reader) { $reader.Dispose() }
+        elseif ($stream) { $stream.Dispose() }
+    }
+}
+
+function Get-DotNetRuntimeLocations([ValidateSet('x64', 'x86', 'arm64')][string]$TargetArchitecture = $Architecture) {
     $locations = @()
     # .NET's documented install-location registry lives in the 32-bit view,
-    # including the x64 runtime. Check both views for older/custom installers.
+    # including 64-bit runtimes. Target architecture and registry view are
+    # independent: never let a healthy x64 runtime satisfy an x86 app.
     foreach ($view in @([Microsoft.Win32.RegistryView]::Registry32, [Microsoft.Win32.RegistryView]::Registry64)) {
         $registry = $null; $installed = $null
         try {
             $registry = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $view)
-            $installed = $registry.OpenSubKey('SOFTWARE\dotnet\Setup\InstalledVersions\x64')
+            $installed = $registry.OpenSubKey("SOFTWARE\dotnet\Setup\InstalledVersions\$TargetArchitecture")
             if ($installed) {
                 $location = [string]$installed.GetValue('InstallLocation', '')
                 if ($location) { $locations += $location }
@@ -42,16 +162,22 @@ function Test-DotNetRuntime {
             if ($registry) { $registry.Dispose() }
         }
     }
-    if ($env:ProgramW6432) { $locations += (Join-Path $env:ProgramW6432 'dotnet') }
-    elseif ($env:ProgramFiles) { $locations += (Join-Path $env:ProgramFiles 'dotnet') }
-    foreach ($location in ($locations | Select-Object -Unique)) {
+    $programFiles = if ($TargetArchitecture -eq 'x86' -and ${env:ProgramFiles(x86)}) { ${env:ProgramFiles(x86)} }
+        elseif ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+    if ($programFiles) { $locations += (Join-Path $programFiles 'dotnet') }
+    return @($locations | Select-Object -Unique)
+}
+
+function Test-DotNetRuntime([ValidateSet('x64', 'x86', 'arm64')][string]$TargetArchitecture = $Architecture) {
+    foreach ($location in @(Get-DotNetRuntimeLocations $TargetArchitecture)) {
         $shared = Join-Path $location 'shared\Microsoft.NETCore.App'
-        if (-not (Test-Path -LiteralPath (Join-Path $location 'dotnet.exe')) -or -not (Test-Path -LiteralPath $shared)) { continue }
+        if (-not (Test-Path -LiteralPath $shared) -or
+            (Get-PortableExecutableArchitecture (Join-Path $location 'dotnet.exe')) -ne $TargetArchitecture) { continue }
         foreach ($directory in (Get-ChildItem -LiteralPath $shared -Directory)) {
             $version = $null
             if ([Version]::TryParse($directory.Name, [ref]$version) -and $version.Major -eq 10 -and
-                (Test-Path -LiteralPath (Join-Path $directory.FullName 'coreclr.dll'))) {
-                Write-SetupLog "Shared .NET runtime already present: $version (x64)."
+                (Get-PortableExecutableArchitecture (Join-Path $directory.FullName 'coreclr.dll')) -eq $TargetArchitecture) {
+                Write-SetupLog "Shared .NET runtime already present: $version ($TargetArchitecture)."
                 return $true
             }
         }
@@ -59,23 +185,32 @@ function Test-DotNetRuntime {
     return $false
 }
 
-function Test-WindowsAppRuntimePackages([object[]]$Packages) {
-    $frameworkReady = $false; $mainReady = $false; $singletonReady = $false; $ddlmReady = $false
+function Test-WindowsAppRuntimePackages([object[]]$Packages,
+    [ValidateSet('x64', 'x86', 'arm64')][string]$TargetArchitecture = $Architecture,
+    [ValidateSet('x64', 'x86', 'arm64')][string]$NativeArchitecture = (Get-NativeWindowsArchitecture)) {
+    $ready = @($false, $false, $false, $false)
+    $plan = @(Get-WindowsAppRuntimeArchitecturePlan $TargetArchitecture $NativeArchitecture)
+    $ddlmSuffix = @{ x64 = 'x6'; x86 = 'x8'; arm64 = 'a6' }[$TargetArchitecture]
+    $nativeFrameworkReady = ($TargetArchitecture -eq $NativeArchitecture)
     foreach ($package in $Packages) {
         Write-SetupLog "Observed runtime package: $($package.Name); family=$($package.PackageFamilyName); version=$($package.Version); architecture=$($package.Architecture); status=$($package.Status)."
         $version = $null
         if (-not [Version]::TryParse([string]$package.Version, [ref]$version) -or
-            [string]$package.Architecture -ne 'X64' -or $version -lt $minimumWindowsAppRuntimeVersion -or
-            [string]$package.Status -ne 'Ok') { continue }
-        if ($package.PackageFamilyName -eq $windowsAppRuntimeFamily) { $frameworkReady = $true }
-        elseif ($package.PackageFamilyName -eq 'MicrosoftCorporationII.WinAppRuntime.Main.1.8_8wekyb3d8bbwe') { $mainReady = $true }
-        elseif ($package.PackageFamilyName -eq 'MicrosoftCorporationII.WinAppRuntime.Singleton_8wekyb3d8bbwe') { $singletonReady = $true }
-        elseif ($package.PackageFamilyName -match '^Microsoft\.WinAppRuntime\.DDLM\.8000\.\d+\.\d+\.\d+-x6_8wekyb3d8bbwe$') { $ddlmReady = $true }
+            $version -lt $minimumWindowsAppRuntimeVersion -or [string]$package.Status -ne 'Ok') { continue }
+        $index = -1
+        if ($package.PackageFamilyName -eq $windowsAppRuntimeFamily) {
+            $index = 0
+            if ([string]$package.Architecture -eq $NativeArchitecture) { $nativeFrameworkReady = $true }
+        }
+        elseif ($package.PackageFamilyName -eq 'MicrosoftCorporationII.WinAppRuntime.Main.1.8_8wekyb3d8bbwe') { $index = 1 }
+        elseif ($package.PackageFamilyName -eq 'MicrosoftCorporationII.WinAppRuntime.Singleton_8wekyb3d8bbwe') { $index = 2 }
+        elseif ($package.PackageFamilyName -match "^Microsoft\.WinAppRuntime\.DDLM\.8000\.\d+\.\d+\.\d+-$ddlmSuffix`_8wekyb3d8bbwe$") { $index = 3 }
+        if ($index -ge 0 -and [string]$package.Architecture -eq $plan[$index]) { $ready[$index] = $true }
     }
-    $ready = $frameworkReady -and $mainReady -and $singletonReady -and $ddlmReady
-    Write-SetupLog "Runtime checks: framework=$frameworkReady; main=$mainReady; singleton=$singletonReady; DDLM=$ddlmReady."
-    if ($ready) { Write-SetupLog "Windows App Runtime 1.8 framework, Main, Singleton and DDLM are registered for this user (x64, minimum $minimumWindowsAppRuntimeVersion)." }
-    return $ready
+    Write-SetupLog "Runtime checks: framework=$($ready[0]); main=$($ready[1]); singleton=$($ready[2]); DDLM=$($ready[3]); nativeFramework=$nativeFrameworkReady; app=$TargetArchitecture; native=$NativeArchitecture."
+    $allReady = $nativeFrameworkReady -and -not ($ready -contains $false)
+    if ($allReady) { Write-SetupLog "Windows App Runtime 1.8 framework, Main, Singleton and DDLM are registered for this user (app $TargetArchitecture, native $NativeArchitecture, minimum $minimumWindowsAppRuntimeVersion)." }
+    return $allReady
 }
 
 function Test-WindowsAppRuntime {
@@ -142,15 +277,16 @@ function Save-MicrosoftDownload([Uri]$Uri, [string]$Destination, [long]$MaximumB
     }
 }
 
-function Get-DotNetRuntimeInstallerFromMetadata([object]$Metadata) {
+function Get-DotNetRuntimeInstallerFromMetadata([object]$Metadata,
+    [ValidateSet('x64', 'x86', 'arm64')][string]$TargetArchitecture = $Architecture) {
     if ([string]$Metadata.'channel-version' -ne '10.0' -or [string]$Metadata.'latest-runtime' -notmatch '^10\.0\.\d+$') {
         throw 'Microsoft returned unsupported .NET runtime metadata.'
     }
     $release = @($Metadata.releases | Where-Object { $_.runtime.version -eq $Metadata.'latest-runtime' })
     if ($release.Count -ne 1) { throw 'Microsoft runtime release metadata did not identify one stable release.' }
-    $file = @($release[0].runtime.files | Where-Object { $_.rid -eq 'win-x64' -and $_.name -eq 'dotnet-runtime-win-x64.exe' })
+    $file = @($release[0].runtime.files | Where-Object { $_.rid -eq "win-$TargetArchitecture" -and $_.name -eq "dotnet-runtime-win-$TargetArchitecture.exe" })
     if ($file.Count -ne 1 -or [string]$file[0].hash -notmatch '^[0-9a-fA-F]{128}$') {
-        throw 'Microsoft runtime release metadata did not include a verified x64 installer.'
+        throw "Microsoft runtime release metadata did not include a verified $TargetArchitecture installer."
     }
     Assert-MicrosoftDownloadUri ([Uri]$file[0].url)
     return $file[0]
@@ -227,7 +363,8 @@ function Invoke-RuntimeInstaller([string]$Installer, [string[]]$Arguments, [swit
     finally { $process.Dispose() }
 }
 
-function Get-WindowsAppRuntimePackageIdentity([string]$Package, [string]$ExpectedName) {
+function Get-WindowsAppRuntimePackageIdentity([string]$Package, [string]$ExpectedName,
+    [ValidateSet('x64', 'x86', 'arm64')][string]$ExpectedArchitecture = $Architecture) {
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($Package)
@@ -250,15 +387,18 @@ function Get-WindowsAppRuntimePackageIdentity([string]$Package, [string]$Expecte
         $version = $null
         if (-not [Version]::TryParse($identity.GetAttribute('Version'), [ref]$version) -or
             $version -lt $minimumWindowsAppRuntimeVersion -or $version.Major -ne 8000 -or
-            $identity.GetAttribute('ProcessorArchitecture') -ne 'x64' -or
+            $identity.GetAttribute('ProcessorArchitecture') -ne $ExpectedArchitecture -or
             $identity.GetAttribute('Publisher') -ne 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US') {
-            throw 'A Windows App Runtime package did not match the required Microsoft x64 runtime identity.'
+            throw "A Windows App Runtime package did not match the required Microsoft $ExpectedArchitecture runtime identity."
         }
-        if ($ExpectedName -eq 'DDLM') { $ExpectedName = "Microsoft.WinAppRuntime.DDLM.$version-x6" }
+        if ($ExpectedName -eq 'DDLM') {
+            $suffix = @{ x64 = 'x6'; x86 = 'x8'; arm64 = 'a6' }[$ExpectedArchitecture]
+            $ExpectedName = "Microsoft.WinAppRuntime.DDLM.$version-$suffix"
+        }
         if ($identity.GetAttribute('Name') -ne $ExpectedName) {
             throw "A Windows App Runtime package did not match the required component $ExpectedName."
         }
-        return [PSCustomObject]@{ Name = $identity.GetAttribute('Name'); Version = $version; Path = $Package }
+        return [PSCustomObject]@{ Name = $identity.GetAttribute('Name'); Version = $version; Architecture = $ExpectedArchitecture; Path = $Package }
     }
     finally {
         if ($reader) { $reader.Dispose() }
@@ -291,8 +431,8 @@ namespace Notchling.Setup {
         private static extern IntPtr LockResource(IntPtr resource);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool FreeLibrary(IntPtr module);
-        public static string[] Extract(string installer, string directory) {
-            string[] names = { "MSIX_FWPACKAGE_X64", "MSIX_MAINPACKAGE_X64", "MSIX_SINGLETONPACKAGE_X64", "MSIX_DDLMPACKAGE_X64" };
+        public static string[] Extract(string installer, string directory, string[] names) {
+            if (names == null || names.Length < 4 || names.Length > 5) throw new InvalidDataException("Four or five Microsoft runtime resource names are required.");
             string[] paths = new string[names.Length];
             // LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE:
             // no import resolution, DllMain, or application code execution.
@@ -329,7 +469,8 @@ namespace Notchling.Setup {
 '@
     }
     New-Item -ItemType Directory -Path $Destination | Out-Null
-    return [Notchling.Setup.RuntimeResources]::Extract($Installer, $Destination)
+    $plan = @(Get-WindowsAppRuntimePackagePlan)
+    return [Notchling.Setup.RuntimeResources]::Extract($Installer, $Destination, [string[]]@($plan | ForEach-Object { $_.Resource }))
 }
 
 function Install-WindowsAppRuntimePackages([string]$Installer, [string]$WorkDirectory) {
@@ -337,35 +478,34 @@ function Install-WindowsAppRuntimePackages([string]$Installer, [string]$WorkDire
     # arbitrary EXE into native resource extraction or package installation.
     Assert-MicrosoftSignature $Installer
     $files = @(Expand-WindowsAppRuntimePackages $Installer (Join-Path $WorkDirectory 'runtime-recovery'))
-    $expected = @('Microsoft.WindowsAppRuntime.1.8', 'MicrosoftCorporationII.WinAppRuntime.Main.1.8',
-        'MicrosoftCorporationII.WinAppRuntime.Singleton', 'DDLM')
-    if ($files.Count -ne $expected.Count) { throw 'The verified installer did not provide all four x64 runtime packages.' }
+    $plan = @(Get-WindowsAppRuntimePackagePlan)
+    if ($files.Count -ne $plan.Count) { throw "The verified installer did not provide all required runtime packages for app $Architecture." }
     $packages = @()
     for ($index = 0; $index -lt $files.Count; $index++) {
-        $packages += Get-WindowsAppRuntimePackageIdentity $files[$index] $expected[$index]
+        $packages += Get-WindowsAppRuntimePackageIdentity $files[$index] $plan[$index].Name $plan[$index].Architecture
     }
     # Validate every identity before deploying anything. Windows validates the
     # package signatures itself; do not use AllowUnsigned or force app shutdown.
     foreach ($package in $packages) {
         $alreadyReady = @(Get-AppxPackage -Name $package.Name -ErrorAction Stop | Where-Object {
             $_.PackageFamilyName -eq ($package.Name + '_8wekyb3d8bbwe') -and
-            [string]$_.Architecture -eq 'X64' -and [string]$_.Status -eq 'Ok' -and
+            [string]$_.Architecture -eq $package.Architecture -and [string]$_.Status -eq 'Ok' -and
             [Version]$_.Version -ge $package.Version
         })
         if ($alreadyReady.Count -gt 0) {
             # Singleton is shared by newer Windows App Runtime lines. A newer
             # healthy registration must be reused rather than downgraded.
-            Write-SetupLog "Reusing an equal or newer healthy Microsoft x64 package for the current account: $($package.Name); version=$($alreadyReady[0].Version)."
+            Write-SetupLog "Reusing an equal or newer healthy Microsoft $($package.Architecture) package for the current account: $($package.Name); version=$($alreadyReady[0].Version)."
             continue
         }
-        Write-SetupLog "Registering verified Microsoft x64 package for the current account: $($package.Name); version=$($package.Version)."
+        Write-SetupLog "Registering verified Microsoft $($package.Architecture) package for the current account: $($package.Name); version=$($package.Version)."
         try { Add-AppxPackage -Path $package.Path -ErrorAction Stop }
         catch {
             Write-SetupLog ("Microsoft runtime package registration failed: " + ($_ | Out-String).Trim())
             throw "Windows could not register $($package.Name). $($_.Exception.Message) This may require repair of Windows AppX deployment components by your administrator; retrying a download alone will not repair them."
         }
     }
-    Write-SetupLog 'Verified-resource recovery registered all four Microsoft Windows App Runtime x64 packages.'
+    Write-SetupLog "Verified-resource recovery registered all required Microsoft Windows App Runtime packages (app $Architecture, native $(Get-NativeWindowsArchitecture))."
 }
 
 function Invoke-WindowsAppRuntimeInstaller([string]$Installer, [string]$WorkDirectory) {
@@ -393,11 +533,11 @@ function Invoke-NotchlingPrerequisites {
         $logDirectory = Split-Path -Parent $LogPath
         New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
         Write-SetupLog 'Checking Notchling shared runtime prerequisites.'
-        if ([Environment]::OSVersion.Version.Build -lt 19045 -or -not [Environment]::Is64BitOperatingSystem -or
-            ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -and $env:PROCESSOR_ARCHITEW6432 -ne 'AMD64')) {
-            throw 'Notchling requires Windows 10 22H2 or Windows 11 on an x64 PC.'
+        $nativeArchitecture = Get-NativeWindowsArchitecture
+        Assert-SupportedSetupHost $Architecture $nativeArchitecture ([Environment]::OSVersion.Version.Build) ([Environment]::Is64BitProcess)
+        if ((Get-PowerShellProcessArchitecture) -ne $nativeArchitecture) {
+            throw 'Setup must run the native Windows PowerShell component check, rather than an emulated PowerShell process.'
         }
-        if (-not [Environment]::Is64BitProcess) { throw 'Setup must run the 64-bit Windows component check. Restart Setup on your x64 PC.' }
         # A PowerShell 7 parent can pass its module search path into Windows PowerShell.
         # Import the Windows PowerShell security module explicitly so certificate
         # verification never resolves an incompatible PowerShell 7 binary module.
@@ -419,7 +559,7 @@ function Invoke-NotchlingPrerequisites {
             Save-MicrosoftDownload ([Uri]'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json') $metadataPath 2097152 45
             $metadata = [IO.File]::ReadAllText($metadataPath) | ConvertFrom-Json
             $file = Get-DotNetRuntimeInstallerFromMetadata $metadata
-            $dotNetInstaller = Join-Path $workDirectory 'dotnet-runtime-win-x64.exe'
+            $dotNetInstaller = Join-Path $workDirectory "dotnet-runtime-win-$Architecture.exe"
             Save-MicrosoftDownload ([Uri]$file.url) $dotNetInstaller 536870912 300
             if ((Get-FileHash -LiteralPath $dotNetInstaller -Algorithm SHA512).Hash -ne $file.hash) {
                 throw 'The shared .NET runtime download failed integrity verification. Setup did not run it.'
@@ -435,8 +575,8 @@ function Invoke-NotchlingPrerequisites {
         if (-not $appRuntimeReady) {
             $phase = 'downloading and verifying Microsoft Windows App Runtime 1.8'
             Write-SetupLog 'Downloading Windows App Runtime 1.8 from Microsoft.'
-            $appRuntimeInstaller = Join-Path $workDirectory 'windowsappruntimeinstall-x64.exe'
-            Save-MicrosoftDownload ([Uri]'https://aka.ms/windowsappsdk/1.8/1.8.260921001/windowsappruntimeinstall-x64.exe') $appRuntimeInstaller 536870912 300
+            $appRuntimeInstaller = Join-Path $workDirectory "windowsappruntimeinstall-$Architecture.exe"
+            Save-MicrosoftDownload ([Uri]"https://aka.ms/windowsappsdk/1.8/1.8.260921001/windowsappruntimeinstall-$Architecture.exe") $appRuntimeInstaller 536870912 300
             Assert-MicrosoftSignature $appRuntimeInstaller
             Write-SetupLog "Verified Windows App Runtime installer version: $((Get-Item -LiteralPath $appRuntimeInstaller).VersionInfo.ProductVersion)."
             # Do not force elevation: registration must target the installing user.

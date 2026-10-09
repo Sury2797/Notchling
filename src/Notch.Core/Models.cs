@@ -6,7 +6,7 @@ public enum ActivityKind { Sale, Meeting, Agent, Focus, Information }
 public enum RevenueProvider { Stripe, Polar, Dodo, AdSense }
 public enum MediaPlaybackState { Unknown, Playing, Paused, Stopped, Loading }
 public sealed record ModuleDefinition(ModuleId Id, string Title, string Glyph, double Width, double Height, string Description);
-public sealed record MediaSnapshot(string Title, string Artist, string? ArtworkPath, bool IsPlaying, TimeSpan Position, TimeSpan Duration, string Source, bool CanSeek, bool CanPlay = true, bool CanPause = true, bool CanPrevious = true, bool CanNext = true, DateTimeOffset? PositionUpdatedAt = null, double PlaybackRate = 1, string? AlbumTitle = null, string? SourceDisplayName = null, string? SourceIconPath = null, MediaPlaybackState PlaybackState = MediaPlaybackState.Unknown);
+public sealed record MediaSnapshot(string Title, string Artist, string? ArtworkPath, bool IsPlaying, TimeSpan Position, TimeSpan Duration, string Source, bool CanSeek, bool CanPlay = true, bool CanPause = true, bool CanPrevious = true, bool CanNext = true, DateTimeOffset? PositionUpdatedAt = null, double PlaybackRate = 1, string? AlbumTitle = null, string? SourceDisplayName = null, string? SourceIconPath = null, MediaPlaybackState PlaybackState = MediaPlaybackState.Unknown, long SessionRevision = 0);
 public sealed record SystemSnapshot(double CpuPercent, double MemoryPercent, int? BatteryPercent, double Volume, string OutputDevice, TimeSpan SessionScreenTime, bool AudioAvailable = true);
 public sealed record ClipboardItem(Guid Id, string Text, DateTimeOffset CapturedAt);
 public sealed record SavedNote(Guid Id, string Title, string Text, DateTimeOffset UpdatedAt);
@@ -30,6 +30,7 @@ public sealed record AppPreferences
     public bool ReducedMotion { get; init; }
     public bool HoverNavigation { get; init; } = true;
     public bool CaptureClipboard { get; init; }
+    public bool CheckForUpdatesAutomatically { get; init; }
     public bool DemoMode { get; init; }
     public int FocusMinutes { get; init; } = 25;
     public int HydrationMinutes { get; init; } = 30;

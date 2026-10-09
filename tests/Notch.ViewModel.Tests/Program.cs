@@ -48,6 +48,7 @@ MainViewModel ViewModel() => new(new DispatcherQueue(), dataDirectory: data);
 #endif
 
 await ConnectionStatusCases.RegisterAsync(Case, data);
+await UpdateNotificationCases.RegisterAsync(Case, data);
 
 await Case("Public testing grants every tool without inventing a paid entitlement", async () =>
 {
@@ -252,21 +253,21 @@ await Case("Unsigned evaluation update check gives manual guidance without savin
     await File.WriteAllTextAsync(workspacePath, JsonSerializer.Serialize(new MainViewModel.LocalData([], [], [], [], "Keep my real notebook — café")));
     await File.WriteAllTextAsync(preferencesPath, JsonSerializer.Serialize(new AppPreferences { FocusMinutes = 37 }));
     var store = new FaultingStore(data);
-    await using var vm = new MainViewModel(new DispatcherQueue(), dataDirectory: data, store: store);
+    var updates = new FakeUpdateService { Result = FakeUpdateService.Evaluation };
+    await using var vm = new MainViewModel(new DispatcherQueue(), dataDirectory: data, store: store, updateService: updates);
     await vm.InitializeAsync();
     var originalFiles = Directory.GetFiles(data).ToDictionary(path => path, File.ReadAllBytes);
     var writes = store.Writes;
-    const string guidance = "This evaluation build uses manual updates. Open Release page to download the latest installer.";
+    const string guidance = "Notchling 999.0.0 is available. This evaluation uses manual updates; open Release page to download its installer.";
     var updateNotifications = new List<string>();
     vm.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(vm.UpdateStatus)) updateNotifications.Add(vm.UpdateStatus); };
     store.FailWrites = true;
     try
     {
-        // Uses the linked, real WindowsUpdateService against this unsigned test
-        // executable. A mistaken save would fail rather than quietly pass.
+        // Read-only metadata is doubled; a mistaken save would fail rather than pass.
         await vm.ExecuteAsync(vm.CheckForUpdatesAsync);
         await vm.ExecuteAsync(vm.CheckForUpdatesAsync);
-        Assert(vm.Error == "" && vm.Status == guidance && vm.UpdateStatus == guidance,
+        Assert(vm.Error == "" && vm.UpdateStatus == guidance && updates.Downloads == 0 && updates.Opens == 0,
             "An expected evaluation limitation appeared as an error or failed to explain how to update.");
         Assert(updateNotifications.Count(status => status == guidance) == 2,
             "Repeated update checks did not publish the durable Settings guidance.");

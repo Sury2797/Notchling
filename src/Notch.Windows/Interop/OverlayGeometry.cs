@@ -65,14 +65,31 @@ public static class OverlayGeometry
             target.ToolbarVisible);
     }
 
+    /// <summary>Keep short or interrupted changes responsive without extending a full opening beyond 180 ms.</summary>
+    public static TimeSpan TransitionDuration(OverlayLayout start, OverlayLayout target, double scale)
+    {
+        if (!double.IsFinite(scale) || scale <= 0)
+            throw new ArgumentOutOfRangeException(nameof(scale));
+        var physicalDistance = Math.Max(
+            Math.Max(Math.Abs((double)target.X - start.X), Math.Abs((double)target.Y - start.Y)),
+            Math.Max(Math.Abs((double)target.Width - start.Width), Math.Abs((double)target.Height - start.Height)));
+        if (physicalDistance == 0) return TimeSpan.Zero;
+        // Measure in DIPs so the same movement does not become slower on a denser display.
+        return TimeSpan.FromMilliseconds(Math.Clamp(110 + physicalDistance / scale * .175, 110, 180));
+    }
+
     /// <summary>The body and short path into the dock form one interaction surface; empty flanks do not.</summary>
     public static bool ContainsInteractionPoint(double x, double y, double width, double bodyHeight,
-        bool toolbarVisible, double toolbarWidth, double cornerRadius = 26)
+        bool toolbarVisible, double toolbarWidth, double cornerRadius = 26, double? toolbarBodyHeight = null,
+        double? visibleWindowHeight = null)
     {
         if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(width)
             || !double.IsFinite(bodyHeight) || !double.IsFinite(toolbarWidth)
+            || !double.IsFinite(cornerRadius)
             || width <= 0 || bodyHeight <= 0 || toolbarWidth <= 0
             || x < 0 || y < 0 || x >= width) return false;
+        if (visibleWindowHeight is { } visibleHeight
+            && (!double.IsFinite(visibleHeight) || visibleHeight <= 0 || y >= visibleHeight)) return false;
         if (y < bodyHeight)
         {
             var radius = Math.Clamp(cornerRadius, 0, Math.Min(width / 2, bodyHeight / 2));
@@ -80,15 +97,19 @@ public static class OverlayGeometry
             var centerX = x < radius ? radius : width - radius;
             return Math.Pow(x - centerX, 2) + Math.Pow(y - (bodyHeight - radius), 2) <= radius * radius;
         }
-        if (!toolbarVisible || y >= bodyHeight + 58) return false;
+        // XAML places the detached dock at the final body edge once, while the native
+        // panel boundary interpolates. Do not treat the empty travelling edge as a dock.
+        var dockBody = toolbarBodyHeight ?? bodyHeight;
+        if (!toolbarVisible || !double.IsFinite(dockBody) || dockBody < 0
+            || y < dockBody || y >= dockBody + 58) return false;
         var dockWidth = Math.Min(toolbarWidth, width);
         var left = (width - dockWidth) / 2;
         if (x < left || x >= left + dockWidth) return false;
         // The ten-DIP vertical gap and the separator between the two dock capsules
         // are an intentional pointer corridor, retained by the same finite leave grace.
-        if (y < bodyHeight + 10) return true;
+        if (y < dockBody + 10) return true;
         var dockX = x - left;
-        var dockY = y - bodyHeight - 10;
+        var dockY = y - dockBody - 10;
         var dockRadius = Math.Min(24, dockWidth / 2);
         if (dockX >= dockRadius && dockX < dockWidth - dockRadius) return true;
         var center = dockX < dockRadius ? dockRadius : dockWidth - dockRadius;

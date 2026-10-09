@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
 using Notch.Core;
 using Notch.Windows.Interop;
 using Notch.Windows.ViewModels;
@@ -40,13 +39,13 @@ public sealed partial class MainWindow : Window
     private OverlayMode _renderedMode;
     private ModuleId? _renderedModule;
     private bool _explicitOpening;
-    private string? _compactArtworkPath;
-    private long _compactArtworkRequest;
     private int _hoverDiagnosticCount;
     public MainWindow()
     {
         InitializeComponent();
         NativeTheme.Initialize(DispatcherQueue);
+        ElementCompositionPreview.SetIsTranslationEnabled(ToolContent, true);
+        NativeTheme.ApplyCardFeedback(RootGrid);
         _host = new(this);
         _vm = new(DispatcherQueue) { WindowHandle = _host.Handle };
         Title = ProductIdentity.WindowTitle;
@@ -151,7 +150,7 @@ public sealed partial class MainWindow : Window
             NavigationButtons.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
             var button = new Button
             {
-                Content = new FontIcon { Glyph = definition.Glyph, FontSize = 16 },
+                Content = new VisualIcon { Kind = VisualIcon.ForModule(module), Size = 19 },
                 Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new(0), CornerRadius = new(20),
                 Padding = new(0), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
                 UseSystemFocusVisuals = true,
@@ -163,7 +162,7 @@ public sealed partial class MainWindow : Window
             Grid.SetColumn(button, _buttons.Count); _buttons.Add(module, button); NavigationButtons.Children.Add(button);
         }
     }
-    private void OnThemeChanged(object? sender, EventArgs args) { if (!_quitting) RenderShell(false); }
+    private void OnThemeChanged(object? sender, EventArgs args) { if (!_quitting) { NativeTheme.ApplyCardFeedback(RootGrid); RenderShell(false); } }
     private void OnDisplayChanged(object? sender, EventArgs args)
     {
         if (_quitting) return;
@@ -176,9 +175,9 @@ public sealed partial class MainWindow : Window
     {
         if (_quitting) return;
         if (args.PropertyName is nameof(MainViewModel.Preferences) or nameof(MainViewModel.IsDemo) or nameof(MainViewModel.IsReady) or nameof(MainViewModel.IsPremium) or nameof(MainViewModel.CanUseExtendedTools)) RenderShell(false);
-        else if (args.PropertyName is nameof(MainViewModel.Media) or nameof(MainViewModel.FocusTime) or nameof(MainViewModel.FocusRunning)) UpdateCompactTitle();
+        else if (args.PropertyName is nameof(MainViewModel.Media) or nameof(MainViewModel.FocusTime) or nameof(MainViewModel.FocusRunning) or nameof(MainViewModel.MediaSourceSelection) or nameof(MainViewModel.HasAvailableUpdate)) UpdateCompactTitle();
         else if (args.PropertyName == nameof(MainViewModel.Error)) { ErrorBar.Message = _vm.Error; ErrorBar.IsOpen = !string.IsNullOrWhiteSpace(_vm.Error); }
-        else if (args.PropertyName is nameof(MainViewModel.Status) or nameof(MainViewModel.SaveState) or nameof(MainViewModel.PlanStatus)) UpdateStatus();
+        else if (args.PropertyName is nameof(MainViewModel.Status) or nameof(MainViewModel.SaveState) or nameof(MainViewModel.PlanStatus) or nameof(MainViewModel.ShellStatus) or nameof(MainViewModel.HasUnsavedChanges)) UpdateStatus();
     }
     private void RenderShell(bool animate, bool reposition = true)
     {
@@ -207,7 +206,8 @@ public sealed partial class MainWindow : Window
                 showToolbar: expanded, monitorDeviceId: _vm.Preferences.MonitorDeviceId, horizontalOffset: _vm.Preferences.HorizontalOffset,
                 topOffset: _vm.Preferences.TopOffset, suppressInFullscreen: _vm.Preferences.HideInFullscreen,
                 animate: animate && !_vm.Preferences.ReducedMotion && NativeTheme.AnimationsEnabled, geometryChanged: UpdateShellGeometry,
-                toolbarWidth: _vm.CanUseExtendedTools ? 496 : 400);
+                toolbarWidth: _vm.CanUseExtendedTools ? 496 : 400, cornerRadius: expanded ? 26 : 20,
+                animationsEnabled: !_vm.Preferences.ReducedMotion && NativeTheme.AnimationsEnabled);
         UpdateShellGeometry();
         PanelSurface.CornerRadius = new(0, 0, expanded ? 26 : 20, expanded ? 26 : 20);
         CompactButton.Visibility = !expanded && !activity ? Visibility.Visible : Visibility.Collapsed;
@@ -237,13 +237,14 @@ public sealed partial class MainWindow : Window
         {
             ActivityOpenButton.Visibility = notification.Destination is null ? Visibility.Collapsed : Visibility.Visible;
             ActivitySource.Text = notification.Source.ToUpperInvariant(); ActivityTitle.Text = notification.Title; ActivityDetail.Text = notification.Detail ?? "";
-            ActivityGlyph.Glyph = notification.Kind switch { ActivityKind.Focus => "\uE916", ActivityKind.Meeting => "\uE787", ActivityKind.Sale => "\uE8C7", _ => "\uE8EA" };
+            ActivityGlyph.Kind = notification.Kind switch { ActivityKind.Focus => VisualIconKind.Focus, ActivityKind.Meeting => VisualIconKind.Calendar, ActivityKind.Sale => VisualIconKind.Revenue, _ => VisualIconKind.Notification };
         }
         if (animate && contentChanged && expanded && !_vm.Preferences.ReducedMotion && NativeTheme.AnimationsEnabled)
         {
-            AnimateContent();
+            AnimateContent(_renderedMode != OverlayMode.Expanded);
             if (_renderedMode != OverlayMode.Expanded) AnimateDock();
         }
+        if (!expanded || _vm.Preferences.ReducedMotion || !NativeTheme.AnimationsEnabled) ResetShellAnimations();
         _renderedMode = mode; _renderedModule = _vm.SelectedModule;
         if (_started) _host.Show(userRequested: false);
         if (_vm.IsReady && _vm.Preferences.MonitorDeviceId is null && _host.ActiveMonitorDeviceId is { } deviceId)
@@ -252,10 +253,8 @@ public sealed partial class MainWindow : Window
     private void UpdateStatus()
     {
         DemoStrip.Visibility = _vm.IsDemo ? Visibility.Visible : Visibility.Collapsed;
-        var status = _vm.Status;
-        if (_vm.SelectedModule is not ModuleId.Home and not ModuleId.Media
-            && status == "Live data — controls follow your active Windows player.") status = "";
-        StatusText.Text = string.IsNullOrWhiteSpace(status) ? _vm.SaveState : status;
+        StatusText.Text = _vm.ShellStatus;
+        StatusText.Visibility = string.IsNullOrWhiteSpace(StatusText.Text) ? Visibility.Collapsed : Visibility.Visible;
         ToolTipService.SetToolTip(StatusText, StatusText.Text);
     }
     private void UpdateCompactTitle()
@@ -263,36 +262,17 @@ public sealed partial class MainWindow : Window
         var media = _vm.Media;
         var title = media is not null ? MediaPresentation.Title(media) : _vm.FocusRunning ? "Focus · " + _vm.FocusTime : ProductIdentity.DisplayName;
         CompactTitle.Text = _vm.IsDemo ? "Preview · " + title : title;
-        CompactGlyph.Glyph = media is not null ? "\uE8D6" : _vm.FocusRunning ? "\uE916" : "\uE713";
-        ToolTipService.SetToolTip(CompactButton, media is null ? CompactTitle.Text
-            : string.Join(" · ", new[] { MediaPresentation.Title(media), media.Artist, media.AlbumTitle, MediaPresentation.SourceLabel(media.Source, media.SourceDisplayName) }
-                .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal)));
-        var artwork = media?.ArtworkPath ?? media?.SourceIconPath;
-        if (!StringComparer.Ordinal.Equals(_compactArtworkPath, artwork))
-        {
-            _compactArtworkPath = artwork;
-            _ = LoadCompactArtworkAsync(artwork);
-        }
-    }
-    private async Task LoadCompactArtworkAsync(string? path)
-    {
-        var request = ++_compactArtworkRequest;
-        CompactArtwork.Source = new BitmapImage(new Uri("ms-appx:///Assets/Notchling.png"));
-        CompactArtwork.Stretch = _vm.Media?.ArtworkPath is null ? Stretch.Uniform : Stretch.UniformToFill;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
-        try
-        {
-            var file = await global::Windows.Storage.StorageFile.GetFileFromPathAsync(Path.GetFullPath(path));
-            using var stream = await file.OpenReadAsync();
-            var image = new BitmapImage { DecodePixelWidth = 48 };
-            await image.SetSourceAsync(stream);
-            if (_quitting || request != _compactArtworkRequest) return;
-            CompactArtwork.Source = image;
-        }
-        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
-        {
-            // Album and player icons are optional; the approved app icon remains available.
-        }
+        CompactGlyph.Kind = media is not null ? VisualIconKind.Music : _vm.FocusRunning ? VisualIconKind.Focus : VisualIconKind.ChevronDown;
+        CompactArtwork.Visibility = media is null ? Visibility.Visible : Visibility.Collapsed;
+        CompactSourceIcon.Visibility = media is null ? Visibility.Collapsed : Visibility.Visible;
+        CompactSourceIcon.SetSource(media, _vm.MediaSourceSelection);
+        UpdateBadge.Visibility = _vm.HasAvailableUpdate ? Visibility.Visible : Visibility.Collapsed;
+        var detail = media is null ? CompactTitle.Text : string.Join(" · ", new[] {
+            MediaPresentation.Title(media), media.Artist, media.AlbumTitle,
+            MediaSourceIdentity.Resolve(media, _vm.MediaSourceSelection).Tooltip
+        }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal));
+        if (_vm.HasAvailableUpdate) detail += " · Notchling " + _vm.AvailableUpdateVersion + " is available in Settings";
+        ToolTipService.SetToolTip(CompactButton, detail);
     }
     private void UpdateShellGeometry()
     {
@@ -312,15 +292,31 @@ public sealed partial class MainWindow : Window
         var navigationWidth = Math.Max(0, width - 112);
         if (NavigationColumn.Width.Value != navigationWidth) NavigationColumn.Width = new(navigationWidth);
     }
-    private void AnimateContent()
+    private void AnimateContent(bool opening)
     {
         var visual = ElementCompositionPreview.GetElementVisual(ToolContent);
         var compositor = visual.Compositor;
         var easing = compositor.CreateCubicBezierEasingFunction(new(.2f, .7f), new(.2f, 1));
-        var opacity = compositor.CreateScalarKeyFrameAnimation(); opacity.InsertKeyFrame(0, .8f); opacity.InsertKeyFrame(1, 1, easing); opacity.Duration = TimeSpan.FromMilliseconds(160);
-        var scale = compositor.CreateVector3KeyFrameAnimation(); scale.InsertKeyFrame(0, new(.99f, .99f, 1)); scale.InsertKeyFrame(1, Vector3.One, easing); scale.Duration = TimeSpan.FromMilliseconds(180);
-        visual.CenterPoint = new((float)ToolContent.ActualWidth / 2, 0, 0);
-        visual.StartAnimation("Opacity", opacity); visual.StartAnimation("Scale", scale);
+        // Keep text and vectors at their final raster scale throughout the reveal.
+        visual.StopAnimation("Scale"); visual.Scale = Vector3.One;
+        var opacity = compositor.CreateScalarKeyFrameAnimation();
+        opacity.InsertKeyFrame(0, opening ? 0 : .78f); opacity.InsertKeyFrame(1, 1, easing);
+        opacity.DelayTime = opening ? TimeSpan.FromMilliseconds(35) : TimeSpan.Zero;
+        opacity.Duration = TimeSpan.FromMilliseconds(opening ? 145 : 130);
+        var translation = compositor.CreateVector3KeyFrameAnimation();
+        translation.InsertKeyFrame(0, new(0, opening ? 5 : 2, 0)); translation.InsertKeyFrame(1, Vector3.Zero, easing);
+        translation.DelayTime = opacity.DelayTime; translation.Duration = opacity.Duration;
+        visual.StartAnimation("Opacity", opacity); visual.StartAnimation("Translation", translation);
+    }
+    private void ResetShellAnimations()
+    {
+        foreach (var element in new UIElement[] { ToolContent, ToolbarGrid })
+        {
+            var visual = ElementCompositionPreview.GetElementVisual(element);
+            visual.StopAnimation("Opacity"); visual.StopAnimation("Scale"); visual.StopAnimation("Translation");
+            visual.Opacity = 1; visual.Scale = Vector3.One;
+            visual.Properties.InsertVector3("Translation", Vector3.Zero);
+        }
     }
     private void AnimateDock()
     {
@@ -481,7 +477,6 @@ public sealed partial class MainWindow : Window
             }
             _quitting = true;
             _openDelay.Stop(); _hoverMonitor.Stop(); _switchDelay.Stop();
-            ++_compactArtworkRequest;
             if (discard) await _vm.DiscardAndDisposeAsync(); else await _vm.DisposeAsync();
             _vm.PropertyChanged -= OnViewModelChanged;
             NativeTheme.Changed -= OnThemeChanged;

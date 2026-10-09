@@ -6,6 +6,7 @@ TimerCases.Register(suite);
 OverlayCases.Register(suite);
 OverlayGeometryCases.Register(suite);
 HoverInteractionCases.Register(suite);
+MediaSourceIdentityCases.Register(suite);
 StoreCases.Register(suite);
 WorkspaceCases.Register(suite);
 ConverterCases.Register(suite);

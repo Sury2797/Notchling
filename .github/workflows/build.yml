@@ -48,12 +48,28 @@ jobs:
         run: python -m unittest discover -s tests/release -v
 
   windows:
-    name: Windows x64 installer and launch (${{ matrix.os }})
+    name: Windows ${{ matrix.arch }} installer and launch (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, windows-2022]
+        include:
+          - os: windows-latest
+            arch: x64
+            platform: x64
+            artifact_suffix: x64
+          - os: windows-2022
+            arch: x64
+            platform: x64
+            artifact_suffix: x64-windows-2022
+          - os: windows-2022
+            arch: x86
+            platform: x86
+            artifact_suffix: x86
+          - os: windows-11-arm
+            arch: arm64
+            platform: ARM64
+            artifact_suffix: arm64
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v6
@@ -61,7 +77,7 @@ jobs:
           dotnet-version: '10.0.x'
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: '3.13'
       - name: Validate Windows release script syntax
         shell: pwsh
         run: |
@@ -72,24 +88,24 @@ jobs:
           }
       - name: Exercise prerequisite handling in Windows PowerShell 5.1
         shell: pwsh
-        run: ./scripts/invoke-prerequisite-check.ps1 -Mode Unit
+        run: ./scripts/invoke-prerequisite-check.ps1 -Mode Unit -AppArchitecture ${{ matrix.arch }}
       - name: Exercise Windows App Runtime module-not-found recovery
         shell: pwsh
-        run: ./scripts/invoke-prerequisite-check.ps1 -Mode RuntimeFallback
+        run: ./scripts/invoke-prerequisite-check.ps1 -Mode RuntimeFallback -AppArchitecture ${{ matrix.arch }}
       - name: Exercise the missing-dotnet download and installer path
         shell: pwsh
-        run: ./scripts/invoke-prerequisite-check.ps1 -Mode Integration
+        run: ./scripts/invoke-prerequisite-check.ps1 -Mode Integration -AppArchitecture ${{ matrix.arch }}
       - name: Build native WinUI application
-        run: dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=x64
+        run: dotnet build src/Notch.Windows/Notch.Windows.csproj --configuration Release -p:Platform=${{ matrix.platform }}
       - name: Publish application without bundled shared runtimes
         run: >-
           dotnet publish src/Notch.Windows/Notch.Windows.csproj
-          --configuration Release --runtime win-x64 --self-contained false
-          -p:Platform=x64 -p:WindowsPackageType=None
+          --configuration Release --runtime win-${{ matrix.arch }} --self-contained false
+          -p:Platform=${{ matrix.platform }} -p:WindowsPackageType=None
           -p:WindowsAppSDKSelfContained=false -p:PublishSingleFile=false
-          --output artifacts/notchling-windows-x64
+          --output artifacts/notchling-windows-${{ matrix.arch }}
       - name: Measure published app and reject bundled runtimes
-        run: python scripts/report-package-size.py --publish artifacts/notchling-windows-x64 --require-app-only --output artifacts/package-size.json
+        run: python scripts/report-package-size.py --publish artifacts/notchling-windows-${{ matrix.arch }} --architecture ${{ matrix.arch }} --require-app-only --output artifacts/package-size.json
       - name: Install evaluation installer compiler
         shell: pwsh
         run: |
@@ -106,17 +122,17 @@ jobs:
           $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
           $license = Join-Path (Split-Path $iscc) 'license.txt'
           $version = (Get-Item $iscc).VersionInfo.FileVersion
-          python scripts/bundle-notices.py --publish artifacts/notchling-windows-x64 --assets src/Notch.Windows/obj/project.assets.json --installer-license $license --installer-version $version
+          python scripts/bundle-notices.py --publish artifacts/notchling-windows-${{ matrix.arch }} --assets src/Notch.Windows/obj/project.assets.json --installer-license $license --installer-version $version
           if ($LASTEXITCODE -ne 0) { throw 'Notice generation failed.' }
       - name: Compile single-file evaluation setup
         shell: pwsh
         run: |
           [xml]$project = Get-Content src/Notch.Windows/Notch.Windows.csproj
           $version = [string]$project.Project.PropertyGroup.Version
-          $publish = Join-Path $PWD 'artifacts/notchling-windows-x64'
+          $publish = Join-Path $PWD 'artifacts/notchling-windows-${{ matrix.arch }}'
           $output = Join-Path $PWD 'artifacts/installer'
           $PSNativeCommandUseErrorActionPreference = $false
-          $compilerOutput = & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /DEvaluationBuild "/DAppVersion=$version" "/DPublishDirectory=$publish" "/DReleaseDirectory=$output" packaging/windows/Notch.iss 2>&1
+          $compilerOutput = & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /DEvaluationBuild "/DAppArchitecture=${{ matrix.arch }}" "/DAppVersion=$version" "/DPublishDirectory=$publish" "/DReleaseDirectory=$output" packaging/windows/Notch.iss 2>&1
           $compilerExit = $LASTEXITCODE
           $compilerOutput | Write-Output
           if ($compilerExit -ne 0) {
@@ -128,76 +144,31 @@ jobs:
         shell: pwsh
         run: |
           $setup = Get-ChildItem artifacts/installer/*-evaluation-setup.exe | Select-Object -First 1 -ExpandProperty FullName
-          python scripts/report-package-size.py --publish artifacts/notchling-windows-x64 --require-app-only --installer $setup --output artifacts/package-size.json
+          python scripts/report-package-size.py --publish artifacts/notchling-windows-${{ matrix.arch }} --architecture ${{ matrix.arch }} --require-app-only --installer $setup --output artifacts/package-size.json
           if ($LASTEXITCODE -ne 0) { throw 'App-only package verification failed.' }
       - name: Install and launch the actual evaluation setup
         shell: pwsh
         run: |
           $setup = Get-ChildItem artifacts/installer/*-evaluation-setup.exe | Select-Object -First 1 -ExpandProperty FullName
-          $install = Join-Path $env:RUNNER_TEMP 'Notchling.InstallerSmoke'
-          $log = Join-Path $PWD 'artifacts/installer-smoke.log'
-          $prerequisiteLog = Join-Path $env:LOCALAPPDATA 'Notchling/Setup/Logs/setup-prerequisites.log'
-          $prerequisiteLines = @()
-          function ConvertTo-WorkflowData([string]$Message) {
-            return $Message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-          }
-          $result = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$install`"", "/LOG=`"$log`"") -Wait -PassThru
-          if (Test-Path -LiteralPath $prerequisiteLog) {
-            if ((Get-Item -LiteralPath $prerequisiteLog).Length -gt 1048576) {
-              throw 'The prerequisite diagnostic log exceeded its 1 MiB cloud-test limit.'
-            }
-            Copy-Item -LiteralPath $prerequisiteLog -Destination artifacts/setup-prerequisites.log
-            $prerequisiteLines = @(Get-Content -LiteralPath $prerequisiteLog)
-          }
-          if ($result.ExitCode -ne 0) {
-            $details = if ($prerequisiteLines.Count -gt 0) { ($prerequisiteLines | Select-Object -Last 12) -join ' | ' } else { (Get-Content $log -Tail 12) -join ' | ' }
-            $failure = ConvertTo-WorkflowData "Evaluation setup failed: $($result.ExitCode). $details"
-            Write-Output "::error::$failure"
-            throw 'Evaluation setup failed. See installer-smoke.log.'
-          }
-          if ($prerequisiteLines.Count -eq 0) { throw 'Successful setup did not produce prerequisite verification evidence.' }
-          $downloadedBytes = 0L
-          foreach ($line in $prerequisiteLines) {
-            if ($line -match '\bDownloaded (\d+) bytes from [a-z0-9.-]+\.') { $downloadedBytes += [long]$Matches[1] }
-          }
-          $dotNetInstalled = @($prerequisiteLines | Where-Object { $_ -match 'Downloading the current stable \.NET 10 runtime from Microsoft\.' }).Count -gt 0
-          $dotNetReused = -not $dotNetInstalled -and @($prerequisiteLines | Where-Object { $_ -match 'Shared \.NET runtime already present:' }).Count -gt 0
-          $scope = if ($dotNetReused) { 'Shared .NET was reused; missing-.NET installation was not exercised.' } else { 'A missing .NET prerequisite was installed during this run.' }
-          $summary = "Setup prerequisite download bytes: $downloadedBytes; .NET runtime reused: $dotNetReused. $scope This cloud test does not qualify bare Windows 10/11 or denied-UAC/offline behavior."
-          Write-Output "::notice::$(ConvertTo-WorkflowData $summary)"
-          $recognized = 'Shared \.NET runtime already present:|Downloading the current stable \.NET 10 runtime|Downloading Windows App Runtime|Downloaded \d+ bytes from|Verified Windows App Runtime installer version:|Windows App Runtime 1\.8 framework, Main, Singleton and DDLM are registered|All prerequisites verified for the current user\.'
-          foreach ($line in ($prerequisiteLines | Where-Object { $_ -match $recognized } | Select-Object -Last 7)) {
-            Write-Output "::notice::$(ConvertTo-WorkflowData $line)"
-          }
-          $app = Get-ChildItem (Join-Path $install 'app') -Filter Notchling.Windows.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $app) { throw 'The installer did not create the application.' }
-          try {
-            ./scripts/smoke-windows.ps1 -AppPath $app -ReportPath artifacts/windows-smoke.json
-          } finally {
-            $uninstall = Join-Path $install 'unins000.exe'
-            if (Test-Path $uninstall) {
-              $cleanup = Start-Process -FilePath $uninstall -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
-              if ($cleanup.ExitCode -ne 0) { throw "Smoke-test uninstall failed: $($cleanup.ExitCode)." }
-            }
-          }
+          ./scripts/qualify-windows-installer.ps1 -SetupPath $setup -AppArchitecture ${{ matrix.arch }} -ReportDirectory artifacts
       - uses: actions/upload-artifact@v6
         with:
-          name: ${{ matrix.os == 'windows-latest' && 'notchling-windows-x64-installer' || 'notchling-windows-x64-installer-windows-2022' }}
+          name: notchling-windows-${{ matrix.artifact_suffix }}-installer
           path: artifacts/installer/*-evaluation-setup.exe
           compression-level: 0
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v6
         with:
-          name: ${{ matrix.os == 'windows-latest' && 'notchling-windows-x64-app-only' || 'notchling-windows-x64-app-only-windows-2022' }}
-          path: artifacts/notchling-windows-x64/*
+          name: notchling-windows-${{ matrix.artifact_suffix }}-app-only
+          path: artifacts/notchling-windows-${{ matrix.arch }}/*
           compression-level: 9
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: ${{ matrix.os == 'windows-latest' && 'notchling-windows-cloud-test-results' || 'notchling-windows-cloud-test-results-windows-2022' }}
+          name: notchling-windows-${{ matrix.artifact_suffix }}-cloud-test-results
           path: |
             artifacts/package-size.json
             artifacts/windows-smoke.json
@@ -210,7 +181,7 @@ jobs:
           retention-days: 14
 
   evaluation:
-    name: Publish tested evaluation EXE
+    name: Publish tested x64, x86 and ARM64 evaluation apps
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/notchling-evaluation-')
     needs: [core, windows]
     runs-on: ubuntu-latest
@@ -222,7 +193,15 @@ jobs:
         with:
           name: notchling-windows-x64-installer
           path: artifacts/installer
-      - name: Publish one setup EXE after all checks pass
+      - uses: actions/download-artifact@v6
+        with:
+          name: notchling-windows-x86-installer
+          path: artifacts/installer
+      - uses: actions/download-artifact@v6
+        with:
+          name: notchling-windows-arm64-installer
+          path: artifacts/installer
+      - name: Publish three architecture-specific setup EXEs after all checks pass
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -234,26 +213,29 @@ jobs:
           NOTCH_EVALUATION_VERSION="${NOTCH_EVALUATION_TAG#notchling-evaluation-}"
           NOTCH_PROJECT_VERSION="$(python3 -c 'import xml.etree.ElementTree as e; print(e.parse("src/Notch.Windows/Notch.Windows.csproj").findtext("PropertyGroup/Version"))')"
           [[ "$NOTCH_EVALUATION_VERSION" == "$NOTCH_PROJECT_VERSION" ]] || exit 1
-          NOTCH_SETUP_NAME="Notchling-${NOTCH_EVALUATION_VERSION}-windows-x64-evaluation-setup.exe"
-          NOTCH_SETUP_PATH="artifacts/installer/$NOTCH_SETUP_NAME"
-          [[ -f "$NOTCH_SETUP_PATH" ]] || exit 1
-          NOTCH_SETUP_HASH="$(sha256sum "$NOTCH_SETUP_PATH" | cut -d ' ' -f 1)"
-          NOTCH_SETUP_BYTES="$(stat -c %s "$NOTCH_SETUP_PATH")"
-          NOTCH_SETUP_MEGABYTES="$(python3 -c 'import sys; print(f"{int(sys.argv[1]) / 1000000:.2f}")' "$NOTCH_SETUP_BYTES")"
           cat > evaluation-notes.md <<EOF
-          Download **$NOTCH_SETUP_NAME** below and run Setup. No developer SDK or manual dependency setup is required.
+          Choose the **x64** setup for most Intel/AMD laptops, **ARM64** for Windows on ARM, or **x86** for 32-bit Windows 10. Download only your app Setup EXE below. No developer SDK or manual dependency setup is required.
 
-          **All 21 tools are free for everyone during public testing.** Checkout is paused. Provider credentials and optional service setup are still needed for external data; public access does not create a paid subscription.
+          **All 21 tools are free for everyone during public testing.** Checkout is paused. External data still requires provider credentials or optional service setup.
 
-          This unsigned Windows x64 evaluation passed native installation, launch, all-tool navigation, hover/typing collapse recovery, eight connection states, compact credential alignment, media empty-state controls, notes/Awake, Pomodoro, scratchpad persistence, and uninstall in [cloud CI](https://github.com/$GH_REPO/actions/runs/$NOTCH_EVALUATION_RUN). Source: $NOTCH_EVALUATION_REVISION.
+          All three application architectures passed installation, native launch, all-tool navigation, hover/typing recovery, connection states, credential alignment, notes/Awake, media controls, Pomodoro, scratchpad persistence and uninstall in [cloud CI](https://github.com/$GH_REPO/actions/runs/$NOTCH_EVALUATION_RUN). Source: $NOTCH_EVALUATION_REVISION.
 
-          Setup installs missing shared .NET and Windows App Runtime components automatically. This app installer is **$NOTCH_SETUP_MEGABYTES MB**. Missing components require additional one-time downloads; [runtime estimates and cloud measurements](https://github.com/$GH_REPO/blob/$NOTCH_EVALUATION_REVISION/docs/release-delivery.md) explain the first-install cost. Existing compatible components are reused.
+          x64 was tested on two Windows host generations; ARM64 on a native Windows 11 ARM runner; x86 on a 64-bit Windows runner with cross-bitness UI Automation. The x86 run does not certify a consumer 32-bit Windows 10 device. Windows 11 has no 32-bit OS edition. Windows 10 22H2 and Windows 11 are targets; actual consumer hardware/accessibility qualification remains pending.
 
-          Windows 10 22H2 and Windows 11 are release targets; full consumer hardware/accessibility qualification remains pending. Premium billing is not live. Publisher signing and production release approval remain required.
+          Setup automatically installs missing shared .NET and Windows App Runtime components for your app architecture. Missing components add one-time downloads; [runtime costs and measurements](https://github.com/$GH_REPO/blob/$NOTCH_EVALUATION_REVISION/docs/release-delivery.md) explain the first-install cost. Compatible installed components are reused. This is an unsigned evaluation; production publisher signing and billing remain unconfigured.
 
-          Installer bytes: $NOTCH_SETUP_BYTES
-
-          Installer SHA-256: $NOTCH_SETUP_HASH
+          | App | Installer bytes | SHA-256 |
+          | --- | ---: | --- |
           EOF
-          gh release create "$NOTCH_EVALUATION_TAG" "$NOTCH_SETUP_PATH" --verify-tag --prerelease --latest=false --title "Notchling $NOTCH_EVALUATION_VERSION — Windows evaluation" --notes-file evaluation-notes.md
-          echo "::notice title=Direct Windows evaluation download::https://github.com/$GH_REPO/releases/download/$NOTCH_EVALUATION_TAG/$NOTCH_SETUP_NAME"
+          NOTCH_SETUP_PATHS=()
+          for NOTCH_ARCH in x64 x86 arm64; do
+            NOTCH_SETUP_NAME="Notchling-${NOTCH_EVALUATION_VERSION}-windows-${NOTCH_ARCH}-evaluation-setup.exe"
+            NOTCH_SETUP_PATH="artifacts/installer/$NOTCH_SETUP_NAME"
+            [[ -f "$NOTCH_SETUP_PATH" ]] || exit 1
+            NOTCH_SETUP_HASH="$(sha256sum "$NOTCH_SETUP_PATH" | cut -d ' ' -f 1)"
+            NOTCH_SETUP_BYTES="$(stat -c %s "$NOTCH_SETUP_PATH")"
+            printf '| %s | %s | %s |\n' "$NOTCH_ARCH" "$NOTCH_SETUP_BYTES" "$NOTCH_SETUP_HASH" >> evaluation-notes.md
+            NOTCH_SETUP_PATHS+=("$NOTCH_SETUP_PATH")
+            echo "::notice title=Direct $NOTCH_ARCH evaluation download::https://github.com/$GH_REPO/releases/download/$NOTCH_EVALUATION_TAG/$NOTCH_SETUP_NAME"
+          done
+          gh release create "$NOTCH_EVALUATION_TAG" "${NOTCH_SETUP_PATHS[@]}" --verify-tag --prerelease --latest=false --title "Notchling $NOTCH_EVALUATION_VERSION — Windows evaluation" --notes-file evaluation-notes.md

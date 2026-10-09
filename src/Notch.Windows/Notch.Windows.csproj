@@ -7,9 +7,12 @@
     <RootNamespace>Notch.Windows</RootNamespace>
     <AssemblyName>Notchling.Windows</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Platforms>x64</Platforms>
-    <PlatformTarget>x64</PlatformTarget>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Platforms>x64;x86;ARM64</Platforms>
+    <Platform Condition="'$(Platform)' == '' or '$(Platform)' == 'AnyCPU'">x64</Platform>
+    <PlatformTarget>$(Platform)</PlatformTarget>
+    <RuntimeIdentifier Condition="'$(Platform)' == 'x64'">win-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(Platform)' == 'x86'">win-x86</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
     <UseWinUI>true</UseWinUI>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <WindowsPackageType>None</WindowsPackageType>
@@ -26,9 +29,9 @@
     <TieredPGO>true</TieredPGO>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>Assets\Notchling.ico</ApplicationIcon>
-    <Version>0.3.4</Version>
-    <AssemblyVersion>0.3.4.0</AssemblyVersion>
-    <FileVersion>0.3.4.0</FileVersion>
+    <Version>0.4.0</Version>
+    <AssemblyVersion>0.4.0.0</AssemblyVersion>
+    <FileVersion>0.4.0.0</FileVersion>
     <Product>Notchling</Product>
     <Title>Notchling</Title>
     <AssemblyTitle>Notchling</AssemblyTitle>
@@ -37,6 +40,10 @@
     <Authors>SuryaK999</Authors>
     <Copyright>Copyright © 2026 SuryaK999</Copyright>
   </PropertyGroup>
+  <Target Name="ValidateNativeArchitecture" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(Platform)' != 'x64' and '$(Platform)' != 'x86' and '$(Platform)' != 'ARM64'" Text="Notchling requires Platform=x64, x86 or ARM64." />
+    <Error Condition="('$(Platform)' == 'x64' and '$(RuntimeIdentifier)' != 'win-x64') or ('$(Platform)' == 'x86' and '$(RuntimeIdentifier)' != 'win-x86') or ('$(Platform)' == 'ARM64' and '$(RuntimeIdentifier)' != 'win-arm64')" Text="The Windows runtime identifier must match the selected native platform." />
+  </Target>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
     <ProjectReference Include="..\Notch.Core\Notch.Core.csproj" />

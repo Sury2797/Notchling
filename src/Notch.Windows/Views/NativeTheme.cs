@@ -4,6 +4,7 @@ using System.Security;
 using Microsoft.Win32;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Notch.Windows.Services;
 using Windows.UI;
@@ -20,7 +21,7 @@ internal static class NativeTheme
     private static readonly Dictionary<string, SolidColorBrush> Brushes = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> SurfaceColors = new(StringComparer.OrdinalIgnoreCase)
     {
-        "#050505", "#141414", "#191919", "#1B1B1B", "#202020", "#242424", "#252525", "#102218", "#292422", "Black"
+        "#050505", "#141414", "#191919", "#1B1B1B", "#1D1D1D", "#232323", "#202020", "#242424", "#252525", "#102218", "#292422", "Black"
     };
     private static readonly AccessibilitySettings? Accessibility = TryCreate(() => new AccessibilitySettings());
     private static readonly UISettings? Settings = TryCreate(() => new UISettings());
@@ -84,6 +85,30 @@ internal static class NativeTheme
     public static SolidColorBrush Border => Brush("#282828");
     public static SolidColorBrush SelectedBackground => Foreground;
     public static SolidColorBrush SelectedForeground => Background;
+
+    /// <summary>Retain native button states, with quieter feedback for large tool cards.</summary>
+    public static void ApplyCardFeedback(UIElement element)
+    {
+        if (element is Button button && ReferenceEquals(button.Style, Application.Current.Resources["NotchCardButtonStyle"]))
+        {
+            if (IsHighContrast)
+            {
+                foreach (var key in new[] { "ButtonBackgroundPointerOver", "ButtonBackgroundPressed", "ButtonBorderBrushPointerOver", "ButtonBorderBrushPressed" })
+                    button.Resources.Remove(key);
+            }
+            else
+            {
+                button.Resources["ButtonBackgroundPointerOver"] = Brush("#1D1D1D");
+                button.Resources["ButtonBackgroundPressed"] = Brush("#232323");
+                button.Resources["ButtonBorderBrushPointerOver"] = Brush("#383838");
+                button.Resources["ButtonBorderBrushPressed"] = Brush("#454545");
+            }
+        }
+        if (element is Panel panel)
+            foreach (var child in panel.Children) ApplyCardFeedback(child);
+        else if (element is Border { Child: { } child }) ApplyCardFeedback(child);
+        else if (element is ContentControl { Content: UIElement content }) ApplyCardFeedback(content);
+    }
 
     public static void Initialize(DispatcherQueue dispatcher)
     {

@@ -25,6 +25,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     private ModuleId? _renderedModule;
     private bool _subscribed;
     private bool _dialogOpen;
+    private readonly List<Action> _responsiveLayouts = [];
     public bool HasOpenDialog => _dialogOpen;
     private int _revenueDays = 30;
     private RevenueProvider _provider = RevenueProvider.Stripe;
@@ -34,7 +35,6 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     private CancellationTokenSource? _volumeDelay;
     private string? _artworkPath;
     private string? _seekIdentity;
-    private bool _isSourceIcon;
     private readonly Dictionary<string, (StackPanel Container, Path Arc, TextBlock Value)> _systemRings = new();
     private int _artworkRequest;
     private double? _renderedFocusProgress;
@@ -51,6 +51,16 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     public FeaturedToolsView(MainViewModel viewModel)
     {
         InitializeComponent();
+        NativeTheme.ApplyCardFeedback(ModuleRoot);
+        ConfigureResponsiveGrid(RevenueHeaderGrid, 3, 240);
+        ConfigureResponsiveGrid(RevenueRangeGrid, 3, 76);
+        ConfigureResponsiveGrid(RevenueProviderGrid, 4, 88);
+        ConfigureRevenueBody();
+        ConfigureResponsiveGrid(AnalyticsHeaderGrid, 2, 290);
+        ConfigureResponsiveGrid(AnalyticsStatsGrid, 4, 148);
+        ConfigureResponsiveGrid(AnalyticsBodyGrid, 2, 280);
+        ConfigureResponsiveGrid(CodingHeaderGrid, 2, 290);
+        ConfigureResponsiveGrid(CodingStatsGrid, 3, 190);
         _viewModel = viewModel;
         _provider = viewModel.Revenue?.Provider ?? RevenueProvider.Stripe;
         _views = new()
@@ -83,6 +93,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         {
             _viewModel.PropertyChanged += ViewModelChanged;
             _viewModel.Reminders.CollectionChanged += RemindersChanged;
+            NativeTheme.Changed += RefreshResponsiveLayouts;
             _subscribed = true;
         }
         RenderSelected();
@@ -95,6 +106,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         {
             _viewModel.PropertyChanged -= ViewModelChanged;
             _viewModel.Reminders.CollectionChanged -= RemindersChanged;
+            NativeTheme.Changed -= RefreshResponsiveLayouts;
             _subscribed = false;
         }
         _liveTick.Stop();
@@ -104,6 +116,64 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         _artworkPath = null;
         MediaArtwork.Source = null;
         ArtworkPlaceholder.Visibility = Visibility.Visible;
+    }
+
+    private void RefreshResponsiveLayouts(object? sender, EventArgs args)
+    {
+        foreach (var arrange in _responsiveLayouts) arrange();
+    }
+
+    private void ConfigureResponsiveGrid(Grid grid, int maximumColumns, double minimumColumnWidth)
+    {
+        var children = grid.Children.OfType<FrameworkElement>().ToArray();
+        var columns = 0;
+        void Arrange()
+        {
+            if (grid.ActualWidth <= 0) return;
+            var next = Math.Clamp((int)((grid.ActualWidth + grid.ColumnSpacing)
+                / (minimumColumnWidth * Math.Max(1, NativeTheme.TextScaleFactor) + grid.ColumnSpacing)), 1, maximumColumns);
+            if (columns == next) return;
+            columns = next;
+            grid.ColumnDefinitions.Clear(); grid.RowDefinitions.Clear();
+            for (var column = 0; column < columns; column++) grid.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+            for (var row = 0; row < (children.Length + columns - 1) / columns; row++) grid.RowDefinitions.Add(new() { Height = GridLength.Auto });
+            for (var index = 0; index < children.Length; index++)
+            {
+                Grid.SetColumn(children[index], index % columns); Grid.SetRow(children[index], index / columns);
+            }
+        }
+        _responsiveLayouts.Add(Arrange);
+        grid.Loaded += (_, _) => Arrange(); grid.SizeChanged += (_, _) => Arrange();
+    }
+
+    private void ConfigureRevenueBody()
+    {
+        var summary = (FrameworkElement)RevenueBodyGrid.Children[0];
+        var separator = (FrameworkElement)RevenueBodyGrid.Children[1];
+        var payments = (FrameworkElement)RevenueBodyGrid.Children[2];
+        bool? wide = null;
+        void Arrange()
+        {
+            if (RevenueBodyGrid.ActualWidth <= 0) return;
+            var next = RevenueBodyGrid.ActualWidth >= 560 * Math.Max(1, NativeTheme.TextScaleFactor);
+            if (wide == next) return;
+            wide = next;
+            RevenueBodyGrid.ColumnDefinitions.Clear(); RevenueBodyGrid.RowDefinitions.Clear();
+            RevenueBodyGrid.ColumnDefinitions.Add(new() { Width = new GridLength(next ? 1.45 : 1, GridUnitType.Star) });
+            RevenueBodyGrid.RowDefinitions.Add(new() { Height = GridLength.Auto });
+            if (next)
+            {
+                RevenueBodyGrid.ColumnDefinitions.Add(new() { Width = new GridLength(1) });
+                RevenueBodyGrid.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+            }
+            else RevenueBodyGrid.RowDefinitions.Add(new() { Height = GridLength.Auto });
+            separator.Visibility = next ? Visibility.Visible : Visibility.Collapsed;
+            Grid.SetColumn(separator, next ? 1 : 0); Grid.SetRow(separator, 0);
+            Grid.SetColumn(summary, 0); Grid.SetRow(summary, 0);
+            Grid.SetColumn(payments, next ? 2 : 0); Grid.SetRow(payments, next ? 0 : 1);
+        }
+        _responsiveLayouts.Add(Arrange);
+        RevenueBodyGrid.Loaded += (_, _) => Arrange(); RevenueBodyGrid.SizeChanged += (_, _) => Arrange();
     }
 
     private void ViewModelChanged(object? sender, PropertyChangedEventArgs e)
@@ -152,7 +222,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
                 ModuleId.Home => _viewModel.CanUseExtendedTools
                     ? property is nameof(MainViewModel.System) or nameof(MainViewModel.ListeningPorts) or nameof(MainViewModel.Analytics) or nameof(MainViewModel.Revenue) or nameof(MainViewModel.Weather)
                     : property == nameof(MainViewModel.Media),
-                ModuleId.Media => property is nameof(MainViewModel.Media) or nameof(MainViewModel.System),
+                ModuleId.Media => property is nameof(MainViewModel.Media) or nameof(MainViewModel.System) or nameof(MainViewModel.MediaSourceSelection),
                 ModuleId.Revenue => property == nameof(MainViewModel.Revenue),
                 ModuleId.Analytics => property == nameof(MainViewModel.Analytics),
                 ModuleId.Coding => property == nameof(MainViewModel.Coding),
@@ -264,8 +334,12 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
             : media?.PlaybackState == MediaPlaybackState.Stopped ? "STOPPED"
             : media?.PlaybackState == MediaPlaybackState.Loading ? "LOADING"
             : media is null || media.PlaybackState == MediaPlaybackState.Unknown ? "READY TO PLAY" : "PAUSED";
-        MediaSourceText.Text = media is null ? "Windows media" : MediaPresentation.SourceLabel(media.Source, media.SourceDisplayName);
-        ToolTipService.SetToolTip(MediaSourceText, MediaSourceText.Text);
+        var source = MediaSourceIdentity.Resolve(media, _viewModel.MediaSourceSelection);
+        MediaSourceText.Text = media is null ? "Windows media" : source.Label;
+        ToolTipService.SetToolTip(MediaSourceText, source.Tooltip);
+        MediaSourceBadgeIcon.SetSource(media, _viewModel.MediaSourceSelection);
+        ArtworkPlaceholder.SetSource(media, _viewModel.MediaSourceSelection);
+        MediaSourcePickerButton.Visibility = MediaSourceIdentity.CanSelectProvider(media) && !_viewModel.IsDemo ? Visibility.Visible : Visibility.Collapsed;
         MediaTitleText.Text = MediaPresentation.Title(media);
         ToolTipService.SetToolTip(MediaTitleText, MediaTitleText.Text);
         MediaArtistText.Text = media is null ? "Play music or video in a supported Windows app." : media.Artist;
@@ -280,7 +354,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
             _seekDelay?.Cancel(); _seekDelay = null; _seekIdentity = seekIdentity;
         }
         PlayingGlyph.Visibility = media?.IsPlaying == true ? Visibility.Visible : Visibility.Collapsed;
-        PlayPauseIcon.Glyph = media?.IsPlaying == true ? "\uE769" : "\uE768";
+        PlayPauseIcon.Kind = media?.IsPlaying == true ? VisualIconKind.Pause : VisualIconKind.Play;
         var playbackAction = media?.IsPlaying == true ? "Pause" : "Play";
         AutomationProperties.SetName(PlayPauseButton, playbackAction);
         AutomationProperties.SetName(PreviousButton, "Previous");
@@ -305,16 +379,43 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         if (_volumeDelay is null && (VolumeSlider.PointerCaptures?.Count ?? 0) == 0)
             VolumeSlider.Value = Math.Clamp(_viewModel.System?.Volume ?? 0, 0, 1);
         OutputDeviceText.Text = _viewModel.System?.OutputDevice ?? "No output device";
-        var artwork = media?.ArtworkPath ?? media?.SourceIconPath;
-        var sourceIcon = media?.ArtworkPath is null && media?.SourceIconPath is not null;
-        if (_artworkPath != artwork || _isSourceIcon != sourceIcon)
+        // The player's identity belongs in the source badge. The artwork area
+        // displays the actual cover/thumbnail or a clearly separate source icon.
+        var artwork = media?.ArtworkPath;
+        AutomationProperties.SetName(MediaArtworkBorder, artwork is null ? source.Label + " source icon" : "Media artwork");
+        if (_artworkPath != artwork)
         {
-            _artworkPath = artwork; _isSourceIcon = sourceIcon;
-            MediaArtwork.Stretch = sourceIcon ? Stretch.Uniform : Stretch.UniformToFill;
-            MediaArtwork.Margin = sourceIcon ? new Thickness(20) : new Thickness(0);
-            AutomationProperties.SetName(MediaArtworkBorder, sourceIcon ? "Player application icon" : "Media artwork");
+            _artworkPath = artwork;
             _ = LoadArtworkAsync(_artworkPath);
         }
+    }
+
+    private void MediaSourcePicker_Click(object sender, RoutedEventArgs e)
+    {
+        var track = _viewModel.Media;
+        if (!MediaSourceIdentity.CanSelectProvider(track) || _viewModel.IsDemo) return;
+        var menu = new MenuFlyout();
+        var current = MediaSourceIdentity.Resolve(track, _viewModel.MediaSourceSelection);
+        foreach (var brand in new[] { MediaSourceBrand.Automatic, MediaSourceBrand.YouTube, MediaSourceBrand.YouTubeMusic,
+            MediaSourceBrand.Spotify, MediaSourceBrand.AppleMusic })
+        {
+            var item = new ToggleMenuFlyoutItem
+            {
+                Text = MediaSourceIdentity.Label(brand),
+                IsChecked = brand == MediaSourceBrand.Automatic ? !current.IsUserSelected : current.IsUserSelected && current.Brand == brand,
+            };
+            item.Click += (_, _) =>
+            {
+                // Do not apply a choice to a different player or track that
+                // arrived while this menu was open.
+                if (_viewModel.Media is not { } latest || track is null || latest.Source != track.Source
+                    || latest.SessionRevision != track.SessionRevision || latest.Title != track.Title
+                    || latest.Artist != track.Artist || latest.AlbumTitle != track.AlbumTitle) return;
+                _viewModel.SelectMediaSource(brand);
+            };
+            menu.Items.Add(item);
+        }
+        menu.ShowAt(MediaSourcePickerButton);
     }
 
     private void RenderMediaPosition()
@@ -398,6 +499,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         foreach (var button in new[] { PolarButton, DodoButton, AdSenseButton }) { button.IsEnabled = false; ToolTipService.SetToolTip(button, "This provider is not integrated yet."); }
         RevenueRangeText.Text = revenue is null ? $"{_provider} · awaiting connection" : $"{_provider} · updated {Relative(revenue.UpdatedAt)}" + DemoSuffix;
         RevenueTotalText.Text = revenue is null ? "—" : Money(revenue.Total, revenue.Currency);
+        ToolTipService.SetToolTip(RevenueTotalText, RevenueTotalText.Text);
         RevenueOrdersText.Text = revenue is null ? "Real payments, close at hand" : $"{revenue.Payments.Count:N0} loaded payments" + (revenue.Complete ? "" : " · partial response");
         RevenueConnectPanel.Visibility = revenue is null ? Visibility.Visible : Visibility.Collapsed;
         RevenueChart.Visibility = revenue is null ? Visibility.Collapsed : Visibility.Visible;
@@ -415,7 +517,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition());
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new Border { Width = 29, Height = 29, CornerRadius = new CornerRadius(15), Background = Brush("#242424"), Child = new FontIcon { Glyph = "\uE96E", FontSize = 12 } });
+            row.Children.Add(new Border { Width = 29, Height = 29, CornerRadius = new CornerRadius(15), Background = Brush("#242424"), Child = new VisualIcon { Kind = VisualIconKind.Revenue, Size = 14 } });
             var description = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
             description.Children.Add(new TextBlock { Text = string.IsNullOrWhiteSpace(payment.Description) ? "Payment" : payment.Description, FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
             description.Children.Add(Caption(Relative(payment.CreatedAt), 10));
@@ -566,12 +668,12 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         {
             var row = new Grid { ColumnSpacing = 8 };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var complete = new Button { Style = (Style)Application.Current.Resources["NotchIconButtonStyle"], Background = new SolidColorBrush(Colors.Transparent), Content = new FontIcon { Glyph = "\uEA3A", FontSize = 17 } };
+            var complete = new Button { Style = (Style)Application.Current.Resources["NotchIconButtonStyle"], Background = new SolidColorBrush(Colors.Transparent), Content = new VisualIcon { Kind = VisualIconKind.CheckCircle, Size = 18 } };
             AutomationProperties.SetName(complete, $"Complete reminder: {reminder.Title}"); complete.Click += (_, _) => _viewModel.CompleteReminder(reminder.Id); row.Children.Add(complete);
             var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
             text.Children.Add(new TextBlock { Text = reminder.Title, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
             text.Children.Add(Caption(reminder.DueAt.LocalDateTime.ToString("t", CultureInfo.CurrentCulture), 10)); Grid.SetColumn(text, 1); row.Children.Add(text);
-            var remove = new Button { Style = (Style)Application.Current.Resources["NotchIconButtonStyle"], Content = new FontIcon { Glyph = "\uE711", FontSize = 12 } };
+            var remove = new Button { Style = (Style)Application.Current.Resources["NotchIconButtonStyle"], Content = new VisualIcon { Kind = VisualIconKind.Close, Size = 16 } };
             AutomationProperties.SetName(remove, $"Remove reminder: {reminder.Title}"); remove.Click += (_, _) => _viewModel.RemoveReminder(reminder.Id); Grid.SetColumn(remove, 2); row.Children.Add(remove);
             RemindersPanel.Children.Add(row);
         }
@@ -589,7 +691,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         var weather = _viewModel.Weather;
         WeatherCityText.Text = (weather?.City ?? _viewModel.Preferences.WeatherCity) + DemoSuffix;
         WeatherTemperatureText.Text = weather is null ? "—" : $"{weather.Temperature:0}°C";
-        WeatherCurrentIcon.Glyph = WeatherGlyph(weather?.Code ?? -1);
+        WeatherCurrentIcon.Kind = VisualIcon.ForWeatherCode(weather?.Code ?? -1);
         WeatherConditionText.Text = weather is null ? _viewModel.CanRefreshWeather ? "Ready to refresh" : "Service setup required" : $"{weather.City} · {Condition(weather.Code)}";
         WeatherDetailText.Text = weather is null ? _viewModel.WeatherConnectionGuidance : $"Feels {weather.FeelsLike:0}° · Humidity {weather.Humidity}% · Wind {weather.Wind:0} km/h";
         WeatherRefreshButton.IsEnabled = _viewModel.CanRefreshWeather && !_viewModel.IsDemo;
@@ -615,7 +717,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
             var hour = hours[index];
             var column = new StackPanel { Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center };
             column.Children.Add(Caption(hour.Time.DateTime.ToString("htt", CultureInfo.CurrentCulture), 10));
-            column.Children.Add(new FontIcon { Glyph = WeatherGlyph(hour.Code), FontSize = 19 });
+            column.Children.Add(new VisualIcon { Kind = VisualIcon.ForWeatherCode(hour.Code), Size = 22 });
             column.Children.Add(new TextBlock { Text = $"{hour.Temperature:0}°", FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
             Grid.SetColumn(column, index % hourColumns); Grid.SetRow(column, index / hourColumns); WeatherHoursGrid.Children.Add(column);
         }
@@ -629,7 +731,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
             var day = days[index];
             var column = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
             column.Children.Add(Caption(day.Date == CityToday(weather) ? "Today" : day.Date.ToString("ddd", CultureInfo.CurrentCulture), 10));
-            column.Children.Add(new FontIcon { Glyph = WeatherGlyph(day.Code), FontSize = 18 });
+            column.Children.Add(new VisualIcon { Kind = VisualIcon.ForWeatherCode(day.Code), Size = 20 });
             column.Children.Add(new TextBlock { Text = $"{day.Maximum:0}°", FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
             column.Children.Add(new Border { Width = 4, Height = 13 + 14 * Math.Clamp((day.Maximum - day.Minimum) / maximum, 0, 1), CornerRadius = new CornerRadius(2), Background = Brush("#D5D5D5"), HorizontalAlignment = HorizontalAlignment.Center });
             column.Children.Add(Caption($"{day.Minimum:0}°", 10));
@@ -736,7 +838,6 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         return age < TimeSpan.FromMinutes(1) ? "just now" : age < TimeSpan.FromHours(1) ? $"{Math.Max(1, (int)age.TotalMinutes)}m ago" : age < TimeSpan.FromDays(1) ? $"{(int)age.TotalHours}h ago" : timestamp.LocalDateTime.ToString("MMM d", CultureInfo.CurrentCulture);
     }
     private static string Condition(int code) => code switch { 0 => "Clear sky", 1 => "Mostly clear", 2 => "Partly cloudy", 3 => "Overcast", 45 or 48 => "Fog", 51 or 53 or 55 or 56 or 57 => "Drizzle", 61 or 63 or 65 or 66 or 67 or 80 or 81 or 82 => "Rain", 71 or 73 or 75 or 77 or 85 or 86 => "Snow", 95 or 96 or 99 => "Thunderstorms", _ => "Conditions unavailable" };
-    private static string WeatherGlyph(int code) => code switch { 0 or 1 => "\uE706", 2 => "\uE9BD", 3 or 45 or 48 => "\uE753", 51 or 53 or 55 or 56 or 57 or 61 or 63 or 65 or 66 or 67 or 80 or 81 or 82 => "\uE9C4", 71 or 73 or 75 or 77 or 85 or 86 => "\uE9C6", 95 or 96 or 99 => "\uE945", _ => "\uE9BD" };
     private static void SelectButton(Button button, bool selected)
     {
         button.Background = Brush(selected ? "#FFFFFF" : "#141414");
@@ -884,6 +985,8 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     {
         _liveTick.Stop(); _seekDelay?.Cancel(); _volumeDelay?.Cancel();
         _viewModel.PropertyChanged -= ViewModelChanged; _viewModel.Reminders.CollectionChanged -= RemindersChanged;
+        NativeTheme.Changed -= RefreshResponsiveLayouts;
+        _subscribed = false;
         _seekDelay?.Dispose(); _volumeDelay?.Dispose();
     }
 }

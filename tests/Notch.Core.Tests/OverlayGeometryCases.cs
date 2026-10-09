@@ -142,6 +142,22 @@ internal static class OverlayGeometryCases
             Check.Equal(settings, OverlayGeometry.Interpolate(visible, settings, 1));
             Check.Throws<ArgumentOutOfRangeException>(() => OverlayGeometry.Interpolate(visible, settings, double.NaN));
         });
+        suite.Add("Short interrupted resize movements finish sooner with a DPI-independent bounded duration", () =>
+        {
+            var compact = OverlayGeometry.Calculate(640, 540, false, true, 0, 0, 1920, 1040, 1);
+            var expanded = OverlayGeometry.Calculate(640, 540, true, true, 0, 0, 1920, 1040, 1);
+            var justOpened = OverlayGeometry.Interpolate(compact, expanded, .02);
+            var fullDuration = OverlayGeometry.TransitionDuration(compact, expanded, 1);
+            var reverseDuration = OverlayGeometry.TransitionDuration(justOpened, compact, 1);
+            Check.True(reverseDuration < fullDuration);
+            Check.True(reverseDuration >= TimeSpan.FromMilliseconds(110));
+            Check.True(fullDuration <= TimeSpan.FromMilliseconds(180));
+            Check.Equal(TimeSpan.Zero, OverlayGeometry.TransitionDuration(compact, compact, 1));
+            var compactDense = OverlayGeometry.Calculate(640, 540, false, true, 0, 0, 3840, 2080, 2);
+            var expandedDense = OverlayGeometry.Calculate(640, 540, true, true, 0, 0, 3840, 2080, 2);
+            Check.Equal(fullDuration, OverlayGeometry.TransitionDuration(compactDense, expandedDense, 2));
+            Check.Throws<ArgumentOutOfRangeException>(() => OverlayGeometry.TransitionDuration(compact, expanded, double.NaN));
+        });
         suite.Add("Body-to-dock corridor preserves hover while invisible bottom flanks and tail dismiss", () =>
         {
             Check.True(OverlayGeometry.ContainsInteractionPoint(300, 305, 600, 300, true, 496));
@@ -159,6 +175,33 @@ internal static class OverlayGeometryCases
             Check.False(OverlayGeometry.ContainsInteractionPoint(600, 12, 600, 300, true, 496));
             Check.False(OverlayGeometry.ContainsInteractionPoint(10, -1, 600, 300, true, 496));
             Check.False(OverlayGeometry.ContainsInteractionPoint(double.NaN, 1, 600, 300, true, 496));
+        });
+        suite.Add("An opening panel does not create a false dock corridor at its travelling bottom edge", () =>
+        {
+            Check.False(OverlayGeometry.ContainsInteractionPoint(300, 165, 600, 160, true, 496,
+                toolbarBodyHeight: 300));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(300, 290, 600, 160, true, 496,
+                toolbarBodyHeight: 300));
+            Check.True(OverlayGeometry.ContainsInteractionPoint(300, 305, 600, 160, true, 496,
+                toolbarBodyHeight: 300));
+            Check.True(OverlayGeometry.ContainsInteractionPoint(300, 334, 600, 160, true, 496,
+                toolbarBodyHeight: 300));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(12, 334, 600, 160, true, 496,
+                toolbarBodyHeight: 300));
+            // A correctly placed final dock is still outside the smaller HWND early in an opening.
+            Check.False(OverlayGeometry.ContainsInteractionPoint(300, 334, 600, 160, true, 496,
+                toolbarBodyHeight: 300, visibleWindowHeight: 230));
+            Check.True(OverlayGeometry.ContainsInteractionPoint(300, 334, 600, 160, true, 496,
+                toolbarBodyHeight: 300, visibleWindowHeight: 350));
+        });
+        suite.Add("Activity and compact interaction corners follow the same explicit radius as the visible surface", () =>
+        {
+            // This point belongs to a 20-DIP activity corner but is outside a 26-DIP corner.
+            Check.True(OverlayGeometry.ContainsInteractionPoint(8, 138, 460, 144, false, 496, 20));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(8, 138, 460, 144, false, 496, 26));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(1, 39, 256, 40, false, 496, 20));
+            Check.True(OverlayGeometry.ContainsInteractionPoint(20, 39, 256, 40, false, 496, 20));
+            Check.False(OverlayGeometry.ContainsInteractionPoint(1, 1, 256, 40, false, 496, double.NaN));
         });
     }
 

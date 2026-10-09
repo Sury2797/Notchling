@@ -26,6 +26,7 @@ public sealed class WindowsMediaService : IMediaService
     private string? _artworkKey;
     private string? _artworkPath;
     private long _refreshVersion;
+    private long _sessionRevision;
     private long _propertiesVersion;
     private long _artworkVersion = -1;
     private string? _sourceIdentity;
@@ -193,6 +194,7 @@ public sealed class WindowsMediaService : IMediaService
             token.ThrowIfCancellationRequested();
             var session = FindSession();
             long refreshVersion;
+            long sessionRevision;
             lock (_gate)
             {
                 if (_disposed) return;
@@ -201,6 +203,7 @@ public sealed class WindowsMediaService : IMediaService
                 {
                     UnsubscribeSession();
                     _session = session;
+                    _sessionRevision++;
                     _artworkKey = null;
                     _artworkPath = null;
                     _artworkVersion = -1;
@@ -213,6 +216,7 @@ public sealed class WindowsMediaService : IMediaService
                         TrySessionEvent(() => session.TimelinePropertiesChanged += OnTimelineChanged);
                     }
                 }
+                sessionRevision = _sessionRevision;
             }
             if (session is null)
             {
@@ -280,7 +284,7 @@ public sealed class WindowsMediaService : IMediaService
                 playback.Controls.IsPlayEnabled, playback.Controls.IsPauseEnabled,
                 playback.Controls.IsPreviousEnabled, playback.Controls.IsNextEnabled,
                 positionUpdatedAt, playbackRate, album,
-                sourceChanged ? null : _sourceDisplayName, sourceChanged ? null : _sourceIconPath, state);
+                sourceChanged ? null : _sourceDisplayName, sourceChanged ? null : _sourceIconPath, state, sessionRevision);
             // Metadata and transport become available before optional thumbnail/logo I/O.
             // A slow player preview must not postpone its title or playback controls.
             if (!PublishCurrent(session, refreshVersion, snapshot)) return;

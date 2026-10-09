@@ -7,6 +7,12 @@
 #ifndef ReleaseDirectory
   #error ReleaseDirectory is required
 #endif
+#ifndef AppArchitecture
+  #error AppArchitecture is required (x64, x86 or arm64)
+#endif
+#if AppArchitecture != "x64" && AppArchitecture != "x86" && AppArchitecture != "arm64"
+  #error Unsupported AppArchitecture
+#endif
 
 [Setup]
 AppId={{53529908-CB73-4B48-936A-74B9A6D47B81}
@@ -21,8 +27,15 @@ DefaultGroupName=Notchling
 UsePreviousGroup=no
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+#if AppArchitecture == "x64"
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
+#elif AppArchitecture == "arm64"
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+#else
+ArchitecturesAllowed=x86compatible
+#endif
 MinVersion=10.0.19045
 WizardStyle=modern
 SetupIconFile=..\..\src\Notch.Windows\Assets\Notchling.ico
@@ -32,9 +45,9 @@ LicenseFile=..\..\docs\product-terms.md
 InfoBeforeFile=..\..\docs\privacy.md
 OutputDir={#ReleaseDirectory}
 #ifdef EvaluationBuild
-OutputBaseFilename=Notchling-{#AppVersion}-windows-x64-evaluation-setup
+OutputBaseFilename=Notchling-{#AppVersion}-windows-{#AppArchitecture}-evaluation-setup
 #else
-OutputBaseFilename=Notchling-{#AppVersion}-windows-x64-setup
+OutputBaseFilename=Notchling-{#AppVersion}-windows-{#AppArchitecture}-setup
 #endif
 Compression=lzma2
 SolidCompression=yes
@@ -73,6 +86,7 @@ var
   ResultFile: String;
   ResultText: AnsiString;
   Parameters: String;
+  PowerShellPath: String;
 begin
   Result := '';
   if CheckForMutexes('Notch.Desktop.Running') then begin
@@ -83,10 +97,14 @@ begin
   ExtractTemporaryFile('install-prerequisites.ps1');
   ResultFile := ExpandConstant('{tmp}\Notchling-prerequisites-result.txt');
   Parameters := '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{tmp}\install-prerequisites.ps1') + '" -ResultPath "' + ResultFile + '"';
+    ExpandConstant('{tmp}\install-prerequisites.ps1') + '" -Architecture {#AppArchitecture} -ResultPath "' + ResultFile + '"';
+  if IsWin64 and not Is64BitInstallMode then
+    PowerShellPath := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe')
+  else
+    PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
   WizardForm.PreparingLabel.Caption := 'Preparing shared Windows components, only if needed. A Microsoft permission prompt may appear.';
   Log('Checking Notchling shared runtime prerequisites.');
-  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+  if not Exec(PowerShellPath,
     Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
     Result := 'Setup could not start the Windows component check. Restart Windows and try Setup again.';
     Exit;

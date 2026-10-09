@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   candidate:
-    name: Signed x64 installer and notices
+    name: Signed x64, x86 and ARM64 installers and notices
     runs-on: windows-latest
     environment: production
     steps:
@@ -27,7 +27,7 @@ jobs:
           dotnet-version: '10.0.x'
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: '3.13'
       - name: Install installer compiler
         shell: pwsh
         run: |
@@ -52,9 +52,66 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  qualify:
+    name: Qualify signed ${{ matrix.arch }} app (${{ matrix.os }})
+    needs: candidate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+            platform: x64
+            suffix: x64
+          - os: windows-2022
+            arch: x64
+            platform: x64
+            suffix: x64-windows-2022
+          - os: windows-2022
+            arch: x86
+            platform: x86
+            suffix: x86
+          - os: windows-11-arm
+            arch: arm64
+            platform: ARM64
+            suffix: arm64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/download-artifact@v6
+        with:
+          name: notchling-signed-release-candidate
+          path: artifacts/release
+      - name: Restore pinned runtime package metadata for qualification
+        run: dotnet restore src/Notch.Windows/Notch.Windows.csproj -p:Platform=${{ matrix.platform }} --runtime win-${{ matrix.arch }}
+      - name: Install and qualify the signed app on its target architecture
+        shell: pwsh
+        env:
+          NOTCH_RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          $setup = Join-Path $PWD "artifacts/release/Notchling-$env:NOTCH_RELEASE_VERSION-windows-${{ matrix.arch }}-setup.exe"
+          $signature = Get-AuthenticodeSignature -LiteralPath $setup
+          if ($signature.Status -ne 'Valid') { throw 'Signed candidate installer failed signature verification.' }
+          ./scripts/qualify-windows-installer.ps1 -SetupPath $setup -AppArchitecture ${{ matrix.arch }} -ReportDirectory artifacts
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: notchling-signed-${{ matrix.suffix }}-qualification
+          path: |
+            artifacts/windows-smoke.json
+            artifacts/windows-ui-smoke.json
+            artifacts/installer-smoke.log
+            artifacts/setup-prerequisites.log
+            artifacts/screenshots/
+          if-no-files-found: warn
+          retention-days: 30
+
   draft:
     name: Prepare stable-channel release draft
-    needs: candidate
+    needs: [candidate, qualify]
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -72,4 +129,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           [[ "$NOTCH_RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
-          gh release create "v$NOTCH_RELEASE_VERSION" artifacts/release/* --draft --target "$NOTCH_RELEASE_REVISION" --title "Notchling $NOTCH_RELEASE_VERSION" --notes "Signed Windows 10 22H2 and Windows 11 x64 candidate. Complete the native qualification matrix and deployment/customer-policy checklist before publishing this draft."
+          gh release create "v$NOTCH_RELEASE_VERSION" artifacts/release/* --draft --target "$NOTCH_RELEASE_REVISION" --title "Notchling $NOTCH_RELEASE_VERSION" --notes "Signed x64, x86 and ARM64 candidates. Native ARM64 and cross-bitness x86 installed qualification passed; 32-bit Windows 10 hardware qualification remains pending (Windows 11 has no x86 OS edition). Complete the native qualification matrix and deployment/customer-policy checklist before publishing this draft."

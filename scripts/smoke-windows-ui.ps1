@@ -799,16 +799,33 @@ namespace NotchlingUiSmoke {
         $supportTop = $support.Current.BoundingRectangle.Top
         $downloadsBefore = @(Get-UpdateDownloadSnapshot)
         if (Find-Control "Notchling error" $null $false) { throw "The evaluation-update fixture already has a visible application error." }
+        $daily = Scroll-ToSetting "Check for updates daily" $null ([System.Windows.Automation.TogglePattern]::Pattern)
+        if ($daily.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+            throw "Daily network update checks were enabled without user opt-in."
+        }
+        Scroll-ToSetting "Check for updates" ([System.Windows.Automation.ControlType]::Button) ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
+        $supportTop = (Wait-Control "Updates and troubleshooting" $null $true ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)).Current.BoundingRectangle.Top
         Invoke-Button "Check for updates"
-        $manualUpdateGuidance = "This evaluation build uses manual updates. Open Release page to download the latest installer."
-        # Check the actual Settings live region, rather than accepting only the
-        # unrelated footer that exposes the same informational status.
-        Wait-Control $manualUpdateGuidance ([System.Windows.Automation.ControlType]::Text) | Out-Null
+        # Discovery uses bounded public metadata requests. Anonymous GitHub
+        # quotas/offline runners can produce retry guidance; exact discovery
+        # results and cancellation are separately exercised with API fixtures.
+        $updateWait = [Diagnostics.Stopwatch]::StartNew()
+        do {
+            Assert-Budget
+            $completedCheck = Find-Control "Check for updates" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern)
+            if ($completedCheck) { break }
+            if ($updateWait.Elapsed.TotalSeconds -ge 45) { throw "The read-only release check did not finish within its bounded operation budget." }
+            Start-Sleep -Milliseconds 100
+        } while ($true)
         $updateStatus = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, "UpdateStatus"))
-        if ($null -eq $updateStatus -or $updateStatus.Current.IsOffscreen -or $updateStatus.Current.Name -ne $manualUpdateGuidance) {
-            throw "The visible Settings live region did not expose the manual-update guidance."
+        if ($null -eq $updateStatus -or $updateStatus.Current.IsOffscreen -or
+            ($updateStatus.Current.Name -notmatch '^Notchling .+ is available\. This evaluation uses manual updates;' -and
+             $updateStatus.Current.Name -ne 'No newer compatible release was found. Open Release page to view downloads.' -and
+             $updateStatus.Current.Name -notmatch '^Couldn.t check online\. Try again or open Release page for manual downloads\.$')) {
+            throw "The visible Settings live region did not expose a completed read-only release result or actionable offline guidance."
         }
+        if (Find-Control "Install verified update" ([System.Windows.Automation.ControlType]::Button) $false) { throw "Unsigned evaluation discovery exposed automatic installer execution." }
         Wait-Control "Release page" ([System.Windows.Automation.ControlType]::Button) | Out-Null
         if (Find-Control "Notchling error" $null $false) { throw "An unsigned evaluation update check displayed a red application error instead of manual-update guidance." }
         $report.UnsignedUpdateGuidance = $true
@@ -826,7 +843,7 @@ namespace NotchlingUiSmoke {
             throw "An unsigned evaluation update check created or changed an installer download."
         }
         $report.UpdateActionCreatedNoDownload = $true
-        $report.EvaluationUpdateStatus = "Passed: unsigned evaluation action provides manual-update guidance without an error or installer download."
+        $report.EvaluationUpdateStatus = "Passed: " + $updateStatus.Current.Name + " Daily checks default off; no error or installer download."
         $report.Actions += "Verified unsigned update guidance, no application error, retained Settings viewport, and no installer download"
     }
 

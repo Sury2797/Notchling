@@ -3,6 +3,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$AppPath,
+    [Parameter(Mandatory)][ValidateSet("x64", "x86", "arm64")][string]$AppArchitecture,
     [string]$AssetsPath = "src/Notch.Windows/obj/project.assets.json",
     [string]$ReportPath = "artifacts/windows-smoke.json",
     [switch]$InstallRuntimeFromNuGet,
@@ -19,6 +20,11 @@ $report = [ordered]@{
     Scope = "Published application on a disposable Windows CI desktop; not Windows 10 hardware qualification or animation benchmarking."
     OS = [Environment]::OSVersion.VersionString
     AppPath = $AppPath
+    AppArchitecture = $AppArchitecture
+    ActualProcessArchitecture = $null
+    HostArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+    UIAutomationArchitecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant()
+    ArchitectureScope = $null
     RuntimePackages = @()
     WindowTitle = $null
     WindowBounds = $null
@@ -155,14 +161,27 @@ function Initialize-TestRuntime {
 
     # Appx uses Windows PowerShell on systems where the module is not PowerShell 7 compatible.
     Import-Module Appx -UseWindowsPowerShell -WarningAction SilentlyContinue
-    $packageDirectory = Join-Path $packageRoot "tools/MSIX/win10-x64"
-    $msixPaths = @(Get-ChildItem -LiteralPath $packageDirectory -Filter "*.msix" -File)
-    if ($msixPaths.Count -ne 4) { throw "Expected framework, DDLM, Main, and Singleton x64 runtime packages." }
-    $packages = foreach ($msix in $msixPaths) {
-        $archive = [IO.Compression.ZipFile]::OpenRead($msix.FullName)
+    # Microsoft registers Main/Singleton for the native OS, and Framework/DDLM
+    # for the application architecture. Never require x86 Main on an x64 host.
+    $nativeArchitecture = $report.HostArchitecture
+    $expectedPackages = @(
+        @{ File = 'Microsoft.WindowsAppRuntime.1.8.msix'; Architecture = $AppArchitecture },
+        @{ File = 'Microsoft.WindowsAppRuntime.DDLM.1.8.msix'; Architecture = $AppArchitecture },
+        @{ File = 'Microsoft.WindowsAppRuntime.Main.1.8.msix'; Architecture = $nativeArchitecture },
+        @{ File = 'Microsoft.WindowsAppRuntime.Singleton.1.8.msix'; Architecture = $nativeArchitecture }
+    )
+    if ($AppArchitecture -ne $nativeArchitecture) {
+        # Native Main/Singleton also depend on the native framework. An x86
+        # app's framework alone cannot satisfy their package dependency.
+        $expectedPackages += @{ File = 'Microsoft.WindowsAppRuntime.1.8.msix'; Architecture = $nativeArchitecture }
+    }
+    $packages = foreach ($expected in $expectedPackages) {
+        $msixPath = Join-Path $packageRoot ("tools/MSIX/win10-" + $expected.Architecture + '/' + $expected.File)
+        if (-not (Test-Path -LiteralPath $msixPath -PathType Leaf)) { throw "Pinned runtime package is missing: $($expected.File)." }
+        $archive = [IO.Compression.ZipFile]::OpenRead($msixPath)
         try {
             $entry = $archive.GetEntry("AppxManifest.xml")
-            if (-not $entry) { throw "Runtime package manifest is missing: $($msix.Name)" }
+            if (-not $entry) { throw "Runtime package manifest is missing: $($expected.File)" }
             $reader = [IO.StreamReader]::new($entry.Open())
             try { [xml]$manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
         } finally { $archive.Dispose() }
@@ -170,21 +189,22 @@ function Initialize-TestRuntime {
         $namespaces.AddNamespace("appx", "http://schemas.microsoft.com/appx/manifest/foundation/windows10")
         $identity = $manifest.SelectSingleNode("/appx:Package/appx:Identity", $namespaces)
         $dependencies = @($manifest.SelectNodes("/appx:Package/appx:Dependencies/appx:PackageDependency", $namespaces))
-        if (-not $identity -or $identity.GetAttribute("ProcessorArchitecture") -ne "x64" -or
+        if (-not $identity -or $identity.GetAttribute("ProcessorArchitecture") -ne $expected.Architecture -or
             $identity.GetAttribute("Publisher") -ne "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US") {
-            throw "Unexpected runtime package identity: $($msix.Name)"
+            throw "Unexpected runtime package identity: $($expected.File)"
         }
         [pscustomobject]@{
             Name = $identity.GetAttribute("Name")
             Version = [version]$identity.GetAttribute("Version")
             DependencyCount = $dependencies.Count
-            Path = $msix.FullName
+            Path = $msixPath
+            Architecture = $expected.Architecture
         }
     }
     # The framework has zero package dependencies; all three companions require it.
     foreach ($package in ($packages | Sort-Object DependencyCount, Name)) {
         $installed = @(Get-AppxPackage -Name $package.Name | Where-Object {
-            $_.Architecture -eq "X64" -and [version]$_.Version -ge $package.Version
+            [string]$_.Architecture -ieq $package.Architecture -and [version]$_.Version -ge $package.Version
         })
         if ($installed.Count -eq 0) {
             if (-not $InstallRuntimeFromNuGet) {
@@ -194,7 +214,7 @@ function Initialize-TestRuntime {
             # Windows validates the MSIX signature; no unsigned/developer bypass is enabled.
             Add-AppxPackage -Path $package.Path -ErrorAction Stop
             $installed = @(Get-AppxPackage -Name $package.Name | Where-Object {
-                $_.Architecture -eq "X64" -and [version]$_.Version -ge $package.Version
+                [string]$_.Architecture -ieq $package.Architecture -and [version]$_.Version -ge $package.Version
             })
             if ($installed.Count -eq 0) { throw "Runtime registration did not produce the required package: $($package.Name)" }
         }
@@ -207,7 +227,14 @@ try {
     if ($env:GITHUB_ACTIONS -ne "true") {
         throw "This smoke test is restricted to disposable GitHub Actions runners to protect local app data."
     }
-    if (-not [Environment]::Is64BitProcess) { throw "Use 64-bit PowerShell for the x64 application." }
+    if ($report.UIAutomationArchitecture -ne $report.HostArchitecture) {
+        throw "Run qualification in native host PowerShell; cross-bitness app UI Automation is supported."
+    }
+    if ($AppArchitecture -eq "arm64" -and $report.HostArchitecture -ne "arm64") { throw "ARM64 qualification requires a native ARM64 desktop." }
+    if ($AppArchitecture -eq "x64" -and $report.HostArchitecture -ne "x64") { throw "x64 qualification requires a native x64 desktop." }
+    $report.ArchitectureScope = if ($AppArchitecture -eq "x86" -and $report.HostArchitecture -ne "x86") {
+        "x86 application on an x64/ARM64 host with cross-bitness UI Automation; not 32-bit Windows consumer hardware qualification."
+    } else { "Native $AppArchitecture application and host; consumer-device qualification remains pending." }
     $app = (Resolve-Path -LiteralPath $AppPath).Path
     if ([IO.Path]::GetFileName($app) -ne "Notchling.Windows.exe") { throw "Specify the published Notchling.Windows.exe." }
     $report.AppPath = $app
@@ -227,6 +254,26 @@ using System.Runtime.InteropServices;
 using System.Text;
 namespace NotchlingSmoke {
     public static class Native {
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern bool IsWow64Process2(IntPtr process, out ushort processMachine, out ushort nativeMachine);
+        public static string MachineName(ushort machine) {
+            switch (machine) { case 0x014c: return "x86"; case 0x8664: return "x64"; case 0xaa64: return "arm64"; default: throw new InvalidOperationException("Unsupported process machine: " + machine); }
+        }
+        public static string ProcessArchitecture(IntPtr process) {
+            ushort emulated, native;
+            if (!IsWow64Process2(process, out emulated, out native)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            return MachineName(emulated == 0 ? native : emulated);
+        }
+        public static string PeArchitecture(string path) {
+            using (var input = new System.IO.BinaryReader(System.IO.File.OpenRead(path))) {
+                if (input.BaseStream.Length < 64 || input.ReadUInt16() != 0x5a4d) throw new InvalidOperationException("Application is not a Windows executable.");
+                input.BaseStream.Position = 0x3c;
+                var offset = input.ReadUInt32();
+                if (offset < 64 || offset > 1048576 || offset + 24L > input.BaseStream.Length) throw new InvalidOperationException("Application PE offset is invalid.");
+                input.BaseStream.Position = offset;
+                if (input.ReadUInt32() != 0x00004550) throw new InvalidOperationException("Application PE signature is invalid.");
+                return MachineName(input.ReadUInt16());
+            }
+        }
         private delegate bool EnumWindowProc(IntPtr window, IntPtr state);
         [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowProc callback, IntPtr state);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
@@ -262,6 +309,8 @@ namespace NotchlingSmoke {
 '@
     }
 
+    if ([NotchlingSmoke.Native]::PeArchitecture($app) -ne $AppArchitecture) { throw "Installed application PE does not match requested $AppArchitecture architecture." }
+
     $title = "Notchling — Desktop notch"
     $launchClock = [Diagnostics.Stopwatch]::StartNew()
     $startInfo = [Diagnostics.ProcessStartInfo]::new($app)
@@ -272,7 +321,8 @@ namespace NotchlingSmoke {
     # the owned test child's environment, never the runner's SDK configuration.
     $invalidDotNetRoot = Join-Path $env:RUNNER_TEMP 'Notchling.EmptyDotNetRoot'
     New-Item -ItemType Directory -Path $invalidDotNetRoot -Force | Out-Null
-    $startInfo.Environment['DOTNET_ROOT_X64'] = $invalidDotNetRoot
+    $startInfo.Environment['DOTNET_ROOT_' + $AppArchitecture.ToUpperInvariant()] = $invalidDotNetRoot
+    $startInfo.Environment['DOTNET_ROOT(x86)'] = $invalidDotNetRoot
     $startInfo.Environment['DOTNET_ROOT'] = $invalidDotNetRoot
     $child = [Diagnostics.Process]::Start($startInfo)
     if (-not $child) { throw "Windows did not create the application process." }
@@ -288,6 +338,8 @@ namespace NotchlingSmoke {
         throw "No visible native app window appeared within $LaunchTimeoutSeconds seconds. Check runtime deployment or Windows crash logs."
     }
     $launchClock.Stop()
+    $report.ActualProcessArchitecture = [NotchlingSmoke.Native]::ProcessArchitecture($child.Handle)
+    if ($report.ActualProcessArchitecture -ne $AppArchitecture) { throw "Launched app process does not match requested $AppArchitecture architecture." }
     $report.FirstVisibleWindowMilliseconds = [Math]::Round($launchClock.Elapsed.TotalMilliseconds, 1)
     $report.WindowTitle = $title
     $report.VisibleWindow = $true
@@ -385,7 +437,7 @@ namespace NotchlingSmoke {
         $connectionCount = @($report.UIInteractions.ConnectionGuidance).Count
     }
     if ($env:GITHUB_ACTIONS -eq 'true') {
-        Write-Output "::notice title=Installed Windows smoke result::Succeeded=$($report.Succeeded); StartupMs=$($report.FirstVisibleWindowMilliseconds); ResponsiveSamples=$($report.ResponsiveSamples); PublicTestingUiInteractions=$($report.UIInteractions.Succeeded); PublicToolsOpened=$publicToolCount; ConnectionStatesChecked=$connectionCount; InvalidDotNetRoot=$($report.LaunchedWithInvalidDotNetRoot); ReopenedExistingInstance=$($report.ExistingInstanceReopened); WorkingSetMiB=$($report.AverageWorkingSetMiB); PrivateMiB=$($report.AveragePrivateMiB); CpuAllCoresPercent=$($report.CpuPercentAllCores); SamplingSeconds=$($report.MeasurementSeconds)"
+        Write-Output "::notice title=Installed Windows smoke result::Succeeded=$($report.Succeeded); AppArchitecture=$($report.ActualProcessArchitecture); HostArchitecture=$($report.HostArchitecture); StartupMs=$($report.FirstVisibleWindowMilliseconds); ResponsiveSamples=$($report.ResponsiveSamples); PublicTestingUiInteractions=$($report.UIInteractions.Succeeded); PublicToolsOpened=$publicToolCount; ConnectionStatesChecked=$connectionCount; InvalidDotNetRoot=$($report.LaunchedWithInvalidDotNetRoot); ReopenedExistingInstance=$($report.ExistingInstanceReopened); WorkingSetMiB=$($report.AverageWorkingSetMiB); PrivateMiB=$($report.AveragePrivateMiB); CpuAllCoresPercent=$($report.CpuPercentAllCores); SamplingSeconds=$($report.MeasurementSeconds)"
         if ($failure) {
             $message = $report.Error.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
             Write-Output "::error title=Installed Windows launch failure::$message"
@@ -397,6 +449,7 @@ namespace NotchlingSmoke {
 
 | Check / measurement | Result |
 | --- | --- |
+| Requested / actual app / host architecture | $AppArchitecture / $($report.ActualProcessArchitecture) / $($report.HostArchitecture) |
 | Installed application launched and responded | $($report.Succeeded) |
 | Visible native window / icon | $($report.VisibleWindow) / $($report.WindowIconPresent) |
 | First visible window | $($report.FirstVisibleWindowMilliseconds) ms |
@@ -411,7 +464,7 @@ namespace NotchlingSmoke {
 | CPU, normalized across all cores | $($report.CpuPercentAllCores)% |
 | Sampling duration | $($report.MeasurementSeconds) seconds |
 
-Scope: Windows hosted CI desktop only; this is a startup smoke test, not Windows 10 qualification, sustained idle profiling, or rendered animation benchmarking.
+Scope: $($report.ArchitectureScope) Windows hosted CI desktop only; this is not Windows 10 hardware qualification, sustained idle profiling, or rendered animation benchmarking.
 "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
     }
 }

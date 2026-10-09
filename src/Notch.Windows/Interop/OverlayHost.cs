@@ -28,6 +28,7 @@ public sealed class OverlayHost : IDisposable
     private Monitor? _placementMonitor;
     private bool _animationRunning;
     private long _animationStarted;
+    private TimeSpan _animationDuration = TimeSpan.FromMilliseconds(180);
     private bool _animateNextLayout;
     private double _animationProgress;
     private double? _placementScale;
@@ -49,6 +50,7 @@ public sealed class OverlayHost : IDisposable
     private long? _suspendedAt;
     private double _width = 256;
     private double _panelHeight = 40;
+    private double _cornerRadius = 20;
     private bool _expanded;
     private bool _pinned;
     private bool _showToolbar = true;
@@ -84,7 +86,7 @@ public sealed class OverlayHost : IDisposable
             return OverlayGeometry.ContainsInteractionPoint((point.X - (double)layout.X) / scale,
                 (point.Y - (double)layout.Y) / scale, layout.Width / scale,
                 layout.LogicalBodyHeight, _expanded && layout.ToolbarVisible,
-                _toolbarWidth, _expanded ? 26 : 20);
+                _toolbarWidth, _cornerRadius, _targetLayout?.LogicalBodyHeight, layout.Height / scale);
         }
     }
 
@@ -128,13 +130,17 @@ public sealed class OverlayHost : IDisposable
     public void ResizeAndPlace(double width, double panelHeight, bool expanded, bool pinned, int monitorIndex,
         bool showToolbar = true, string? monitorDeviceId = null, double horizontalOffset = 0,
         double topOffset = 0, bool suppressInFullscreen = true, bool animate = false,
-        Action? geometryChanged = null, double toolbarWidth = 720)
+        Action? geometryChanged = null, double toolbarWidth = 720, double? cornerRadius = null,
+        bool animationsEnabled = true)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!double.IsFinite(width) || !double.IsFinite(panelHeight) || width <= 0 || panelHeight <= 0)
             throw new ArgumentOutOfRangeException(nameof(width), "Overlay dimensions must be finite and positive.");
         if (!double.IsFinite(toolbarWidth) || toolbarWidth <= 0)
             throw new ArgumentOutOfRangeException(nameof(toolbarWidth));
+        var nextCornerRadius = cornerRadius ?? (expanded ? 26 : 20);
+        if (!double.IsFinite(nextCornerRadius) || nextCornerRadius < 0)
+            throw new ArgumentOutOfRangeException(nameof(cornerRadius));
 
         var deviceId = string.IsNullOrWhiteSpace(monitorDeviceId) ? null : monitorDeviceId;
         var nextHorizontalOffset = double.IsFinite(horizontalOffset) ? horizontalOffset : 0;
@@ -144,14 +150,20 @@ public sealed class OverlayHost : IDisposable
         var geometryUnchanged = _hasLayoutRequest && !monitorChanged && _width == width
             && _panelHeight == panelHeight && _expanded == expanded && _showToolbar == showToolbar
             && _toolbarWidth == toolbarWidth
+            && _cornerRadius == nextCornerRadius
             && _horizontalOffset == nextHorizontalOffset && _topOffset == nextTopOffset;
         _pinned = pinned;
         _suppressInFullscreen = suppressInFullscreen;
         _geometryChanged = geometryChanged;
         if (geometryUnchanged)
         {
+            if (!animationsEnabled && _animationRunning)
+            {
+                StopResizeAnimation();
+                TryPlace(refreshVisibility: false);
+            }
             // Preferences such as accent, billing or a text edit do not change HWND geometry.
-            // Preserve a running resize animation and avoid repeated monitor/GDI work.
+            // Preserve a permitted resize animation and avoid repeated monitor/GDI work.
             UpdateVisibility();
             NotifyGeometryChanged();
             return;
@@ -159,6 +171,7 @@ public sealed class OverlayHost : IDisposable
 
         _width = width;
         _panelHeight = panelHeight;
+        _cornerRadius = nextCornerRadius;
         _expanded = expanded;
         _monitorIndex = monitorIndex;
         _showToolbar = showToolbar;
@@ -171,7 +184,7 @@ public sealed class OverlayHost : IDisposable
         StopResizeAnimation();
         if (monitorChanged) { _placementMonitor = null; _placementScale = null; }
         _targetLayout = null;
-        _animateNextLayout = animate && IsVisible && !monitorChanged;
+        _animateNextLayout = animate && animationsEnabled && IsVisible && !monitorChanged;
         TryPlace();
         // XAML takes its final layout once. Rendering frames only update the native
         // boundary; no frame callback rebuilds controls or reassigns XAML row sizes.
@@ -236,8 +249,9 @@ public sealed class OverlayHost : IDisposable
             {
                 _animationStart = previous;
                 _animationProgress = 0;
+                _animationDuration = OverlayGeometry.TransitionDuration(previous, target, scale);
                 _animationStarted = Stopwatch.GetTimestamp();
-                _animationRunning = true;
+                _animationRunning = _animationDuration > TimeSpan.Zero;
             }
             _animateNextLayout = false;
         }
@@ -252,8 +266,8 @@ public sealed class OverlayHost : IDisposable
             _nativeLayout = nativeLayout;
         }
 
-        ApplyRegion(layout.Width / scale, layout.LogicalBodyHeight, _expanded,
-            layout.ToolbarVisible, scale, _targetLayout.LogicalBodyHeight, _targetLayout.LogicalWidth);
+        ApplyRegion(layout.Width / scale, layout.LogicalBodyHeight, layout.Height,
+            _expanded && layout.ToolbarVisible, scale, _targetLayout.LogicalBodyHeight, _targetLayout.LogicalWidth);
         _currentLayout = layout;
         ActiveMonitorDeviceId = monitor.DeviceName;
         _monitorBounds = monitor.Bounds;
@@ -262,7 +276,8 @@ public sealed class OverlayHost : IDisposable
     private void OnResizeAnimation(object? sender, object args)
     {
         if (_disposed || !_animationRunning) { StopResizeAnimation(); return; }
-        _animationProgress = Math.Clamp(Stopwatch.GetElapsedTime(_animationStarted).TotalMilliseconds / 180, 0, 1);
+        _animationProgress = Math.Clamp(Stopwatch.GetElapsedTime(_animationStarted).TotalMilliseconds
+            / _animationDuration.TotalMilliseconds, 0, 1);
         if (_animationProgress >= 1) StopResizeAnimation();
         TryPlace(refreshVisibility: false);
     }
@@ -364,12 +379,12 @@ public sealed class OverlayHost : IDisposable
     private static int Pixels(double logicalPixels, double scale) =>
         checked((int)Math.Round(logicalPixels * scale, MidpointRounding.AwayFromZero));
 
-    private void ApplyRegion(double width, double bodyHeight, bool expanded, bool showToolbar, double scale,
+    private void ApplyRegion(double width, double bodyHeight, int physicalWindowHeight, bool showToolbar, double scale,
         double toolbarBodyHeight, double targetWidth)
     {
         var right = Pixels(width, scale);
         var bottom = Pixels(bodyHeight, scale);
-        var radius = Pixels(Math.Min(expanded ? 26 : 20, bodyHeight / 2), scale);
+        var radius = Pixels(Math.Clamp(_cornerRadius, 0, Math.Min(width, bodyHeight) / 2), scale);
         // Keep the dock region at the same final coordinates as its stable XAML
         // layout; an animated body must not create empty capsules travelling below it.
         var toolbarWidth = Math.Min(_toolbarWidth, targetWidth);
@@ -377,7 +392,10 @@ public sealed class OverlayHost : IDisposable
         var toolbarTop = Pixels(toolbarBodyHeight + 10, scale);
         var toolbarBottom = Pixels(toolbarBodyHeight + 58, scale);
         var diameter = Pixels(48, scale);
-        var geometry = new RegionGeometry(right, bottom, radius, expanded && showToolbar,
+        // A dock below the current HWND cannot be visible. Avoid allocating and
+        // combining its two GDI regions until an opening reaches that boundary.
+        var hasToolbar = showToolbar && physicalWindowHeight > toolbarTop;
+        var geometry = new RegionGeometry(right, bottom, radius, hasToolbar,
             Pixels(toolbarLeft, scale), Pixels(toolbarLeft + toolbarWidth - 112, scale),
             Pixels(toolbarLeft + Math.Max(0, toolbarWidth - 96), scale), Pixels(toolbarLeft + toolbarWidth, scale),
             toolbarTop, toolbarBottom, diameter);
@@ -388,7 +406,7 @@ public sealed class OverlayHost : IDisposable
         try
         {
             UnionRegion(region, NativeMethods.CreateRectRgn(0, 0, right, Math.Max(1, bottom - radius)));
-            if (expanded && showToolbar)
+            if (hasToolbar)
             {
                 if (toolbarWidth > 112)
                 {

@@ -63,6 +63,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private int _preferencesGeneration;
     private AppPreferences _preferences = new();
     private MediaSnapshot? _media;
+    private MediaSourceSelection? _mediaSourceSelection;
     private SystemSnapshot? _system;
     private WeatherSnapshot? _weather;
     private RevenueSnapshot? _revenue;
@@ -80,13 +81,20 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public ClipboardService ClipboardService { get; }
     public AppPreferences Preferences { get => _preferences; private set => Set(ref _preferences, value); }
     public ModuleId SelectedModule => Overlay.SelectedModule;
-    public MediaSnapshot? Media { get => _media; private set => Set(ref _media, value); }
+    public MediaSnapshot? Media { get => _media; private set { if (Set(ref _media, value) && _mediaSourceSelection is not null && !MediaSourceIdentity.Resolve(value, _mediaSourceSelection).IsUserSelected) { _mediaSourceSelection = null; Notify(nameof(MediaSourceSelection)); } } }
+    public MediaSourceSelection? MediaSourceSelection => _mediaSourceSelection;
+    public void SelectMediaSource(MediaSourceBrand brand)
+    {
+        if (!ReadyForInput() || !MediaSourceIdentity.CanSelectProvider(Media)) return;
+        _mediaSourceSelection = MediaSourceIdentity.SelectForTrack(Media, brand);
+        Notify(nameof(MediaSourceSelection));
+    }
     public SystemSnapshot? System { get => _system; private set => Set(ref _system, value); }
     public WeatherSnapshot? Weather { get => _weather; private set => Set(ref _weather, value); }
     public RevenueSnapshot? Revenue { get => _revenue; private set => Set(ref _revenue, value); }
     public CodingSnapshot? Coding { get => _coding; private set => Set(ref _coding, value); }
     public AnalyticsSnapshot? Analytics { get => _analytics; private set => Set(ref _analytics, value); }
-    public string Status { get => _status; private set => Set(ref _status, value); }
+    public string Status { get => _status; private set { _feedbackAt = _feedbackTime.GetTimestamp(); _feedbackModule = SelectedModule; Set(ref _status, value); _feedbackWasVisible = true; Notify(nameof(ShellStatus)); } }
     public string UpdateStatus { get => _updateStatus; private set => Set(ref _updateStatus, value); }
     public string Error { get => _error; private set => Set(ref _error, value); }
     public string Scratchpad
@@ -101,7 +109,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             if (Set(ref _scratchpad, value)) ScheduleSave();
         }
     }
-    public string SaveState { get => _saveState; private set => Set(ref _saveState, value); }
+    public string SaveState { get => _saveState; private set { if (Set(ref _saveState, value)) Notify(nameof(ShellStatus)); } }
     public bool HasUnsavedChanges => _workspaceDirty || _preferencesChanged;
     public bool CanUndoNoteDeletion => _deletedNote is not null;
 #if DEBUG
@@ -152,9 +160,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsReady => _loaded && !_disposed;
     private string WorkspaceRecoveryMessage => $"Your saved notebook could not be read. Its file is preserved and notebook saving is paused. Back up and repair or rename {Path.Combine(_dataDirectory, "workspace.json")}, then restart {ProductIdentity.DisplayName}.";
 
-    public MainViewModel(DispatcherQueue dispatcher, string? dataDirectory = null, IDataStore? store = null, IMediaService? mediaService = null, ISystemService? systemService = null, ISecretVault? vault = null)
+    public MainViewModel(DispatcherQueue dispatcher, string? dataDirectory = null, IDataStore? store = null, IMediaService? mediaService = null, ISystemService? systemService = null, ISecretVault? vault = null, IWindowsUpdateService? updateService = null, TimeProvider? timeProvider = null)
     {
         _dispatcher = dispatcher;
+        _feedbackTime = timeProvider ?? TimeProvider.System;
+        _updateService = updateService ?? new WindowsUpdateService(_updateHttp);
         _lifetimeToken = _lifetime.Token;
         _mediaService = mediaService ?? new WindowsMediaService();
         _systemService = systemService ?? new WindowsSystemService();
@@ -180,7 +190,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             NotificationHistory.Insert(0, activity);
             if (NotificationHistory.Count > 50) NotificationHistory.RemoveAt(50);
         };
-        Overlay.Changed += (_, _) => { if (_disposed) return; _viewGeneration++; Notify(nameof(SelectedModule)); _ = RefreshForViewAsync(); UpdateStopwatchTick(); };
+        Overlay.Changed += (_, _) => { if (_disposed) return; _viewGeneration++; Notify(nameof(SelectedModule)); Notify(nameof(ShellStatus)); _ = RefreshForViewAsync(); UpdateStopwatchTick(); };
         _tick.Tick += OnTick;
         _stopwatchTick.Tick += (_, _) => { if (!_disposed) Notify(nameof(StopwatchTime)); };
         foreach (var collection in new INotifyCollectionChanged[] { Notes, Shelf, Links })
@@ -482,6 +492,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private void OnTick(object? sender, object args)
     {
         if (_disposed) return;
+        RefreshTransientFeedback();
+        TryScheduleUpdateCheck();
         ReconcileEntitlement();
         Overlay.SetInteractionSuppressed(!CanPresentActivities());
         Overlay.Tick();
@@ -696,55 +708,6 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             Overlay.ClearActivities(); _queuedReminders.Clear();
         }
         if (!CanAccessModule(SelectedModule)) Overlay.Expand(ModuleId.Settings);
-    }
-    public async Task CheckForUpdatesAsync()
-    {
-        if (!ReadyForInput()) return;
-        UpdateStatus = "Checking whether verified updates are available…";
-        try
-        {
-            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = true, AutomaticDecompression = DecompressionMethods.All });
-            var service = new WindowsUpdateService(http);
-            var canVerifyPublisher = await service.CanVerifyPublisherAsync(_lifetimeToken);
-            if (_disposed) return;
-            _lifetimeToken.ThrowIfCancellationRequested();
-            if (!canVerifyPublisher)
-            {
-                // Evaluation installers deliberately have no trusted signing key.
-                // Explain their manual update path before any manifest request,
-                // download, notebook save or installer launch can take place.
-                Status = UpdateStatus = "This evaluation build uses manual updates. Open Release page to download the latest installer.";
-                return;
-            }
-            Status = UpdateStatus = "Checking for verified updates…";
-            var update = await service.CheckAsync(_lifetimeToken);
-            if (_disposed) return;
-            _lifetimeToken.ThrowIfCancellationRequested();
-            if (update is null) { Status = UpdateStatus = "You have the current stable version."; return; }
-            Status = UpdateStatus = "Downloading verified update " + update.Version + "…";
-            var prepared = await service.DownloadAsync(update, _lifetimeToken);
-            if (_disposed) return;
-            _lifetimeToken.ThrowIfCancellationRequested();
-            if (!await SaveBeforeExitAsync())
-            {
-                if (!_disposed) UpdateStatus = "Update downloaded. Save your changes successfully before installing.";
-                return;
-            }
-            if (_disposed) return;
-            _lifetimeToken.ThrowIfCancellationRequested();
-            await service.OpenInstallerAsync(prepared, _lifetimeToken);
-            if (!_disposed) Status = UpdateStatus = $"Update installer opened. Save and quit {ProductIdentity.DisplayName} to let installation proceed.";
-        }
-        catch (OperationCanceledException)
-        {
-            if (!_disposed) UpdateStatus = "Update check cancelled.";
-            throw;
-        }
-        catch (Exception error) when (Recoverable(error))
-        {
-            if (!_disposed) UpdateStatus = "Update could not be completed. Check the error details or use Release page.";
-            throw;
-        }
     }
     public Task RequestLoginAsync(string email) => !ReadyForInput() ? Task.CompletedTask
         : _subscription?.RequestLoginAsync(email, _lifetimeToken) ?? Task.FromException(new InvalidOperationException(_subscriptionUnavailable));
@@ -1076,6 +1039,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _tick.Stop(); _stopwatchTick.Stop(); _saveDelay?.Cancel(); _volumeDelay?.Cancel();
         _lifetime.Cancel();
         InvalidateRequests();
+        if (_updateOperationTask is { } updateOperation)
+            try { await updateOperation; } catch (Exception error) when (Recoverable(error)) { }
         if (_connectionCheckTask is { } connectionCheck)
             try { await connectionCheck; } catch (Exception error) when (Recoverable(error)) { }
         // No new refresh can acquire the gate after _disposed is set under _shutdownGate.
@@ -1087,7 +1052,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _mediaService.Changed -= OnMediaChanged; _mediaService.Error -= OnServiceError;
         try { await _mediaService.DisposeAsync(); } catch (Exception error) when (Recoverable(error)) { }
         try { _systemService.Dispose(); } catch (Exception error) when (Recoverable(error)) { }
-        _http.Dispose(); _store.Dispose();
+        _http.Dispose(); _updateHttp.Dispose(); _store.Dispose();
         _saveDelay?.Dispose(); _volumeDelay?.Dispose(); _lifetime.Dispose(); _refreshLock.Dispose();
     }
     public sealed record LocalData(SavedNote[] Notes, ReminderItem[] Reminders, ShelfItem[] Shelf, SavedLink[] Links, string Scratchpad);

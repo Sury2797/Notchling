@@ -32,6 +32,8 @@ public sealed partial class UtilityToolsView : UserControl
     private bool _invalidDrafts;
     private TextBlock? _saveStateText;
     private TextBlock? _updateStatusText;
+    private Button? _checkUpdatesButton, _installUpdateButton, _cancelUpdateButton;
+    private StackPanel? _notificationPanel;
     private TextBlock? _screenTimeText;
     private TextBlock? _subscriptionStatusText;
     private readonly Dictionary<string, (TextBlock State, TextBlock Detail)> _connectionRows = [];
@@ -45,8 +47,13 @@ public sealed partial class UtilityToolsView : UserControl
     public UtilityToolsView(MainViewModel viewModel)
     {
         InitializeComponent(); _vm = viewModel;
-        Loaded += (_, _) => { if (!_attached) { _vm.PropertyChanged += Changed; _attached = true; } if (_renderedModule != _vm.SelectedModule) Render(); };
-        Unloaded += (_, _) => { _vm.PropertyChanged -= Changed; _attached = false; };
+        Loaded += (_, _) =>
+        {
+            if (!_attached) { _vm.PropertyChanged += Changed; _vm.NotificationHistory.CollectionChanged += NotificationsChanged; _attached = true; }
+            if (_renderedModule != _vm.SelectedModule) Render();
+            else if (_vm.SelectedModule == ModuleId.Settings) UpdateNotifications();
+        };
+        Unloaded += (_, _) => { _vm.PropertyChanged -= Changed; _vm.NotificationHistory.CollectionChanged -= NotificationsChanged; _attached = false; };
     }
     private void Changed(object? sender, PropertyChangedEventArgs args)
     {
@@ -72,6 +79,8 @@ public sealed partial class UtilityToolsView : UserControl
             }
         }
         else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName == nameof(MainViewModel.SubscriptionStatus) && _subscriptionStatusText is not null) _subscriptionStatusText.Text = _vm.SubscriptionStatus;
+        else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName is nameof(MainViewModel.IsCheckingUpdates) or nameof(MainViewModel.IsInstallingUpdate)
+            or nameof(MainViewModel.CanInstallAvailableUpdate) or nameof(MainViewModel.HasAvailableUpdate)) UpdateUpdateControls();
         else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName is nameof(MainViewModel.ConnectionStatuses) or nameof(MainViewModel.IsCheckingConnections)) UpdateConnectionStatus();
     }
     private TextBlock Text(string value, double size = 13, bool muted = false) => new()
@@ -175,24 +184,30 @@ public sealed partial class UtilityToolsView : UserControl
             row.Children.Add(element);
         }
         bool? stacked = null;
+        UIElement[] arranged = [];
         void Arrange()
         {
             if (row.ActualWidth <= 0) return;
-            var next = row.ActualWidth < preferred.Sum() + Math.Max(0, elements.Length - 1) * 10;
-            if (stacked == next) return;
+            var visible = elements.Where(element => element.Visibility != Visibility.Collapsed).ToArray();
+            var desiredWidth = elements.Select((element, index) => element.Visibility == Visibility.Collapsed ? 0 : preferred[index]).Sum();
+            var next = row.ActualWidth < desiredWidth + Math.Max(0, visible.Length - 1) * 10;
+            if (stacked == next && arranged.SequenceEqual(visible)) return;
             stacked = next;
+            arranged = visible;
             row.ColumnDefinitions.Clear(); row.RowDefinitions.Clear();
+            foreach (var element in elements) { Grid.SetColumn((FrameworkElement)element, 0); Grid.SetRow((FrameworkElement)element, 0); }
             if (next)
             {
                 row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
-                for (var i = 0; i < elements.Length; i++) { row.RowDefinitions.Add(new() { Height = GridLength.Auto }); Grid.SetColumn((FrameworkElement)elements[i], 0); Grid.SetRow((FrameworkElement)elements[i], i); }
+                for (var i = 0; i < visible.Length; i++) { row.RowDefinitions.Add(new() { Height = GridLength.Auto }); Grid.SetColumn((FrameworkElement)visible[i], 0); Grid.SetRow((FrameworkElement)visible[i], i); }
             }
             else
             {
                 row.RowDefinitions.Add(new() { Height = GridLength.Auto });
-                for (var i = 0; i < elements.Length; i++) { row.ColumnDefinitions.Add(new() { Width = actionsOnly ? GridLength.Auto : new GridLength(preferred[i], GridUnitType.Star) }); Grid.SetColumn((FrameworkElement)elements[i], i); Grid.SetRow((FrameworkElement)elements[i], 0); }
+                for (var i = 0; i < visible.Length; i++) { row.ColumnDefinitions.Add(new() { Width = actionsOnly ? GridLength.Auto : new GridLength(preferred[Array.IndexOf(elements, visible[i])], GridUnitType.Star) }); Grid.SetColumn((FrameworkElement)visible[i], i); Grid.SetRow((FrameworkElement)visible[i], 0); }
             }
         }
+        foreach (var element in elements) element.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => Arrange());
         row.SizeChanged += (_, _) => Arrange();
         row.Loaded += (_, _) => Arrange();
         return row;
@@ -244,10 +259,14 @@ public sealed partial class UtilityToolsView : UserControl
         ContentStack.Children.Clear();
         _settingsToggles.Clear();
         _updateStatusText = null;
+        _checkUpdatesButton = _installUpdateButton = _cancelUpdateButton = null;
+        _notificationPanel = null;
         _subscriptionStatusText = null;
         _connectionRows.Clear(); _checkConnectionsButton = null;
         var definition = ModuleCatalog.Get(_vm.SelectedModule);
-        Header(definition.Title, _vm.SelectedModule == ModuleId.Tools ? "Choose a tool. Availability and connection requirements are shown below." : definition.Description);
+        Header(definition.Title, _vm.SelectedModule == ModuleId.Tools
+            ? _vm.IsPublicTesting ? "All 21 tools are free during public testing. Choose what you need." : "Choose a tool. Availability and connection requirements are shown below."
+            : definition.Description);
         switch (_vm.SelectedModule)
         {
             case ModuleId.Tools: Tools(); break;
@@ -278,14 +297,14 @@ public sealed partial class UtilityToolsView : UserControl
         ModuleId.Weather => "Requires the configured licensed weather service",
         ModuleId.Media => "Uses a supported Windows media player",
         ModuleId.Clipboard => "Opt-in plain-text history; cleared on exit",
-        _ => "Works on this device",
+        _ => ModuleCatalog.Get(module).Description,
     };
     private void Tools()
     {
         var modules = ModuleCatalog.All.Where(item => item.Id is not ModuleId.Tools and not ModuleId.Settings).ToArray();
         AddToolGroup("Everyday tools", "Music controls, focus sessions and your scratchpad.", modules.Where(module => !Notch.Core.Commerce.FeaturePolicy.RequiresPremium(module.Id)));
-        AddToolGroup(_vm.IsPublicTesting ? "Local utilities" : "Premium utilities", _vm.IsPublicTesting ? "All tools are free during public testing. No subscription is needed." : _vm.CanUseExtendedTools ? "Your extended local tools are available." : "US$2/month. " + (_vm.BillingConfigured ? "Open Settings to purchase or restore access." : "Purchasing will open when subscriptions launch."), modules.Where(module => Notch.Core.Commerce.FeaturePolicy.RequiresPremium(module.Id) && !NeedsConnection(module.Id)));
-        AddToolGroup("Connected tools", _vm.IsPublicTesting ? "Access is unlocked. Connect your own provider or import a file to see real data." : "Premium access plus your own provider connection or imported file. No sample data is shown unless you enable the preview.", modules.Where(module => NeedsConnection(module.Id)));
+        AddToolGroup(_vm.IsPublicTesting ? "Local utilities" : "Premium utilities", _vm.IsPublicTesting ? "Files, notes and useful controls that stay on your device." : _vm.CanUseExtendedTools ? "Your extended local tools are available." : "US$2/month. " + (_vm.BillingConfigured ? "Open Settings to purchase or restore access." : "Purchasing will open when subscriptions launch."), modules.Where(module => Notch.Core.Commerce.FeaturePolicy.RequiresPremium(module.Id) && !NeedsConnection(module.Id)));
+        AddToolGroup("Connected tools", _vm.IsPublicTesting ? "Connect your own provider or import a file to see real data." : "Premium access plus your own provider connection or imported file. No sample data is shown unless you enable the preview.", modules.Where(module => NeedsConnection(module.Id)));
         ContentStack.Children.Add(Text("Export and recovery are always available in Settings. Samples appear only in the explicit preview.", 12, true));
     }
     private void AddToolGroup(string title, string description, IEnumerable<ModuleDefinition> modules)
@@ -296,21 +315,25 @@ public sealed partial class UtilityToolsView : UserControl
         {
             var premium = Notch.Core.Commerce.FeaturePolicy.RequiresPremium(module.Id);
             var available = _vm.CanAccessModule(module.Id);
-            var content = new StackPanel { Spacing = 8 };
+            var content = new StackPanel { Spacing = 10 };
             var heading = new Grid { ColumnSpacing = 10 };
             heading.ColumnDefinitions.Add(new() { Width = new GridLength(24) });
             heading.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
-            var icon = new FontIcon { Glyph = module.Glyph, FontSize = 20, Foreground = available ? NativeTheme.Foreground : NativeTheme.Muted };
+            var icon = new VisualIcon { Kind = VisualIcon.ForModule(module.Id), Size = 22, Foreground = available ? NativeTheme.Foreground : NativeTheme.Muted };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetAccessibilityView(icon, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
             heading.Children.Add(icon);
             var name = Text(module.Title, 14); name.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             Grid.SetColumn(name, 1); heading.Children.Add(name); content.Children.Add(heading);
             var badge = Text(_vm.IsPublicTesting ? "Public testing · unlocked" : !premium ? "Free" : available ? (_vm.IsDevelopmentBuild ? "Premium · development access" : "Premium") : "Premium · locked", 11, !available);
-            badge.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold; content.Children.Add(badge);
+            badge.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+            // Access is explained once above the catalog; per-tool cards explain their purpose.
+            // Keep the full access description in the action's accessible name.
+            if (!_vm.IsPublicTesting) content.Children.Add(badge);
             content.Children.Add(Text(ConnectionRequirement(module.Id), 11, true));
             var button = Button(module.Title, () => _vm.SelectModule(available ? module.Id : ModuleId.Settings));
             button.Style = (Style)Application.Current.Resources["NotchCardButtonStyle"];
-            button.Content = content; button.MinHeight = 116; button.MinWidth = 0;
+            button.Content = content; button.MinHeight = 104; button.MinWidth = 0;
+            NativeTheme.ApplyCardFeedback(button);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, module.Title + ". " + badge.Text + ". " + ConnectionRequirement(module.Id) + (available ? "" : ". Opens plan settings."));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(button, "Tool" + module.Id);
             ToolTipService.SetToolTip(button, available ? ConnectionRequirement(module.Id) : "Premium access required. View plan details in Settings.");
@@ -680,13 +703,63 @@ public sealed partial class UtilityToolsView : UserControl
         _updateStatusText = Text(_vm.UpdateStatus, 12, true);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(_updateStatusText, "UpdateStatus");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(_updateStatusText, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
+        _checkUpdatesButton = UpdateActionButton("Check for updates", "CheckUpdates", _vm.CheckForUpdatesAsync);
+        _installUpdateButton = UpdateActionButton("Install verified update", "InstallUpdate", _vm.InstallAvailableUpdateAsync, primary: true);
+        _cancelUpdateButton = UpdateActionButton("Cancel", "CancelUpdate", () => { _vm.CancelUpdateCheck(); return Task.CompletedTask; });
         ContentStack.Children.Add(SettingsDetails("support", "Updates and troubleshooting", "Get updates or reconnect optional Windows services.",
-            Row(Button("Check for updates", _vm.CheckForUpdatesAsync), Button("Release page", () => OpenLink("https://github.com/Sury2797/Notchling/releases"))),
+            Toggle("Check for updates daily", "Checks only when Notchling is running. Installation always needs your action.", preferences.CheckForUpdatesAutomatically,
+                value => _vm.Preferences with { CheckForUpdatesAutomatically = value }),
+            Row(_checkUpdatesButton, _installUpdateButton, _cancelUpdateButton),
             _updateStatusText,
+            Text("Signed updates are verified before installation. Evaluation releases are downloaded from the release page.", 11, true),
+            Button("Release page", () => OpenLink(_vm.UpdateReleasePage)),
             Button("Retry media and clipboard services", _vm.RetryNativeServicesAsync),
             Text("Ctrl + Shift + Space opens Notchling. Esc collapses the panel. You can also reopen it from the Windows tray.", 12, true)));
-        var notifications = _vm.NotificationHistory.Take(10).Select(activity => (UIElement)Text(activity.Source + ": " + activity.Title, 12, true)).ToArray();
-        if (notifications.Length > 0) ContentStack.Children.Add(SettingsDetails("notifications", "Recent notifications", "Your last ten activity notices.", notifications));
+        UpdateUpdateControls();
+        _notificationPanel = new StackPanel { Spacing = 12 };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(_notificationPanel, "RecentNotifications");
+        ContentStack.Children.Add(SettingsDetails("notifications", "Recent notifications", "Your last ten notices from this session. Choose a notice to open its tool.", _notificationPanel));
+        UpdateNotifications();
+    }
+    private void NotificationsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args)
+    {
+        if (_vm.SelectedModule != ModuleId.Settings) return;
+        if (DispatcherQueue.HasThreadAccess) UpdateNotifications();
+        else DispatcherQueue.TryEnqueue(() => { if (_vm.SelectedModule == ModuleId.Settings) UpdateNotifications(); });
+    }
+    private void UpdateNotifications()
+    {
+        if (_notificationPanel is null) return;
+        _notificationPanel.Children.Clear();
+        foreach (var activity in _vm.NotificationHistory.Take(10))
+        {
+            var row = new Grid { ColumnSpacing = 10 };
+            row.ColumnDefinitions.Add(new() { Width = new GridLength(24) });
+            row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+            row.Children.Add(new VisualIcon
+            {
+                Kind = activity.Kind switch
+                {
+                    Notch.Core.ActivityKind.Sale => VisualIconKind.Revenue, Notch.Core.ActivityKind.Meeting => VisualIconKind.Calendar,
+                    Notch.Core.ActivityKind.Agent => VisualIconKind.Coding, Notch.Core.ActivityKind.Focus => VisualIconKind.Focus,
+                    _ => VisualIconKind.Notification,
+                },
+                Size = 18, Foreground = NativeTheme.Muted,
+            });
+            var detail = new StackPanel { Spacing = 4 };
+            detail.Children.Add(Text(activity.Title, 12));
+            detail.Children.Add(Text(activity.Source + " · " + activity.CreatedAt.ToLocalTime().ToString("t", CultureInfo.CurrentCulture), 11, true));
+            Grid.SetColumn(detail, 1); row.Children.Add(detail);
+            if (activity.Destination is { } destination)
+            {
+                var action = Button(activity.Title, () => _vm.SelectModule(destination));
+                action.Content = row; action.HorizontalAlignment = HorizontalAlignment.Stretch; action.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(action, activity.Title + ". Open " + ModuleCatalog.Get(destination).Title);
+                _notificationPanel.Children.Add(action);
+            }
+            else _notificationPanel.Children.Add(row);
+        }
+        if (_notificationPanel.Children.Count == 0) _notificationPanel.Children.Add(Text("No notifications yet. Focus, reminder and update notices appear here.", 12, true));
     }
     private Grid Toggle(string label, string description, bool value, Func<bool, AppPreferences> update, bool enabled = true)
     {
@@ -710,10 +783,46 @@ public sealed partial class UtilityToolsView : UserControl
             ("Reduce motion", preferences.ReducedMotion), ("Hide during fullscreen apps", preferences.HideInFullscreen),
             (_vm.IsPublicTesting ? "Capture clipboard text" : "Capture clipboard text · Premium", preferences.CaptureClipboard && _vm.CanUseExtendedTools),
             ("Preview sample data for this session", preferences.DemoMode),
+            ("Check for updates daily", preferences.CheckForUpdatesAutomatically),
         };
         _updatingSettingsToggles = true;
         try { foreach (var (name, value) in values) if (_settingsToggles.TryGetValue(name, out var toggle)) toggle.IsOn = value; }
         finally { _updatingSettingsToggles = false; }
+    }
+    private Button UpdateActionButton(string title, string automationId, Func<Task> action, bool primary = false)
+    {
+        var button = new Button
+        {
+            Content = new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center },
+            Style = (Style)Application.Current.Resources[primary ? "NotchFormPrimaryButtonStyle" : "NotchFormButtonStyle"],
+            MinWidth = 0,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, title);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(button, automationId);
+        button.Click += async (_, _) =>
+        {
+            button.IsEnabled = false;
+            try { await _vm.ExecuteAsync(action); }
+            finally { UpdateUpdateControls(); }
+        };
+        return button;
+    }
+    private void UpdateUpdateControls()
+    {
+        // Keep these controls alive during progress. Rebuilding Settings would
+        // discard a credential draft and reset the user's current viewport.
+        var busy = _vm.IsCheckingUpdates || _vm.IsInstallingUpdate;
+        if (_checkUpdatesButton is not null) _checkUpdatesButton.IsEnabled = !busy;
+        if (_installUpdateButton is not null)
+        {
+            _installUpdateButton.Visibility = _vm.CanInstallAvailableUpdate || _vm.IsInstallingUpdate ? Visibility.Visible : Visibility.Collapsed;
+            _installUpdateButton.IsEnabled = _vm.CanInstallAvailableUpdate && !busy;
+        }
+        if (_cancelUpdateButton is not null)
+        {
+            _cancelUpdateButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+            _cancelUpdateButton.IsEnabled = busy;
+        }
     }
     private void UpdateConnectionStatus()
     {

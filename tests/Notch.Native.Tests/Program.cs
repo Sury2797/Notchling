@@ -408,5 +408,35 @@ Task<string> Text(string value) => Task.FromResult(value);
     await media.StartAsync();
     Check(media.Current is { Title: "", Artist: "", AlbumTitle: "", ArtworkPath: null }, "A replacement session inherited metadata from its previous application."); passed++;
 }
+{
+    var first = new GlobalSystemMediaTransportControlsSession { SourceAppUserModelId = "Chrome" };
+    var manager = new GlobalSystemMediaTransportControlsSessionManager { Current = first };
+    GlobalSystemMediaTransportControlsSessionManager.Available = manager;
+    await using var media = new WindowsMediaService(); await media.StartAsync();
+    var original = media.Current!;
+    Check(original.SessionRevision > 0, "A native media session did not publish its session identity.");
+    var selection = MediaSourceIdentity.SelectForTrack(original, MediaSourceBrand.YouTube);
+    Check(selection is not null, "A generic browser did not allow a track-specific provider choice.");
+    first.Timeline.Position = TimeSpan.FromSeconds(30);
+    first.Playback.PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused;
+    await media.StartAsync();
+    Check(media.Current!.SessionRevision == original.SessionRevision && MediaSourceIdentity.Matches(media.Current, selection),
+        "Same-session position/playback refresh invalidated the selected media provider.");
+    var replacement = new GlobalSystemMediaTransportControlsSession { SourceAppUserModelId = first.SourceAppUserModelId };
+    replacement.Properties.Title = first.Properties.Title;
+    replacement.Properties.Artist = first.Properties.Artist;
+    replacement.Properties.AlbumTitle = first.Properties.AlbumTitle;
+    manager.Current = replacement; await media.StartAsync();
+    Check(media.Current!.SessionRevision > original.SessionRevision
+        && MediaSourceIdentity.Resolve(media.Current, selection) is { Brand: MediaSourceBrand.Chrome, IsUserSelected: false },
+        "An identical-title replacement browser session inherited the previous session's YouTube choice.");
+    var replacementRevision = media.Current.SessionRevision;
+    manager.Current = null; await media.StartAsync();
+    Check(media.Current is null, "Clearing the active browser did not remove its media identity.");
+    manager.Current = first; await media.StartAsync();
+    Check(media.Current!.SessionRevision > replacementRevision && !MediaSourceIdentity.Matches(media.Current, selection),
+        "A browser session that returned after disappearing revived an expired provider choice."); passed++;
+}
+passed += await UpdateServiceCases.RunAsync();
 Console.WriteLine($"PASS: {passed} native orchestration regression cases (explicit API doubles; native Windows runtime unverified).");
 if (Directory.Exists(soundCache)) Directory.Delete(soundCache, recursive: true);

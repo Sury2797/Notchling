@@ -2,17 +2,20 @@
 # instead of replacing it with a generic external-command exit-code message.
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Unit', 'Integration', 'RuntimeFallback')][string]$Mode
+    [Parameter(Mandatory)][ValidateSet('Unit', 'Integration', 'RuntimeFallback')][string]$Mode,
+    [ValidateSet('x64', 'x86', 'arm64')][string]$AppArchitecture = 'x64'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or -not $IsWindows) {
     throw 'This prerequisite-check adapter requires a disposable Windows GitHub Actions runner.'
 }
-$desktopPowerShell = Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
+$desktopDirectory = if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { 'Sysnative' } else { 'System32' }
+$desktopPowerShell = Join-Path $env:WINDIR "$desktopDirectory/WindowsPowerShell/v1.0/powershell.exe"
+
 $fixture = Join-Path $PSScriptRoot 'test-prerequisites.ps1'
 $PSNativeCommandUseErrorActionPreference = $false
-$output = @(& $desktopPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $fixture -Mode $Mode -OutputDirectory artifacts/prerequisite-tests 2>&1)
+$output = @(& $desktopPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $fixture -Mode $Mode -AppArchitecture $AppArchitecture -OutputDirectory artifacts/prerequisite-tests 2>&1)
 $resultCode = $LASTEXITCODE
 $output | ForEach-Object { Write-Output $_.ToString() }
 if ($resultCode -ne 0) {

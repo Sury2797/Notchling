@@ -28,6 +28,8 @@
             <SolidColorBrush x:Key="NotchErrorBrush" Color="#FFA6A6" />
             <SolidColorBrush x:Key="NotchPrimaryBackgroundBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="NotchPrimaryForegroundBrush" Color="#050505" />
+            <SolidColorBrush x:Key="NotchCompactHoverBrush" Color="#101010" />
+            <SolidColorBrush x:Key="NotchCompactPressedBrush" Color="#181818" />
             <SolidColorBrush x:Key="ButtonBackground" Color="#282828" />
             <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#383838" />
             <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#454545" />
@@ -82,6 +84,8 @@
             <SolidColorBrush x:Key="NotchErrorBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
             <SolidColorBrush x:Key="NotchPrimaryBackgroundBrush" Color="{ThemeResource SystemColorHighlightColor}" />
             <SolidColorBrush x:Key="NotchPrimaryForegroundBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+            <SolidColorBrush x:Key="NotchCompactHoverBrush" Color="{ThemeResource SystemColorButtonFaceColor}" />
+            <SolidColorBrush x:Key="NotchCompactPressedBrush" Color="{ThemeResource SystemColorButtonFaceColor}" />
             <SolidColorBrush x:Key="ButtonBackground" Color="{ThemeResource SystemColorButtonFaceColor}" />
             <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="{ThemeResource SystemColorButtonFaceColor}" />
             <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="{ThemeResource SystemColorButtonFaceColor}" />
@@ -117,7 +121,7 @@
         <Setter Property="Background" Value="{ThemeResource NotchCardBrush}" />
         <Setter Property="BorderBrush" Value="{ThemeResource NotchHairlineBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="22" />
+        <Setter Property="CornerRadius" Value="18" />
         <Setter Property="Padding" Value="16" />
     </Style>
     <Style x:Key="CardStyle" TargetType="Border" BasedOn="{StaticResource NotchCardStyle}" />
@@ -166,11 +170,41 @@
         <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style x:Key="IconButtonStyle" TargetType="Button" BasedOn="{StaticResource NotchIconButtonStyle}" />
+    <Style x:Key="NotchCompactButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{ThemeResource NotchTextBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="CornerRadius" Value="0,0,20,20" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="UseSystemFocusVisuals" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <VisualStateManager.VisualStateGroups>
+                            <VisualStateGroup x:Name="CommonStates">
+                                <VisualState x:Name="Normal" />
+                                <VisualState x:Name="PointerOver"><VisualState.Setters><Setter Target="CompactControlSurface.Background" Value="{ThemeResource NotchCompactHoverBrush}" /></VisualState.Setters></VisualState>
+                                <VisualState x:Name="Pressed"><VisualState.Setters><Setter Target="CompactControlSurface.Background" Value="{ThemeResource NotchCompactPressedBrush}" /></VisualState.Setters></VisualState>
+                                <VisualState x:Name="Disabled"><VisualState.Setters><Setter Target="CompactControlContent.Opacity" Value="0.4" /></VisualState.Setters></VisualState>
+                            </VisualStateGroup>
+                        </VisualStateManager.VisualStateGroups>
+                        <Border x:Name="CompactControlSurface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}">
+                            <ContentPresenter x:Name="CompactControlContent" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" Padding="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Border>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
     <Style x:Key="NotchCardButtonStyle" TargetType="Button" BasedOn="{StaticResource NotchButtonStyle}">
         <Setter Property="Background" Value="{ThemeResource NotchCardBrush}" />
         <Setter Property="BorderBrush" Value="{ThemeResource NotchHairlineBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="22" />
+        <Setter Property="CornerRadius" Value="18" />
         <Setter Property="Padding" Value="16" />
         <Setter Property="HorizontalAlignment" Value="Stretch" />
         <Setter Property="VerticalAlignment" Value="Stretch" />
@@ -230,8 +264,5 @@
         <Setter Property="UseSystemFocusVisuals" Value="True" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
-    </Style>
-    <Style TargetType="FontIcon">
-        <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
     </Style>
 </ResourceDictionary>
