@@ -14,8 +14,11 @@ $desktopDirectory = if ([Environment]::Is64BitOperatingSystem -and -not [Environ
 $desktopPowerShell = Join-Path $env:WINDIR "$desktopDirectory/WindowsPowerShell/v1.0/powershell.exe"
 
 $fixture = Join-Path $PSScriptRoot 'test-prerequisites.ps1'
+$repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$nativeInterop = Join-Path $repositoryRoot 'artifacts/setup-interop/Notchling.Setup.Interop.dll'
+$fixtureOutput = Join-Path $repositoryRoot 'artifacts/prerequisite-tests'
 $PSNativeCommandUseErrorActionPreference = $false
-$output = @(& $desktopPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $fixture -Mode $Mode -AppArchitecture $AppArchitecture -OutputDirectory artifacts/prerequisite-tests 2>&1)
+$output = @(& $desktopPowerShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $fixture -Mode $Mode -AppArchitecture $AppArchitecture -NativeInteropPath $nativeInterop -OutputDirectory $fixtureOutput 2>&1)
 $resultCode = $LASTEXITCODE
 $output | ForEach-Object { Write-Output $_.ToString() }
 if ($resultCode -ne 0) {

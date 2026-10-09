@@ -6,12 +6,21 @@
 param(
     [ValidateSet('Unit', 'Integration', 'RuntimeFallback')][string]$Mode = 'Unit',
     [ValidateSet('x64', 'x86', 'arm64')][string]$AppArchitecture = 'x64',
-    [string]$NativeInteropPath = (Join-Path $PSScriptRoot '..\artifacts\setup-interop\Notchling.Setup.Interop.dll'),
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\artifacts\prerequisite-tests')
+    [string]$NativeInteropPath,
+    [string]$OutputDirectory
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+# Windows PowerShell 5.1 can bind advanced-script parameter defaults before
+# PSScriptRoot is populated. Resolve script-relative paths in the body instead.
+if ([string]::IsNullOrWhiteSpace($NativeInteropPath)) {
+    $NativeInteropPath = Join-Path $PSScriptRoot '..\artifacts\setup-interop\Notchling.Setup.Interop.dll'
+}
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $OutputDirectory = Join-Path $PSScriptRoot '..\artifacts\prerequisite-tests'
+}
+$NativeInteropPath = [IO.Path]::GetFullPath($NativeInteropPath)
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
     throw 'Run prerequisite fixtures with native Windows PowerShell 5.1, not PowerShell 7.'
 }

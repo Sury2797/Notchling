@@ -4,13 +4,18 @@
 [CmdletBinding()]
 param(
     [Alias('AppArchitecture')][ValidateSet('x64', 'x86', 'arm64')][string]$Architecture = 'x64',
-    [string]$NativeInteropPath = (Join-Path $PSScriptRoot 'Notchling.Setup.Interop.dll'),
+    [string]$NativeInteropPath,
     [string]$ResultPath,
     [string]$LogPath = (Join-Path $env:LOCALAPPDATA 'Notchling\Setup\Logs\setup-prerequisites.log')
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+# Resolve script-relative defaults after parameter binding for PS5.1.
+if ([string]::IsNullOrWhiteSpace($NativeInteropPath)) {
+    $NativeInteropPath = Join-Path $PSScriptRoot 'Notchling.Setup.Interop.dll'
+}
+$NativeInteropPath = [IO.Path]::GetFullPath($NativeInteropPath)
 $minimumWindowsAppRuntimeVersion = [Version]'8000.994.2142.0'
 $windowsAppRuntimeFamily = 'Microsoft.WindowsAppRuntime.1.8_8wekyb3d8bbwe'
 $restartRequired = $false
