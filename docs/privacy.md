@@ -7,11 +7,12 @@
 | Data | Location / behavior |
 | --- | --- |
 | Notes, scratchpad, reminders, links and shelf references | Plaintext JSON in `%LOCALAPPDATA%\Notch`; bounded local saves |
+| Shelf file/image captures in v0.4.3 source | Files in `%LOCALAPPDATA%\Notch\shelf-captures`; explicit drops, Paste image or opt-in file copies only. Up to 50 MiB per copy, 250 MiB and 100 saved files in total; no image-URL download |
 | Provider tokens | Windows Credential Locker, separate from workspace JSON |
 | Clipboard | Off by default; when enabled, up to 50 text entries in memory; clears on disable or exit |
 | Calendar and coding imports | Files you choose explicitly; no automatic home-directory scan |
 | System / media data | Windows APIs for current local display; optional services may be unavailable |
-| Media source choice in v0.4.1 source | A user-selected provider label stays in memory for the active track/session. No browser URL, browsing history, tab scan or remote favicon lookup |
+| Media source choice | A user-selected provider label stays in memory for the active track/session. No browser URL, browsing history, tab scan or remote favicon lookup |
 | Notification history | Session-only, capped at 50 notices; Settings shows the latest ten. Update notices do not upload workspace data |
 | Subscription entitlement | Locally cached signed entitlement/credential state for the configured billing service; contains no payment-card details |
 | Startup diagnostics | A local, bounded log in `%LOCALAPPDATA%\Notchling\Diagnostics\startup.log` records initialization errors; it is not uploaded automatically |
@@ -19,6 +20,8 @@
 Notchling does not provide a cloud workspace synchronization service. There is no app analytics/tracking SDK in this checkout. Plaintext files and export backups can contain personal information; secure the device and store backups carefully.
 
 The data folder keeps its existing `Notch` name for compatibility. The branding change does not relocate local files or replace existing Windows vault identities.
+
+In the v0.4.3 candidate, local files and folders added to Shelf remain references by default. **Save file copies** deliberately creates an independent local file; folders remain references and their contents are not copied. Bitmap images and virtual files supplied by another app are saved locally because they may have no persistent original path. **Paste image** reads an image only when you request it; it does not enable clipboard-history capture. Removing a Shelf item removes its workspace entry and keeps the original or saved copy. **Reveal saved copies** opens the retained capture folder so you can manage or delete those files yourself. Successfully completed copies can remain there after a later operation/save failure. Notebook JSON exports contain paths, not the captured file contents; back up captured files separately. Upgrade and uninstall retain this workspace folder. These new native capture paths remain subject to release qualification.
 
 ## Optional network requests
 
@@ -28,7 +31,7 @@ If the owner configures commercial billing, the application contacts that HTTPS 
 
 Public testing unlocks the catalog without a subscription and pauses checkout. It does not enable hidden provider requests or upload workspace material. Optional sign-in to a configured service can still be required for the licensed weather proxy; current configuration has no deployed backend. **Check connections** explicitly inspects supported services using the credentials/imports you configured, reports each source independently and does not display credential values.
 
-In the published v0.3.4 evaluation, update checking provides manual-download guidance. The **v0.4.1 source** adds read-only discovery of official GitHub releases, including evaluation prereleases. An explicit check sends the normal HTTPS request metadata and the app's update-client user agent; it does not send notes, clipboard text, provider credentials or a device identifier. GitHub can receive your IP address and normal network metadata under its own policy.
+Notchling can check official GitHub release metadata, including evaluation prereleases. An explicit check sends the normal HTTPS request metadata and the app's update-client user agent; it does not send notes, clipboard text, provider credentials or a device identifier. GitHub can receive your IP address and normal network metadata under its own policy. Available update behavior depends on your installed version; release-specific features and evidence are recorded in [Validation](validation-notes.md).
 
 **Check for updates daily** is off by default. When enabled, the source checks at most once per 24 hours while Notchling is running, using a monotonic interval within that session; restarting starts a new interval. There is no separate update daemon. Preview skips real release checks. Checks show availability without downloading or opening an unsigned evaluation installer. The optional fallback reads the repository's public release feed and exact release-asset listing when the API is unavailable.
 

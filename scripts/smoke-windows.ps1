@@ -68,10 +68,10 @@ function Invoke-PublicTestingUiSmoke([int]$AppProcessId, [IntPtr]$AppWindowHandl
     try {
         $standardOutput = $helper.StandardOutput.ReadToEndAsync()
         $standardError = $helper.StandardError.ReadToEndAsync()
-        if (-not $helper.WaitForExit(180000)) {
+        if (-not $helper.WaitForExit(240000)) {
             $helper.Kill()
             $helper.WaitForExit(5000) | Out-Null
-            $report.UIInteractions = [ordered]@{ Succeeded = $false; Status = "Timed out"; Error = "Owned UI Automation helper exceeded its 180-second watchdog." }
+            $report.UIInteractions = [ordered]@{ Succeeded = $false; Status = "Timed out"; Error = "Owned UI Automation helper exceeded its 240-second watchdog." }
             throw $report.UIInteractions.Error
         }
         if (Test-Path -LiteralPath $helperReportPath -PathType Leaf) {

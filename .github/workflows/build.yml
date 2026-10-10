@@ -117,7 +117,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
           }
           if (-not (Test-Path $iscc)) { throw 'The Inno Setup 6 compiler is missing.' }
-          Write-Output "Installer compiler: $((Get-Item $iscc).VersionInfo.FileVersion)"
+          $compilerVersion = [version](Get-Item $iscc).VersionInfo.FileVersion
+          if ($compilerVersion -lt [version]'6.7.1') { throw 'Inno Setup 6.7.1 or later is required for the native themed wizard.' }
+          Write-Output "Installer compiler: $compilerVersion"
       - name: Bundle publisher and installer notices
         shell: pwsh
         run: |
@@ -126,6 +128,8 @@ jobs:
           $version = (Get-Item $iscc).VersionInfo.FileVersion
           python scripts/bundle-notices.py --publish artifacts/notchling-windows-${{ matrix.arch }} --assets src/Notch.Windows/obj/project.assets.json --installer-license $license --installer-version $version
           if ($LASTEXITCODE -ne 0) { throw 'Notice generation failed.' }
+      - name: Render complete installer terms and privacy
+        run: python scripts/render-installer-documents.py --output artifacts/installer-documents
       - name: Compile single-file evaluation setup
         shell: pwsh
         run: |
@@ -134,7 +138,7 @@ jobs:
           $publish = Join-Path $PWD 'artifacts/notchling-windows-${{ matrix.arch }}'
           $output = Join-Path $PWD 'artifacts/installer'
           $PSNativeCommandUseErrorActionPreference = $false
-          $compilerOutput = & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /DEvaluationBuild "/DAppArchitecture=${{ matrix.arch }}" "/DAppVersion=$version" "/DPublishDirectory=$publish" "/DReleaseDirectory=$output" "/DNativeInteropPath=$PWD/artifacts/setup-interop/Notchling.Setup.Interop.dll" packaging/windows/Notch.iss 2>&1
+          $compilerOutput = & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' /DEvaluationBuild "/DAppArchitecture=${{ matrix.arch }}" "/DAppVersion=$version" "/DPublishDirectory=$publish" "/DReleaseDirectory=$output" "/DNativeInteropPath=$PWD/artifacts/setup-interop/Notchling.Setup.Interop.dll" "/DInstallerDocumentsDirectory=$PWD/artifacts/installer-documents" packaging/windows/Notch.iss 2>&1
           $compilerExit = $LASTEXITCODE
           $compilerOutput | Write-Output
           if ($compilerExit -ne 0) {
@@ -148,7 +152,7 @@ jobs:
           $setup = Get-ChildItem artifacts/installer/*-evaluation-setup.exe | Select-Object -First 1 -ExpandProperty FullName
           python scripts/report-package-size.py --publish artifacts/notchling-windows-${{ matrix.arch }} --architecture ${{ matrix.arch }} --require-app-only --installer $setup --output artifacts/package-size.json
           if ($LASTEXITCODE -ne 0) { throw 'App-only package verification failed.' }
-      - name: Install and launch the actual evaluation setup
+      - name: Qualify visible setup pages, install and launch the actual app
         shell: pwsh
         run: |
           $setup = Get-ChildItem artifacts/installer/*-evaluation-setup.exe | Select-Object -First 1 -ExpandProperty FullName
@@ -175,7 +179,11 @@ jobs:
             artifacts/package-size.json
             artifacts/windows-smoke.json
             artifacts/windows-ui-smoke.json
+            artifacts/windows-shelf-drop.json
             artifacts/installer-smoke.log
+            artifacts/installer-ui-smoke.json
+            artifacts/installer-ui.log
+            artifacts/installer-documents/
             artifacts/setup-prerequisites.log
             artifacts/prerequisite-tests/
             artifacts/screenshots/
@@ -220,7 +228,7 @@ jobs:
 
           **All 21 tools are free for everyone during public testing.** Checkout is paused. External data still requires provider credentials or optional service setup.
 
-          All three application architectures passed installation, native launch, all-tool navigation, hover/typing recovery, connection states, credential alignment, notes/Awake, media controls, Pomodoro, scratchpad persistence and uninstall in [cloud CI](https://github.com/$GH_REPO/actions/runs/$NOTCH_EVALUATION_RUN). Source: $NOTCH_EVALUATION_REVISION.
+          All three application architectures passed the branded installer and full formatted legal pages, installation, native launch, all-tool navigation, contextual help, hover/typing recovery, real file/image Shelf drops, connection states, credential alignment, notes/Awake, media controls, Pomodoro, scratchpad persistence and uninstall in [cloud CI](https://github.com/$GH_REPO/actions/runs/$NOTCH_EVALUATION_RUN). Source: $NOTCH_EVALUATION_REVISION.
 
           x64 was tested on two Windows host generations; ARM64 on a native Windows 11 ARM runner; x86 on a 64-bit Windows runner with cross-bitness UI Automation. The x86 run does not certify a consumer 32-bit Windows 10 device. Windows 11 has no 32-bit OS edition. Windows 10 22H2 and Windows 11 are targets; actual consumer hardware/accessibility qualification remains pending.
 

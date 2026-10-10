@@ -8,6 +8,7 @@
     <Compile Include="../../src/Notch.Windows/ViewModels/MainViewModel.cs" Link="MainViewModel.cs" />
     <Compile Include="../../src/Notch.Windows/ViewModels/MainViewModel.Connections.cs" Link="MainViewModel.Connections.cs" />
     <Compile Include="../../src/Notch.Windows/ViewModels/MainViewModel.Updates.cs" Link="MainViewModel.Updates.cs" />
+    <Compile Include="../../src/Notch.Windows/ViewModels/MainViewModel.Shelf.cs" Link="MainViewModel.Shelf.cs" />
     <Compile Include="../../src/Notch.Windows/ViewModels/ObservableObject.cs" Link="ObservableObject.cs" />
     <Compile Include="../../src/Notch.Windows/Services/SubscriptionService.cs" Link="SubscriptionService.cs" />
     <Compile Include="../../src/Notch.Windows/Services/ProductConfiguration.cs" Link="ProductConfiguration.cs" />

@@ -51,6 +51,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     public FeaturedToolsView(MainViewModel viewModel)
     {
         InitializeComponent();
+        HomeGuideHelp.Description = FreeHomeGuideHelp.Description = ContextHelp.QuickGuideText;
         NativeTheme.ApplyCardFeedback(ModuleRoot);
         ConfigureResponsiveGrid(RevenueHeaderGrid, 3, 240);
         ConfigureResponsiveGrid(RevenueRangeGrid, 3, 76);
@@ -61,7 +62,13 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         ConfigureResponsiveGrid(AnalyticsBodyGrid, 2, 280);
         ConfigureResponsiveGrid(CodingHeaderGrid, 2, 290);
         ConfigureResponsiveGrid(CodingStatsGrid, 3, 190);
+        ConfigureResponsiveGrid(CodingHeatmapHeaderGrid, 2, 210);
+        ConfigureResponsiveGrid(MediaHeaderGrid, 2, 280);
+        ConfigureResponsiveGrid(WeatherHeaderGrid, 2, 220);
+        ConfigureResponsiveGrid(FocusActionsGrid, 2, 82);
+        ConfigureResponsiveGrid(StopwatchActionsGrid, 2, 82);
         _viewModel = viewModel;
+        FocusCardContent.SizeChanged += (_, _) => RenderFocusProgress();
         _provider = viewModel.Revenue?.Provider ?? RevenueProvider.Stripe;
         _views = new()
         {
@@ -121,6 +128,7 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     private void RefreshResponsiveLayouts(object? sender, EventArgs args)
     {
         foreach (var arrange in _responsiveLayouts) arrange();
+        if (_viewModel.SelectedModule == ModuleId.Focus && _viewModel.CanUseExtendedTools) RenderFocusProgress();
     }
 
     private void ConfigureResponsiveGrid(Grid grid, int maximumColumns, double minimumColumnWidth)
@@ -632,7 +640,9 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
         {
             var date = _calendarMonth.AddDays(number - 1);
             var selected = date.Date == _calendarDate.Date;
-            var button = new Button { Content = number.ToString(CultureInfo.CurrentCulture), Width = 40, Height = 40, CornerRadius = new CornerRadius(20), Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = selected ? Brush("#FFFFFF") : new SolidColorBrush(Colors.Transparent), Foreground = selected ? Brush("#050505") : Brush(date == DateTime.Today ? "#FFFFFF" : "#A8A8A8"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 };
+            // Seven fixed-width buttons exceed a narrow calendar. Stretch within
+            // the real cell while retaining the normal 40 DIP date target.
+            var button = new Button { Content = number.ToString(CultureInfo.CurrentCulture), MaxWidth = 40, Height = 40, MinWidth = 0, CornerRadius = new CornerRadius(20), Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = selected ? Brush("#FFFFFF") : new SolidColorBrush(Colors.Transparent), Foreground = selected ? Brush("#050505") : Brush(date == DateTime.Today ? "#FFFFFF" : "#A8A8A8"), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 };
             AutomationProperties.SetName(button, date.ToString("D", CultureInfo.CurrentCulture));
             button.Click += (_, _) => { _calendarDate = date; RenderCalendar(); };
             Grid.SetColumn(button, (number - 1 + offset) % 7); Grid.SetRow(button, (number - 1 + offset) / 7 + 1); CalendarDaysGrid.Children.Add(button);
@@ -777,8 +787,9 @@ public sealed partial class FeaturedToolsView : UserControl, IDisposable
     private void RenderFocusProgress()
     {
         var progress = Math.Clamp(_viewModel.FocusProgress, 0, 1);
-        if (_renderedFocusProgress == progress) return;
         var dialSize = 96 * Math.Max(1, NativeTheme.TextScaleFactor);
+        if (FocusCardContent.ActualWidth > 0) dialSize = Math.Min(dialSize, FocusCardContent.ActualWidth);
+        if (_renderedFocusProgress == progress && Math.Abs(FocusDial.Width - dialSize) < .5) return;
         FocusDial.Width = FocusDial.Height = dialSize;
         FocusArc.Data = ArcGeometry(dialSize / 2, dialSize / 2 - 2, progress);
         _renderedFocusProgress = progress;

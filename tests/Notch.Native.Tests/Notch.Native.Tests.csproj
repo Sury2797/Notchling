@@ -11,5 +11,6 @@
     <Compile Include="../../src/Notch.Windows/Services/ClipboardService.cs" Link="UnderTest/ClipboardService.cs" />
     <Compile Include="../../src/Notch.Windows/Services/WindowsMediaService.cs" Link="UnderTest/WindowsMediaService.cs" />
     <Compile Include="../../src/Notch.Windows/Views/AmbientSound.cs" Link="UnderTest/AmbientSound.cs" />
+    <Compile Include="../../src/Notch.Windows/Services/ShelfCaptureService.cs" Link="UnderTest/ShelfCaptureService.cs" />
   </ItemGroup>
 </Project>

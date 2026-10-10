@@ -1,6 +1,6 @@
 # Notchling application terms
 
-**Public-testing policy and draft commercial terms — 9 October 2026.** All catalog tools are enabled without a subscription in the published v0.3.4 evaluation. Billing is paused until the owner chooses a commercial release, completes its configuration and publishes the required identity and consumer disclosures. This document is not an active checkout or a claim that legal review has occurred.
+**Public-testing policy and draft commercial terms — 9 October 2026 UTC.** All catalog tools are enabled without a subscription during the current public-testing phase. Billing is paused until the owner chooses a commercial release, completes its configuration and publishes the required identity and consumer disclosures. This document is not an active checkout or a claim that legal review has occurred.
 
 Contact the project maintainer through [GitHub Issues](https://github.com/Sury2797/Notchling/issues). The source is governed separately by [LICENSE](../LICENSE). Official application usage follows the applicable product terms; a subscription does not transfer source ownership, permit resale or grant redistribution rights.
 
@@ -10,7 +10,7 @@ Official public-testing builds may be used for evaluation without a subscription
 
 The testing phase is separate from purchased Premium status. It does not create, alter or bypass signed subscription proofs. Features and future editions may change in later releases; this permission does not promise permanent free access to every future version, ownership, resale or redistribution rights. Preserve independent backups.
 
-The published v0.3.4 evaluation passed [both hosted Windows installation and UI checks](https://github.com/Sury2797/Notchling/actions/runs/37944357692). Consumer Windows 10/11 hardware and commercial-release qualification remain separate requirements.
+Release-specific installation and UI evidence is recorded in [Validation](validation-notes.md). Consumer Windows 10/11 hardware and commercial-release qualification remain separate requirements.
 
 ## Planned Free and Premium
 

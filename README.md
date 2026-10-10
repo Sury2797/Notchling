@@ -54,24 +54,26 @@ The [validation notes](docs/validation-notes.md) record the exact revision, meas
 
 The [release checklist](docs/release-readiness.md) tracks acceptance. Build results establish compilation and packaging; measured responsiveness and native usability need their own evidence.
 
-### In development: v0.4.1 refinement
+### In development: v0.4.3 refinement
 
 The current source adds the following changes. **v0.3.4 remains the qualified download above until the new installers pass their own checks.**
 
 | Detail | Candidate behavior |
 | --- | --- |
-| Icons and compact state | 48 bundled vector control icons with consistent strokes; approved Pixel Dragon at idle; source logos during playback; softer card feedback |
+| Icons and compact state | 49 bundled vector control icons with consistent strokes; approved Pixel Dragon at idle; source logos during playback; softer card feedback |
 | Media identity | Separate source badge and track artwork. YouTube, YouTube Music, Spotify and other recognized players use source logos. A generic Chrome/Edge/Firefox session keeps its browser identity until you explicitly choose a provider for that track |
 | Motion | Short, interruptible geometry transitions; content fades and small translations without scaling text; reduced motion settles immediately |
 | Layout and feedback | Responsive reporting cards and Settings actions, retained drafts, and short feedback tied to its originating tool |
 | Updates | Read-only evaluation release checks, a quiet compact indicator and notification history; optional daily checks are off by default. Signed updates expose explicit Install, progress and Cancel controls |
 | Architecture | Native x64, x86 and ARM64 build/package paths; publication waits for all four installed-app jobs, including a native Windows 11 ARM64 host |
+| Setup and guidance | Branded native welcome screen, fully formatted terms/privacy, small contextual help controls, and a quick guide in Home and Settings |
+| Shelf capture | Drop onto the compact notch to open Shelf; file/folder references by default, opt-in file copies and explicit image paste; originals remain untouched |
 
 A browser's Windows media session often omits its website. Selecting **YouTube** in the Media source menu gives the current track that logo without reading browser history or guessing from its title. The choice clears when the track or native session changes. Album artwork remains in the expanded player.
 
 Candidate qualification and the remaining device checks are recorded in [validation](docs/validation-notes.md) and [flaws.md](flaws.md). This source work does not establish native x86/ARM64 release success, consumer Windows 10 compatibility or measured frame pacing.
 
-The preceding v0.4.0 candidate was withheld after actual installed-app checks exposed shared WinUI icon-geometry ownership and an x86 Setup runtime-compiler failure. v0.4.1 gives every icon its own geometry and prepares the Setup resource helper at build time; the full matrix must pass again before publication.
+The earlier candidates remain unpublished. v0.4.0 exposed shared WinUI icon geometry and an x86 Setup compiler failure; v0.4.1 exposed a Windows PowerShell 5.1 path-binding failure. The validation-only v0.4.2 passed actual Setup on all four Windows jobs, then failed launch because a content animation addressed the wrong native property. v0.4.3 repairs these paths and adds installer presentation and contextual guidance; the full matrix must pass again before publication. The [validation record](docs/validation-notes.md#candidate-qualification-sequence--10-october-2026-utc) keeps the exact revisions, stages and limits.
 
 ## The experience
 
@@ -81,7 +83,15 @@ Hover over the notch to open it, choose a tool from the separate dock, and leave
 
 Recent text input, open dialogs, and active control manipulation defer passive navigation and temporary activities. A previously focused editor does not keep an unpinned island open indefinitely. Timers and reminders use a bounded activity queue; notification history keeps recent deliveries within reach.
 
-In the v0.4.1 source, normal footer feedback expires after eight seconds and follows only its originating tool. Unsaved-work guidance stays visible. Update notices go to history and the compact indicator without replacing the panel you are editing.
+In the v0.4.3 source, normal footer feedback expires after eight seconds and follows only its originating tool. Unsaved-work guidance stays visible. Update notices go to history and the compact indicator without replacing the panel you are editing.
+
+### Guidance where you need it
+
+The v0.4.3 candidate adds a small **?** next to controls that benefit from explanation. Hover shows a short preview; click or keyboard activation opens a local, scrollable explanation. **Esc** closes it. Home and Settings include the same quick guide for opening, pinning, navigation, local tools and optional connections. There is no compulsory onboarding sequence.
+
+Shelf also gains explicit capture controls in this candidate. Files and folders remain references unless you select **Save file copies**; bitmap/virtual-file payloads become local captures. Browser images can use **Copy image → Paste image** without downloading their URLs. **Remove** keeps the underlying file. Saved captures have separate 50 MiB per-file and 250 MiB/100-file limits; the [Shelf guide](docs/getting-started.md#keep-files-and-images-on-shelf) explains storage and cleanup. These paths await native qualification.
+
+Help covers media source choice, focus timers, payment totals, analytics snapshots, clipboard privacy, session screen time, credentials/endpoints and display positioning. It explains what each control affects and which setup is required. Read the [getting-started guide](docs/getting-started.md) for the complete first-use flow.
 
 | Action | Control |
 | --- | --- |
@@ -129,7 +139,7 @@ Local tools work without an application account during public testing. Connected
 
 Polar, Dodo, and AdSense reporting are not connected. Built-in analytics OAuth, calendar account sync, and cloud workspace sync are not implemented. See the [provider contracts](src/Notch.Core/Providers/README.md) for schemas, attribution, and setup. Third-party accounts, service charges, and availability are separate from Notchling’s testing access or any future subscription.
 
-The v0.4.1 Media source menu separates provider identity from thumbnails. Known sources use bundled logos; other installed players retain their Windows-supplied icon. Browser choices are explicit, temporary labels, and do not create a new playback connection or change the active Windows media session.
+The v0.4.3 Media source menu separates provider identity from thumbnails. Known sources use bundled logos; other installed players retain their Windows-supplied icon. Browser choices are explicit, temporary labels, and do not create a new playback connection or change the active Windows media session.
 
 ## Free and Premium
 
@@ -161,7 +171,7 @@ Notchling’s workspace stays on your device. Optional connections make requests
 - **Clipboard:** off by default; when enabled, up to 50 text entries remain in memory and clear on disable or exit.
 - **Imports:** calendar and coding data come from files you choose.
 - **Recovery:** Settings provides export, validated restore, corrupt-file preservation/recovery, and note-deletion undo.
-- **Updates in v0.4.1 source:** explicit checks read official GitHub release metadata. Optional daily checks are off by default, run only while the app is open, and never install an update automatically.
+- **Updates in v0.4.3 source:** explicit checks read official GitHub release metadata. Optional daily checks are off by default, run only while the app is open, and never install an update automatically.
 
 The compatible data folder remains **`%LOCALAPPDATA%\Notch`**. The branding update retains that path and existing vault identities, so it does not create an empty workspace or discard saved connections. Export before making a manual backup; quit the app before copying the data folder. Vault credentials are not part of that folder backup.
 
@@ -180,7 +190,7 @@ Workspace limits include a 10 MB serialized file ceiling, bounded text, and up t
 | Windows app-only folder | Advanced evaluation with compatible shared runtimes already installed; keep all files together | `notchling-windows-x64-app-only` in [successful build runs](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) |
 | Windows `.msi` / `.msix` | No package currently produced; use Setup `.exe` | — |
 | Linux `.AppImage` / `.deb` / `.rpm` | Native application planned; no Linux app download yet | [Linux roadmap](docs/product-roadmap.md) |
-| Windows ARM64 / x86 | Native builds configured in v0.4.1 source; public installers await qualification | [Candidate status](#in-development-v041-refinement) |
+| Windows ARM64 / x86 | Native builds configured in v0.4.3 source; public installers await qualification | [Candidate status](#in-development-v043-refinement) |
 | macOS `.app` / `.dmg` | No application build configured | — |
 
 The app-only folder is an advanced distribution of the same Windows app, not a self-contained single executable. A Linux core test result does not provide a Linux desktop application.
@@ -194,6 +204,8 @@ The app-only folder is an advanced distribution of the same Windows app, not a s
 Evaluation releases appear in [Releases](https://github.com/Sury2797/Notchling/releases). Development snapshots also appear as **`notchling-windows-x64-installer`** in successful [GitHub Actions runs](https://github.com/Sury2797/Notchling/actions/workflows/build.yml); those artifacts require sign-in, arrive inside a ZIP, and expire after 14 days.
 
 **One installer is the normal download.** Setup installs the app and checks for the shared .NET and Windows App SDK runtimes. If either is missing, Setup downloads its official installer and installs it; an Internet connection is required, and the .NET installer may request administrator approval. Existing compatible runtimes are reused. No SDK, developer tools, or manual DLL copying is required.
+
+The v0.4.3 candidate presents the approved Pixel Dragon on a branded native welcome screen and renders the complete application terms and privacy notice as formatted documents. These are generated from the canonical Markdown during the build; headings, emphasis, Unicode, links and all privacy-table descriptions are retained. Setup explains testing access, shared components and workspace preservation. The installer presentation must pass its own Windows UI check before the candidate becomes the download above.
 
 The verified v0.3.4 setup EXE is **8,923,610 bytes (8.51 MiB)**; its extracted app files total **40,784,258 bytes (38.89 MiB)**. Separate cloud fixtures exercised real missing-runtime installation and signed-resource recovery; the final app Setup reused the verified runtimes. The official Windows App Runtime download remains approximately **106.9 MB**. A machine missing both runtimes needs roughly **147 MB total** for first-install downloads at current versions, including the estimated .NET download. Later installs reuse compatible shared runtimes. See [delivery measurements and limits](docs/release-delivery.md).
 
@@ -209,8 +221,8 @@ The [signed release workflow](https://github.com/Sury2797/Notchling/actions/work
 | --- | --- |
 | Windows 10 22H2 x64, build 19045 | Equal release target; native qualification required |
 | Supported Windows 11 x64 releases | Equal release target; native qualification required |
-| Windows 10 22H2 x86 | v0.4.1 native app/build target; consumer 32-bit OS qualification pending |
-| Windows 10/11 ARM64 | v0.4.1 native app/build target; ARM64 release qualification pending |
+| Windows 10 22H2 x86 | v0.4.3 native app/build target; consumer 32-bit OS qualification pending |
+| Windows 10/11 ARM64 | v0.4.3 native app/build target; ARM64 release qualification pending |
 | Linux | Portable core/checks available; native desktop app planned later |
 | macOS / ARM32 / Windows older than build 19045 | No application release target configured |
 
@@ -328,6 +340,7 @@ This samples CPU, memory, and handles. Rendered frame pacing needs separate Wind
 | Guide | Covers |
 | --- | --- |
 | [Design principles](docs/design-principles.md) | Visual language, input behavior, motion, and platform discipline |
+| [Getting started](docs/getting-started.md) | First use, local controls, contextual help and optional connections |
 | [Brand identity](docs/branding.md) | Approved name, Pixel Dragon artwork, distribution naming, and compatibility |
 | [Architecture](docs/architecture.md) | Core/UI separation, native services, scheduling, and persistence |
 | [Modules and connections](docs/modules-and-connections.md) | Tool behavior and exact integration boundaries |

@@ -14,6 +14,10 @@
   #error Unsupported AppArchitecture
 #endif
 
+#ifndef InstallerDocumentsDirectory
+  #error InstallerDocumentsDirectory is required (generated terms and privacy RTF)
+#endif
+
 #ifndef NativeInteropPath
   #error NativeInteropPath is required (the precompiled AnyCPU Setup helper)
 #endif
@@ -41,12 +45,23 @@ ArchitecturesInstallIn64BitMode=arm64
 ArchitecturesAllowed=x86compatible
 #endif
 MinVersion=10.0.19045
-WizardStyle=modern
+WizardStyle=modern dynamic windows11
+WizardSizePercent=120,120
+DisableWelcomePage=no
+DisableStartupPrompt=yes
+WizardImageFile=..\..\src\Notch.Windows\Assets\Notchling.png
+WizardImageFileDynamicDark=..\..\src\Notch.Windows\Assets\Notchling.png
+WizardSmallImageFile=..\..\src\Notch.Windows\Assets\Notchling.png
+WizardSmallImageFileDynamicDark=..\..\src\Notch.Windows\Assets\Notchling.png
+WizardImageBackColor=none
+WizardImageBackColorDynamicDark=none
+WizardSmallImageBackColor=none
+WizardSmallImageBackColorDynamicDark=none
 SetupIconFile=..\..\src\Notch.Windows\Assets\Notchling.ico
 UninstallDisplayIcon={app}\app\{#AppVersion}\Notchling.Windows.exe
 UninstallDisplayName=Notchling
-LicenseFile=..\..\docs\product-terms.md
-InfoBeforeFile=..\..\docs\privacy.md
+LicenseFile={#InstallerDocumentsDirectory}\product-terms.rtf
+InfoBeforeFile={#InstallerDocumentsDirectory}\privacy.rtf
 OutputDir={#ReleaseDirectory}
 #ifdef EvaluationBuild
 OutputBaseFilename=Notchling-{#AppVersion}-windows-{#AppArchitecture}-evaluation-setup
@@ -65,6 +80,31 @@ Uninstallable=yes
 ; Keep the established installation directory and AppId for upgrade continuity.
 UsePreviousAppDir=yes
 AppMutex=Notch.Desktop.Running
+
+[LangOptions]
+DialogFontName=Segoe UI
+DialogFontSize=10
+WelcomeFontName=Segoe UI
+WelcomeFontSize=22
+
+[Messages]
+SetupWindowTitle=Notchling Setup
+WelcomeLabel1=Notchling
+WelcomeLabel2=A dynamic island for your Windows desktop.%n%nMusic, focus, notes and everyday controls, close at hand.%n%nAll tools are free during public testing. No subscription or app account is needed for local tools.%n%nSetup checks shared Windows components only when needed. Your existing workspace stays in place.
+WizardLicense=Terms of use
+LicenseLabel=Public testing, your data and future paid editions.
+LicenseLabel3=Review the complete terms below. Accept them to continue.
+LicenseAccepted=I &accept the terms
+LicenseNotAccepted=I &do not accept the terms
+WizardInfoBefore=Privacy and your controls
+InfoBeforeLabel=Understand what stays on your device and when connections are used.
+InfoBeforeClickLabel=Review the complete privacy notice below. Select Next when ready.
+WizardReady=Ready to set up Notchling
+ReadyLabel1=Setup will install Notchling for your Windows account and keep your existing workspace.
+FinishedHeadingLabel=Notchling is ready
+FinishedLabel=Open Notchling to choose your tools and placement. Hover over the island to expand it; move away to collapse it.
+FinishedLabelNoIcons=Open Notchling to choose your tools and placement. Hover over the island to expand it; move away to collapse it.
+BeveledLabel=Notchling {#AppVersion}  |  {#AppArchitecture}
 
 [Files]
 Source: "{#PublishDirectory}\*"; DestDir: "{app}\app\{#AppVersion}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -85,6 +125,30 @@ Type: dirifempty; Name: "{userprograms}\Notch"
 Filename: "{app}\app\{#AppVersion}\Notchling.Windows.exe"; WorkingDir: "{app}\app\{#AppVersion}"; Description: "Open Notchling"; Flags: nowait postinstall skipifsilent
 
 [Code]
+procedure InitializeWizard();
+var
+  BrandSize: Integer;
+  BrandLeft: Integer;
+begin
+  // Keep the approved square icon square: the standard sidebar stretches an
+  // image to a portrait rectangle. Both the welcome and finish pages share
+  // this measured layout, while DPI scaling remains owned by Inno Setup.
+  // The sidebar width already reflects font size, DPI and wizard sizing.
+  // Center a measured square within that width instead of using unrelated
+  // ScaleX/ScaleY dimensions that can distort the approved icon.
+  BrandSize := ScaleX(116);
+  BrandLeft := (WizardForm.WizardBitmapImage.Width - BrandSize) div 2;
+  if BrandLeft < ScaleX(16) then
+    BrandLeft := ScaleX(16);
+  WizardForm.WizardBitmapImage.SetBounds(BrandLeft, ScaleY(36), BrandSize, BrandSize);
+  WizardForm.WizardBitmapImage2.SetBounds(BrandLeft, ScaleY(36), BrandSize, BrandSize);
+  WizardForm.WelcomeLabel1.Font.Size := 22;
+  WizardForm.FinishedHeadingLabel.Font.Size := 20;
+  WizardForm.PageNameLabel.Font.Size := 12;
+  WizardForm.LicenseMemo.BorderStyle := bsNone;
+  WizardForm.InfoBeforeMemo.BorderStyle := bsNone;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;

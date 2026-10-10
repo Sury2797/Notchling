@@ -45,9 +45,14 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         NativeTheme.Initialize(DispatcherQueue);
         ElementCompositionPreview.SetIsTranslationEnabled(ToolContent, true);
+        ElementCompositionPreview.GetElementVisual(ToolContent).Properties.InsertVector3("Translation", Vector3.Zero);
         NativeTheme.ApplyCardFeedback(RootGrid);
         _host = new(this);
         _vm = new(DispatcherQueue) { WindowHandle = _host.Handle };
+        RootGrid.AllowDrop = true;
+        RootGrid.DragOver += OnShelfDragOver;
+        RootGrid.DragLeave += OnShelfDragLeave;
+        RootGrid.AddHandler(UIElement.DropEvent, new DragEventHandler(OnShelfDrop), true);
         Title = ProductIdentity.WindowTitle;
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Notchling.ico");
         try { AppWindow.SetIcon(iconPath); }
@@ -306,17 +311,21 @@ public sealed partial class MainWindow : Window
         var translation = compositor.CreateVector3KeyFrameAnimation();
         translation.InsertKeyFrame(0, new(0, opening ? 5 : 2, 0)); translation.InsertKeyFrame(1, Vector3.Zero, easing);
         translation.DelayTime = opacity.DelayTime; translation.Duration = opacity.Duration;
-        visual.StartAnimation("Opacity", opacity); visual.StartAnimation("Translation", translation);
+        visual.StartAnimation("Opacity", opacity); visual.Properties.StartAnimation("Translation", translation);
     }
     private void ResetShellAnimations()
     {
         foreach (var element in new UIElement[] { ToolContent, ToolbarGrid })
         {
             var visual = ElementCompositionPreview.GetElementVisual(element);
-            visual.StopAnimation("Opacity"); visual.StopAnimation("Scale"); visual.StopAnimation("Translation");
+            visual.StopAnimation("Opacity"); visual.StopAnimation("Scale");
             visual.Opacity = 1; visual.Scale = Vector3.One;
-            visual.Properties.InsertVector3("Translation", Vector3.Zero);
         }
+        // WinUI exposes element translation through its property set, rather than
+        // a CompositionVisual property. The dock only animates opacity.
+        var contentProperties = ElementCompositionPreview.GetElementVisual(ToolContent).Properties;
+        contentProperties.StopAnimation("Translation");
+        contentProperties.InsertVector3("Translation", Vector3.Zero);
     }
     private void AnimateDock()
     {
@@ -366,7 +375,7 @@ public sealed partial class MainWindow : Window
         }
         return false;
     }
-    private bool HasProtectedInteraction() => HasOpenDialog || _closingAttempt
+    private bool HasProtectedInteraction() => HasOpenDialog || _closingAttempt || _shelfDragging
         || _featured?.IsManipulating == true || _utilities?.IsManipulating == true
         || RootGrid.XamlRoot is not null && VisualTreeHelper.GetOpenPopupsForXamlRoot(RootGrid.XamlRoot)
             .Any(popup => popup.IsOpen && popup.Child is not ToolTip);
@@ -378,6 +387,7 @@ public sealed partial class MainWindow : Window
         { _hoverMonitor.Stop(); return; }
         if (!_host.IsVisible) return;
         var inside = _host.IsPointerInsideWindow;
+        if (!inside) _shelfDragging = false;
         if (_hoverInteraction.ShouldCollapse(inside, _vm.Preferences.Pinned,
             !inside && HasProtectedInteraction(), !inside && _active && RootGrid.XamlRoot is not null
                 && FocusManager.GetFocusedElement(RootGrid.XamlRoot) is not null))

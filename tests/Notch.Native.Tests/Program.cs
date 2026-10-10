@@ -438,5 +438,6 @@ Task<string> Text(string value) => Task.FromResult(value);
         "A browser session that returned after disappearing revived an expired provider choice."); passed++;
 }
 passed += await UpdateServiceCases.RunAsync();
+passed += await ShelfCaptureCases.RunAsync();
 Console.WriteLine($"PASS: {passed} native orchestration regression cases (explicit API doubles; native Windows runtime unverified).");
 if (Directory.Exists(soundCache)) Directory.Delete(soundCache, recursive: true);

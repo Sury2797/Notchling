@@ -258,9 +258,9 @@ The verified public installer SHA-256 is `13e4cd031568aa166bb2aa5e002f7887cd76b2
 
 The owner's Windows 10 Pro 22H2 build 19045.7725 must still be retested with this release. Real browser/desktop-player metadata and artwork depend on the actual Windows media session supplied by each player. Consumer Windows 10/11, Narrator/high contrast/text scaling, mixed-monitor/fullscreen/sleep behavior, sustained resources and frame pacing remain open. Live Stripe/analytics and the undeployed licensed weather service require their own setup and verification. No owner-only bypass, fake paid proof, signing certificate or production connection was created. Linux native desktop remains planned.
 
-## Icon, motion, source and architecture candidate — v0.4.1
+## Icon, motion, source and architecture candidate — v0.4.3
 
-**Status: follow-up candidate; qualification pending.** The current source addresses the latest screenshots: missing Weather glyphs, strong grey catalog feedback, a video thumbnail shown as compact source identity, dense reporting/settings layouts and stale hydration feedback on other tools. The source also adds read-only evaluation release discovery, quiet update history/indicator, explicit signed installation controls and native x86/ARM64 package paths. The preceding v0.4.0 passed the checks below but failed native installation/launch; v0.4.1 requires a new full run. The published v0.3.4 links and measurements above remain the current qualified download.
+**Status: follow-up candidate; qualification pending.** The current source addresses the latest screenshots: missing Weather glyphs, strong grey catalog feedback, a video thumbnail shown as compact source identity, dense reporting/settings layouts and stale hydration feedback on other tools. The source also adds read-only evaluation release discovery, quiet update history/indicator, explicit signed installation controls and native x86/ARM64 package paths. Its installer presents full formatted terms/privacy and approved branding; contextual help explains selected controls and offers a local quick guide. Earlier candidates exposed native failures described below; v0.4.3 requires a new full run. The published v0.3.4 links and measurements above remain the current qualified download.
 
 | v0.4.0 regression evidence | Result and limit |
 | --- | --- |
@@ -272,9 +272,15 @@ The owner's Windows 10 Pro 22H2 build 19045.7725 must still be retested with thi
 | Compilation and syntax | Native source/XAML projections compiled with **zero warnings/errors**; PowerShell scripts and workflow YAML parsed |
 | Total executed checks | **407 passed** locally and on each Windows/Linux regression host; these execute portable logic and platform/HTTP doubles, not the real WinUI renderer, Windows package deployment or live provider accounts |
 
+### Current v0.4.3 local verification
+
+The working source checked on 10 October 2026 UTC passed **432 cases**: 141 Core, 76 Commerce, 85 Debug view-model, 35 Release view-model, 74 linked native/service-double cases and 21 Python release cases. Native source/XAML projections compiled with zero warnings/errors. New cases cover Shelf batch persistence and bounded capture service behavior, plus complete installer-document formatting and preservation. The workflow must rerun these checks for the committed candidate; no hosted v0.4.3 pass or public-asset measurement is recorded yet.
+
+Shelf source now distinguishes default file/folder references from opted-in file copies and app-supplied bitmap/virtual-file captures. Captures stay in the local workspace, obey per-file/total/count limits, and never download an image URL. Native compact dragging, picker/paste controls, opening, restart persistence, removal and failure recovery still require actual installed UI results. **Remove** keeps files/copies; capture contents need separate backup from notebook JSON exports.
+
 The configured installed-app matrix is x64 on `windows-latest` and `windows-2022`, x86 on x64 `windows-2022`, and native ARM64 on `windows-11-arm`. Evaluation publication requires all four jobs and both regression jobs to pass. Each architecture's emitted PE/bootstrapper/runtime contract and actual launched process must match; installer wrapper architecture alone is insufficient. Setup's runtime plan distinguishes app-architecture Framework/DDLM from native-host Main/Singleton and the native Framework dependency.
 
-The candidate has 48 bundled vector control icons and separate source logos. Automatic identity uses Windows-provided app metadata only; generic browsers keep their own brand until the user chooses a provider for the current track. A native session revision invalidates that choice even if replacement-session text is identical. No browsing history, tab scan or remote favicon lookup is introduced.
+The candidate has 49 bundled vector control icons and separate source logos. Automatic identity uses Windows-provided app metadata only; generic browsers keep their own brand until the user chooses a provider for the current track. A native session revision invalidates that choice even if replacement-session text is identical. No browsing history, tab scan or remote favicon lookup is introduced.
 
 Unsigned release checks read only official metadata; they never download or execute an evaluation installer. Optional daily checks are off by default and run only inside the app, at most once per 24 hours within its session. Notifications are bounded and do not replace the current panel. Signed installation requires an explicit action and preserved installed-publisher trust; no production signing configuration or end-to-end signed-update result exists yet.
 
@@ -290,3 +296,18 @@ Immutable source [`899d27d`](https://github.com/Sury2797/Notchling/commit/899d27
 | x86 Setup failed before prerequisite handling while compiling its resource reader with an external Framework64 compiler | Prepare the AnyCPU resource-reader helper during the build and package it in Setup, removing runtime compilation from the installer context; x86 actual setup/launch must pass |
 
 No v0.4.0 evaluation was published. The new candidate preserves the installed-app and architecture assertions and must pass them again; successful portable checks or a repaired source projection cannot certify these native failure paths.
+
+### Candidate qualification sequence — 10 October 2026 UTC
+
+Each attempt has an immutable revision and its own evidence. No failed candidate replaces the verified v0.3.4 download.
+
+| Attempt | Exact source and workflow | Executed result |
+| --- | --- | --- |
+| v0.4.0 evaluation candidate | [`899d27d`](https://github.com/Sury2797/Notchling/commit/899d27d8b9c2084dc1090fd2bd5a882ef15c5193), [run 37979741879](https://github.com/Sury2797/Notchling/actions/runs/37979741879) | Both regression jobs passed 407 checks. All four Windows build/publish and official prerequisite-fixture stages passed. x64/ARM64 launch failed on shared WinUI `Path.Data` geometry; x86 final Setup failed while invoking an external compiler. Publication did not run |
+| v0.4.1 evaluation candidate | [`dd027e`](https://github.com/Sury2797/Notchling/commit/dd027e8fd316a1b4f6824701fe3fbb1d0df712d3), [run 37980974718](https://github.com/Sury2797/Notchling/actions/runs/37980974718) | Both regression jobs passed. Windows PowerShell 5.1 failed before prerequisite fixtures on all four Windows jobs: a parameter default evaluated `Join-Path $PSScriptRoot ...` before the script root was available. This run did not establish final Setup or launch success, and publication did not run |
+| v0.4.2 validation-only run | [`61c522e`](https://github.com/Sury2797/Notchling/commit/61c522e7cd89c5d703bef403822d1246bdd70228), [run 37981575380](https://github.com/Sury2797/Notchling/actions/runs/37981575380) | Both regression jobs passed 407 checks. All four Windows builds, publishes, prerequisite fixtures and actual final Setup stages passed. Every installed-app launch then failed with `ArgumentException` (`0x80070057`): `Translation` was addressed as a visual property in `MainWindow.ResetShellAnimations`. No installed UI assertions passed. The validation tag cannot publish a release |
+| v0.4.3 follow-up source | Qualification pending | Path defaults now initialize inside the PowerShell script body; the compiler-free AnyCPU helper remains prepared at build time. Content translation uses the WinUI visual's property set rather than a nonexistent visual property. Formatted installer pages, responsive help and alignment changes still require their own native qualification |
+
+The v0.4.2 Setup result establishes that the path-binding and x86 runtime-compiler failures no longer blocked installation on those hosts. It does not establish a usable app: the launch failure prevented UI, interaction, reopening and uninstall qualification from completing. The repaired translation call compiles against the native member metadata, but only a fresh installed launch can verify its property contract at runtime.
+
+The next run must retain the complete four-job app/architecture matrix and both regression gates. Its installer checks must exercise branded welcome, terms/privacy navigation and cancellation before installation; installed UI checks must exercise explicit Home help opening/dismissal alongside the existing controls. New results, public EXE measurements and hashes belong to that exact run, rather than being inherited from a failed attempt.

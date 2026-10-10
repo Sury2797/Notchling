@@ -41,6 +41,7 @@ public sealed partial class UtilityToolsView : UserControl
     private readonly Dictionary<string, ToggleSwitch> _settingsToggles = [];
     private bool _updatingSettingsToggles;
     private readonly Dictionary<string, bool> _expandedSettings = [];
+    private readonly List<Action> _responsiveLayouts = [];
     public bool HasInvalidDrafts => _invalidDrafts;
     public bool IsManipulating => _systemVolume?.PointerCaptures?.Count > 0;
 
@@ -49,11 +50,23 @@ public sealed partial class UtilityToolsView : UserControl
         InitializeComponent(); _vm = viewModel;
         Loaded += (_, _) =>
         {
-            if (!_attached) { _vm.PropertyChanged += Changed; _vm.NotificationHistory.CollectionChanged += NotificationsChanged; _attached = true; }
+            if (!_attached) { _vm.PropertyChanged += Changed; _vm.NotificationHistory.CollectionChanged += NotificationsChanged; NativeTheme.Changed += RefreshResponsiveLayouts; _attached = true; }
             if (_renderedModule != _vm.SelectedModule) Render();
             else if (_vm.SelectedModule == ModuleId.Settings) UpdateNotifications();
+            RefreshResponsiveLayouts(this, EventArgs.Empty);
         };
-        Unloaded += (_, _) => { _vm.PropertyChanged -= Changed; _vm.NotificationHistory.CollectionChanged -= NotificationsChanged; _attached = false; };
+        Unloaded += (_, _) => { _vm.PropertyChanged -= Changed; _vm.NotificationHistory.CollectionChanged -= NotificationsChanged; NativeTheme.Changed -= RefreshResponsiveLayouts; _attached = false; };
+    }
+    private void RefreshResponsiveLayouts(object? sender, EventArgs args)
+    {
+        // Reflow in place when text scaling changes, preserving form drafts and focus.
+        foreach (var arrange in _responsiveLayouts) arrange();
+    }
+    private void TrackResponsiveLayout(FrameworkElement element, Action arrange)
+    {
+        _responsiveLayouts.Add(arrange);
+        element.Loaded += (_, _) => arrange();
+        element.SizeChanged += (_, _) => arrange();
     }
     private void Changed(object? sender, PropertyChangedEventArgs args)
     {
@@ -103,7 +116,7 @@ public sealed partial class UtilityToolsView : UserControl
         return button;
     }
     private Button Button(string title, Action action, bool primary = false) => Button(title, () => { action(); return Task.CompletedTask; }, primary);
-    private static Grid FormRow(FrameworkElement input, params Button[] actions)
+    private Grid FormRow(FrameworkElement input, params Button[] actions)
     {
         // Keep action buttons at their natural size instead of distributing the
         // entire row among star cells. Labels live outside this row so fields and
@@ -154,17 +167,31 @@ public sealed partial class UtilityToolsView : UserControl
                 Grid.SetColumn(actions[i], stackActions ? 0 : i); Grid.SetRow(actions[i], stackActions ? i : 0);
             }
         }
-        row.Loaded += (_, _) => Arrange(); row.SizeChanged += (_, _) => Arrange();
+        TrackResponsiveLayout(row, Arrange);
         return row;
     }
     private StackPanel FormField(string label, FrameworkElement input, params Button[] actions)
+        => FormField(label, input, null, null, actions);
+    private StackPanel FormField(string label, FrameworkElement input, string? help, string? helpId, params Button[] actions)
     {
         var panel = new StackPanel { Spacing = 6 };
-        panel.Children.Add(Text(label, 12));
+        panel.Children.Add(help is null ? Text(label, 12) : LabelWithHelp(label, help, helpId ?? "FieldHelp"));
         panel.Children.Add(FormRow(input, actions));
         return panel;
     }
-    private static Grid Row(params UIElement[] elements)
+    private Grid LabelWithHelp(string label, string description, string id, double size = 12)
+    {
+        var row = new Grid { ColumnSpacing = 6 };
+        row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        var text = Text(label, size); text.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(text);
+        var help = new ContextHelp { Heading = label, Description = description };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(help, id);
+        Grid.SetColumn(help, 1); row.Children.Add(help);
+        return row;
+    }
+    private Grid Row(params UIElement[] elements)
     {
         // A horizontal StackPanel measures children with infinite width. That defeated
         // text wrapping and made Settings wider than the notch. Use finite star cells,
@@ -174,7 +201,7 @@ public sealed partial class UtilityToolsView : UserControl
         var preferred = elements.Select(element => element switch
         {
             FrameworkElement control when double.IsFinite(control.Width) => control.Width,
-            Button { Content: TextBlock label } => Math.Clamp(label.Text.Length * 6.5 * NativeTheme.TextScaleFactor + 34, 90, 270),
+            Button { Content: TextBlock label } => Math.Clamp(label.Text.Length * 6.5 + 34, 90, 270),
             TextBox or PasswordBox or NumberBox or ComboBox => 200d,
             _ => 160d,
         }).ToArray();
@@ -189,7 +216,8 @@ public sealed partial class UtilityToolsView : UserControl
         {
             if (row.ActualWidth <= 0) return;
             var visible = elements.Where(element => element.Visibility != Visibility.Collapsed).ToArray();
-            var desiredWidth = elements.Select((element, index) => element.Visibility == Visibility.Collapsed ? 0 : preferred[index]).Sum();
+            var scale = Math.Max(1, NativeTheme.TextScaleFactor);
+            var desiredWidth = elements.Select((element, index) => element.Visibility == Visibility.Collapsed ? 0 : preferred[index] * scale).Sum();
             var next = row.ActualWidth < desiredWidth + Math.Max(0, visible.Length - 1) * 10;
             if (stacked == next && arranged.SequenceEqual(visible)) return;
             stacked = next;
@@ -208,11 +236,10 @@ public sealed partial class UtilityToolsView : UserControl
             }
         }
         foreach (var element in elements) element.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => Arrange());
-        row.SizeChanged += (_, _) => Arrange();
-        row.Loaded += (_, _) => Arrange();
+        TrackResponsiveLayout(row, Arrange);
         return row;
     }
-    private static Grid AdaptiveGrid(int maximumColumns, double minimumColumnWidth, params UIElement[] elements)
+    private Grid AdaptiveGrid(int maximumColumns, double minimumColumnWidth, params UIElement[] elements)
     {
         var grid = new Grid { ColumnSpacing = 10, RowSpacing = 10, HorizontalAlignment = HorizontalAlignment.Stretch };
         foreach (var element in elements) grid.Children.Add(element);
@@ -226,7 +253,7 @@ public sealed partial class UtilityToolsView : UserControl
             for (var i = 0; i < (elements.Length + columns - 1) / columns; i++) grid.RowDefinitions.Add(new() { Height = GridLength.Auto });
             for (var i = 0; i < elements.Length; i++) { Grid.SetColumn((FrameworkElement)elements[i], i % columns); Grid.SetRow((FrameworkElement)elements[i], i / columns); }
         }
-        Arrange(); grid.SizeChanged += (_, _) => Arrange(); grid.Loaded += (_, _) => Arrange();
+        Arrange(); TrackResponsiveLayout(grid, Arrange);
         return grid;
     }
     private Border Card(UIElement child) => new()
@@ -248,7 +275,16 @@ public sealed partial class UtilityToolsView : UserControl
     }
     private void Header(string title, string description)
     {
-        ContentStack.Children.Add(Text(title, 22)); ContentStack.Children.Add(Text(description, 12, true));
+        var guidance = _vm.SelectedModule switch
+        {
+            ModuleId.Settings => ("SettingsGuide", ContextHelp.QuickGuideText),
+            ModuleId.Clipboard => ("ClipboardHelp", "Clipboard history is optional and starts turned off. When enabled, up to 50 plain-text items stay in memory. Turn it off or quit Notchling to clear them. Copy returns an item to the Windows clipboard; it does not paste into another app."),
+            ModuleId.System => ("SystemMetricsHelp", "CPU and memory show current usage across your device. Battery shows charge when Windows reports a battery; a desktop may show No battery. Volume controls the current Windows audio output, not only the music player."),
+            ModuleId.ScreenTime => ("ScreenTimeHelp", "Active time for this Notchling session. It does not keep a history of app names, window titles or screenshots, and starts a new session when you relaunch the app."),
+            _ => ((string?)null, (string?)null),
+        };
+        ContentStack.Children.Add(guidance.Item1 is null ? Text(title, 22) : LabelWithHelp(title, guidance.Item2!, guidance.Item1, 22));
+        ContentStack.Children.Add(Text(description, 12, true));
     }
     private void Render()
     {
@@ -257,6 +293,7 @@ public sealed partial class UtilityToolsView : UserControl
         _renderedModule = _vm.SelectedModule;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ContentScroll, _vm.SelectedModule == ModuleId.Settings ? "Notchling settings content" : "Notchling tool content");
         ContentStack.Children.Clear();
+        _responsiveLayouts.Clear();
         _settingsToggles.Clear();
         _updateStatusText = null;
         _checkUpdatesButton = _installUpdateButton = _cancelUpdateButton = null;
@@ -382,50 +419,6 @@ public sealed partial class UtilityToolsView : UserControl
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(input, "Scratchpad");
         ContentStack.Children.Add(input); ContentStack.Children.Add(Text("Saved automatically on this device. Plain text; no sync or account. Limit: 500,000 characters; validation errors preserve the full draft.", 12, true));
-    }
-    private void Shelf()
-    {
-        var drop = Card(Text("Drop files or folders here", 17)); drop.Height = 80; drop.AllowDrop = true;
-        drop.DragOver += (_, args) => { args.AcceptedOperation = DataPackageOperation.Link; args.DragUIOverride.Caption = "Add to shelf"; };
-        drop.Drop += async (_, args) =>
-        {
-            var deferral = args.GetDeferral();
-            try { await _vm.ExecuteAsync(async () => { foreach (var item in await args.DataView.GetStorageItemsAsync()) _vm.AddShelf(item.Path); Render(); }); }
-            finally { deferral.Complete(); }
-        };
-        ContentStack.Children.Add(drop);
-        ContentStack.Children.Add(Button("Choose files", PickFilesAsync));
-        ShelfList(); ContentStack.Children.Add(Text("The shelf stores references. Removing an item leaves the original file untouched.", 11, true));
-    }
-    private async Task PickFilesAsync()
-    {
-        if (HasOpenDialog) return;
-        HasOpenDialog = true;
-        try
-        {
-            var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary }; picker.FileTypeFilter.Add("*");
-            WinRT.Interop.InitializeWithWindow.Initialize(picker, _vm.WindowHandle);
-            foreach (var file in await picker.PickMultipleFilesAsync()) _vm.AddShelf(file.Path);
-            Render();
-        }
-        finally { HasOpenDialog = false; }
-    }
-    private void ShelfList()
-    {
-        foreach (var item in _vm.Shelf)
-        {
-            var text = Text(Path.GetFileName(item.Path), 13); text.Width = 280;
-            ContentStack.Children.Add(Row(text, Button("Open", () => OpenFile(item.Path)), Button("Reveal", () => Reveal(item.Path)), Button("Remove", () => { _vm.RemoveShelf(item.Id); Render(); })));
-        }
-        if (_vm.Shelf.Count == 0) ContentStack.Children.Add(Text("Nothing on the shelf yet.", 13, true));
-    }
-    private void Files()
-    {
-        ContentStack.Children.Add(Row(
-            Button("Documents", () => OpenFile(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments))),
-            Button("Downloads", () => OpenFile(NativeFolders.DownloadsPath)),
-            Button("Desktop", () => OpenFile(Environment.GetFolderPath(Environment.SpecialFolder.Desktop)))));
-        ContentStack.Children.Add(Button("Add a frequently used file", PickFilesAsync)); ShelfList();
     }
     private void Clipboard()
     {
@@ -587,7 +580,15 @@ public sealed partial class UtilityToolsView : UserControl
     }
     private NumberBox SettingsNumber(string key, string label, double value, double minimum, double maximum)
     {
-        var box = new NumberBox { Header = Text(label, 12), Value = DraftNumber(key, value), Minimum = minimum, Maximum = maximum, MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var help = key switch
+        {
+            "focus-minutes" => "The length used when you reset the Pomodoro. Save intervals to apply a new length. A running session keeps its current remaining time until reset.",
+            "hydration-minutes" => "Time between hydration nudges while Notchling runs. Drank water restarts this interval. Save intervals to apply a change.",
+            "offset-x" => "Move the notch left with a negative value or right with a positive value, relative to the center of the chosen display. Apply position saves the change; Reset placement returns to the primary display's center.",
+            "offset-y" => "Add space between the top edge of your display and the notch. Placement adapts to display scaling and stays within the available display area. Apply position saves the change.",
+            _ => null,
+        };
+        var box = new NumberBox { Header = help is null ? Text(label, 12) : LabelWithHelp(label, help, "SettingHelp" + key), Value = DraftNumber(key, value), Minimum = minimum, Maximum = maximum, MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, label);
         TrackNumber(key, box); return box;
     }
@@ -656,7 +657,7 @@ public sealed partial class UtilityToolsView : UserControl
         var top = SettingsNumber("offset-y", "Distance from top", preferences.TopOffset, 0, 1000);
         monitor.Header = null;
         ContentStack.Children.Add(SettingsDetails("position", "Display and position", "Choose a display or fine-tune the notch placement.",
-            FormField("Display number (0 is primary)", monitor, Button("Move to display", () => _vm.SetPreferencesAsync(_vm.Preferences with { ActiveMonitor = double.IsFinite(monitor.Value) ? (int)monitor.Value : 0, MonitorDeviceId = null }))),
+            FormField("Display number (0 is primary)", monitor, "0 chooses the primary display. Choose another display number and use Move to display to apply it. If that display is disconnected, Notchling returns to an available display.", "DisplayPositionHelp", Button("Move to display", () => _vm.SetPreferencesAsync(_vm.Preferences with { ActiveMonitor = double.IsFinite(monitor.Value) ? (int)monitor.Value : 0, MonitorDeviceId = null }))),
             AdaptiveGrid(2, 180, horizontal, top),
             Text("Position adjustments use Windows logical pixels and adapt to display scaling.", 11, true),
             Row(Button("Apply position", () => _vm.SetPreferencesAsync(_vm.Preferences with { HorizontalOffset = horizontal.Value, TopOffset = top.Value })),
@@ -672,7 +673,7 @@ public sealed partial class UtilityToolsView : UserControl
             Credential("Stripe read-only key", "stripe"),
             Text("Give the Stripe restricted key permission to read charges. A test-mode key reports test payments.", 11, true),
             Credential("Analytics bearer token", "analytics"),
-            FormField("Analytics HTTPS endpoint", endpoint, Button("Save endpoint", () => _vm.SetPreferencesAsync(_vm.Preferences with { AnalyticsEndpoint = endpoint.Text }))),
+            FormField("Analytics HTTPS endpoint", endpoint, "Use an HTTPS address that returns the supported analytics data format, rather than your website's homepage. Save the endpoint and its bearer token, then use Check connections. Saving an address does not confirm access.", "AnalyticsEndpointHelp", Button("Save endpoint", () => _vm.SetPreferencesAsync(_vm.Preferences with { AnalyticsEndpoint = endpoint.Text }))),
             Text("Provider credentials are stored using Windows protection. Coding and calendar accept imported files in their tools. Weather requires a configured licensed service.", 12, true),
             Button("Provider setup guide", () => OpenLink("https://github.com/Sury2797/Notchling/blob/main/src/Notch.Core/Providers/README.md"))));
 
@@ -863,7 +864,9 @@ public sealed partial class UtilityToolsView : UserControl
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, "Remove " + label);
         ToolTipService.SetToolTip(save, "Save or replace this provider credential in Windows Credential Locker.");
         ToolTipService.SetToolTip(remove, "Delete the stored credential for this provider.");
-        return FormField(label, password, save, remove);
+        return FormField(label, password, provider == "stripe"
+            ? "Use a restricted Stripe key with read access to charges. Notchling reads your payment reports; it does not make payments or activate a subscription. Save replaces the stored key, and Remove disconnects it. A test-mode key reports test payments."
+            : "Use the bearer token issued for your analytics endpoint. Save replaces the stored token; Remove disconnects it. Stored keys stay hidden and are kept separately from your notes using Windows protection.", "CredentialHelp" + provider, save, remove);
     }
     private static void OpenFile(string path)
     {
@@ -937,5 +940,5 @@ public sealed partial class UtilityToolsView : UserControl
         }
         finally { HasOpenDialog = false; }
     }
-    public void Dispose() { _sound?.Dispose(); _credentialDrafts.Clear(); _vm.PropertyChanged -= Changed; }
+    public void Dispose() { DisposeShelfCapture(); _sound?.Dispose(); _credentialDrafts.Clear(); _responsiveLayouts.Clear(); _vm.PropertyChanged -= Changed; _vm.NotificationHistory.CollectionChanged -= NotificationsChanged; NativeTheme.Changed -= RefreshResponsiveLayouts; }
 }

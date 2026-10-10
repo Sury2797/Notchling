@@ -20,7 +20,7 @@ public enum VisualIconKind
     Links, Emoji, Sounds, Convert, Awake, Settings, Tools, Revenue, Analytics,
     Coding, ChevronLeft, ChevronRight, ChevronDown, Refresh, Play, Pause, Previous, Next,
     Volume, Equalizer, Droplet, CheckCircle, Close, Pin, Notification, Download,
-    Check, Info, Warning,
+    Check, Info, Warning, Help,
 }
 
 /// <summary>
@@ -92,6 +92,7 @@ public sealed class VisualIcon : UserControl
         [VisualIconKind.Check] = "M4 12 L9 17 L20 6",
         [VisualIconKind.Info] = "M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M12 11 L12 17 M12 7 L12.1 7",
         [VisualIconKind.Warning] = "M12 3 L22 21 L2 21 Z M12 9 L12 14 M12 17 L12.1 17",
+        [VisualIconKind.Help] = "M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M9 9 C9 5.5 15 5.5 15 9 C15 11 12 11 12 14 M12 17 L12.1 17",
     };
 
     public VisualIconKind Kind { get => (VisualIconKind)GetValue(KindProperty); set => SetValue(KindProperty, value); }

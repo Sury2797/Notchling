@@ -19,6 +19,47 @@ $prerequisiteLines = @()
 function ConvertTo-WorkflowData([string]$Message) {
   return $Message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
 }
+# Qualify the visible wizard before the independent silent install/launch path.
+# Expected legal text is regenerated from this exact source revision, then
+# compared against the compiled native RichEdit viewers rather than a preview.
+$installerDocuments = Join-Path $ReportDirectory 'installer-documents'
+& python (Join-Path $PSScriptRoot 'render-installer-documents.py') --output $installerDocuments
+if ($LASTEXITCODE -ne 0) { throw 'Expected installer legal-document generation failed.' }
+$uiReportPath = Join-Path $ReportDirectory 'installer-ui-smoke.json'
+if (Test-Path -LiteralPath $uiReportPath) { Remove-Item -LiteralPath $uiReportPath }
+$windowsPowerShell = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell/v1.0/powershell.exe'
+$helperInfo = [Diagnostics.ProcessStartInfo]::new($windowsPowerShell)
+$helperInfo.UseShellExecute = $false
+$helperInfo.CreateNoWindow = $true
+$helperInfo.RedirectStandardOutput = $true
+$helperInfo.RedirectStandardError = $true
+foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-Mta', '-ExecutionPolicy', 'Bypass', '-File',
+    (Join-Path $PSScriptRoot 'smoke-windows-installer-ui.ps1'), '-SetupPath', $setup,
+    '-DocumentsDirectory', $installerDocuments, '-ReportPath', $uiReportPath)) { $helperInfo.ArgumentList.Add($argument) }
+$helper = [Diagnostics.Process]::Start($helperInfo)
+if (-not $helper) { throw 'Windows did not start the owned installer presentation probe.' }
+try {
+    $helperOutput = $helper.StandardOutput.ReadToEndAsync()
+    $helperError = $helper.StandardError.ReadToEndAsync()
+    if (-not $helper.WaitForExit(120000)) {
+        # The helper also has a 90-second operation budget and owns teardown of
+        # only its launched wizard. This final watchdog kills that owned tree.
+        $helper.Kill($true)
+        $helper.WaitForExit(5000) | Out-Null
+        throw 'Installer presentation probe exceeded its 120-second watchdog.'
+    }
+    if (-not (Test-Path -LiteralPath $uiReportPath -PathType Leaf)) {
+        $details = $helperError.GetAwaiter().GetResult()
+        throw ('Installer presentation probe produced no report. ' + $details.Substring(0, [Math]::Min(3000, $details.Length)))
+    }
+    $uiReport = Get-Content -LiteralPath $uiReportPath -Raw | ConvertFrom-Json
+    if ($helper.ExitCode -ne 0 -or -not $uiReport.Succeeded) { throw "Actual installer presentation failed: $($uiReport.Stage): $($uiReport.Error)." }
+    $scope = "Actual $AppArchitecture installer welcome, complete formatted terms/privacy, acceptance and cancellation passed at $($uiReport.Dpi) DPI on $($uiReport.OS); window and actions fit the current work area. Other display configurations and consumer hardware are not certified."
+    Write-Output "::notice::$(ConvertTo-WorkflowData $scope)"
+} finally {
+    if (-not $helper.HasExited) { $helper.Kill($true); $helper.WaitForExit(5000) | Out-Null }
+    $helper.Dispose()
+}
 $result = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$install`"", "/LOG=`"$log`"") -Wait -PassThru
 if (Test-Path -LiteralPath $prerequisiteLog) {
   if ((Get-Item -LiteralPath $prerequisiteLog).Length -gt 1048576) {

@@ -1,5 +1,5 @@
 # Windows PowerShell 5.1 supplies the built-in .NET Framework UI Automation client.
-# The caller bounds this all-tools helper to 180 seconds and owns the app lifecycle.
+# The caller bounds this all-tools helper to 240 seconds and owns the app lifecycle.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][int]$AppProcessId,
@@ -43,6 +43,8 @@ $report = [ordered]@{
     SettingsTogglePreservesScroll = $false
     SettingsDraftPreserved = $false
     FeaturedNavigationStartsAtTop = $false
+    ContextualHelpRoundTrip = $false
+    ShelfDrops = $null
     UnsignedUpdateGuidance = $false
     UpdateActionPreservesSettingsScroll = $false
     UpdateActionCreatedNoDownload = $false
@@ -61,7 +63,7 @@ $report = [ordered]@{
 }
 
 function Assert-Budget {
-    if ($clock.Elapsed.TotalSeconds -gt 150) { throw "Public-testing UI interaction exceeded its 150-second operation budget." }
+    if ($clock.Elapsed.TotalSeconds -gt 195) { throw "Public-testing UI interaction exceeded its 195-second operation budget." }
     $process = Get-Process -Id $AppProcessId -ErrorAction Stop
     if ($process.HasExited) { throw "The owned app exited during UI interaction." }
 }
@@ -107,6 +109,85 @@ function Wait-Control([string]$Name, $ControlType, [bool]$RequireEnabled = $true
     } while ($wait.Elapsed.TotalSeconds -lt 10)
     $state = Get-UiStateSnapshot ("Missing control: " + $Name)
     throw "An accessible usable control did not appear: $Name ($ControlType; required pattern: $Pattern). UI state: $state"
+}
+
+function Find-OwnedHelpElement([string]$Id) {
+    # Flyout windows can be a separate UI Automation surface. Never search
+    # another application's text or accept a coincidental desktop label.
+    $idCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
+    $processCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $AppProcessId)
+    $condition = [System.Windows.Automation.AndCondition]::new($idCondition, $processCondition)
+    foreach ($surface in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $processCondition)) {
+        foreach ($element in $surface.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) {
+            if (-not $element.Current.IsOffscreen -and -not $element.Current.BoundingRectangle.IsEmpty) { return $element }
+        }
+    }
+    return $null
+}
+
+function Verify-HomeGuide {
+    $guide = Find-AutomationId "HomeQuickGuide" ([System.Windows.Automation.InvokePattern]::Pattern)
+    if (-not $guide) { throw "Home does not expose its accessible quick guide." }
+    $guide.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $wait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        Assert-Budget
+        $heading = Find-OwnedHelpElement "HomeQuickGuideHeading"
+        $description = Find-OwnedHelpElement "HomeQuickGuideDescription"
+        if ($heading -and $description) { break }
+        if ($wait.Elapsed.TotalSeconds -ge 5) { throw "The explicitly requested Home guide did not open an accessible local flyout." }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+    if ($heading.Current.Name -ne "Notchling quick guide" -or $description.Current.Name -notmatch 'Ctrl \+ Shift \+ Space' -or $description.Current.Name -notmatch 'Clipboard') {
+        throw "The Home guide omitted branding, keyboard navigation or privacy guidance."
+    }
+    $guide.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $wait.Restart()
+    while (Find-OwnedHelpElement "HomeQuickGuideHeading") {
+        Assert-Budget
+        if ($wait.Elapsed.TotalSeconds -ge 5) { throw "The local quick guide did not close when its help control was toggled." }
+        Start-Sleep -Milliseconds 100
+    }
+    if (Find-Control "Notchling error" $null $false) { throw "Opening local guidance produced an application error." }
+    $report.ContextualHelpRoundTrip = $true
+    $report.Actions += "Verified explicit branded Home guide opens and closes with keyboard/privacy instructions and no app error"
+}
+
+function Verify-NativeShelfDrops {
+    Assert-Budget
+    $helperScript = Join-Path $PSScriptRoot "smoke-windows-shelf-drop.ps1"
+    $helperReport = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ReportPath))) "windows-shelf-drop.json"
+    if (-not (Test-Path -LiteralPath $helperScript -PathType Leaf)) { throw "The native Shelf drop probe is missing." }
+    if (Test-Path -LiteralPath $helperReport) { Remove-Item -LiteralPath $helperReport }
+    $info = [Diagnostics.ProcessStartInfo]::new((Join-Path $PSHOME "powershell.exe"))
+    $info.UseShellExecute = $false; $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
+    # These are owned Windows paths; quotes cannot appear in a filename. PS5.1
+    # uses the Framework ProcessStartInfo.Arguments API rather than ArgumentList.
+    $info.Arguments = '-NoLogo -NoProfile -NonInteractive -Mta -ExecutionPolicy Bypass -File "' + $helperScript +
+        '" -AppProcessId ' + $AppProcessId + ' -WindowHandle ' + $WindowHandle + ' -ReportPath "' + $helperReport + '"'
+    $helper = [Diagnostics.Process]::Start($info)
+    if (-not $helper) { throw "Windows did not start the native Shelf drop probe." }
+    try {
+        $output = $helper.StandardOutput.ReadToEndAsync(); $errors = $helper.StandardError.ReadToEndAsync()
+        if (-not $helper.WaitForExit(40000)) {
+            $helper.Kill(); $helper.WaitForExit(5000) | Out-Null
+            throw "The native Shelf drop probe exceeded its 40-second watchdog."
+        }
+        if (-not (Test-Path -LiteralPath $helperReport -PathType Leaf)) {
+            $details = $errors.GetAwaiter().GetResult()
+            throw ("The native Shelf drop probe produced no report. " + $details.Substring(0, [Math]::Min(1500, $details.Length)))
+        }
+        $report.ShelfDrops = Get-Content -LiteralPath $helperReport -Raw | ConvertFrom-Json
+        if ($helper.ExitCode -ne 0 -or -not $report.ShelfDrops.Succeeded) { throw "Native Shelf drop failed: $($report.ShelfDrops.Stage): $($report.ShelfDrops.Error)" }
+        foreach ($field in @("FileDropCopy", "BitmapDropCopy", "CompactDropOpenedShelf", "OriginalFilePreserved", "PersistedBitmapVerified")) {
+            if (-not $report.ShelfDrops.$field) { throw "The native Shelf probe did not prove $field." }
+        }
+        $report.Actions += "Verified real OLE file and bitmap Copy drops, compact drag-to-open, immediate workspace/image persistence and unchanged source file"
+    } finally {
+        if (-not $helper.HasExited) { $helper.Kill(); $helper.WaitForExit(5000) | Out-Null }
+        $helper.Dispose()
+    }
 }
 
 function Get-UiStateSnapshot([string]$Reason) {
@@ -896,6 +977,7 @@ namespace NotchlingUiSmoke {
         Wait-ModuleControl $case.Name $case.Type | Out-Null
         Assert-HorizontalBounds
         if ($case.Module -eq "Home") {
+            Verify-HomeGuide
             # Exercise the real shared viewport before leaving for the short Media
             # view; the next catalog navigation must restore its own top edge.
             $homeScroll = (Find-AutomationId "ModuleScroll" ([System.Windows.Automation.ScrollPattern]::Pattern)).GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
@@ -917,6 +999,12 @@ namespace NotchlingUiSmoke {
     Wait-Control "Keep awake" ([System.Windows.Automation.ControlType]::Button) | Out-Null
     $report.AwakeRoundTrip = $true
     $report.Actions += "Verified native Awake request enables and releases; no physical sleep-duration claim"
+
+    $report.Stage = "Native Shelf file and bitmap drops from the compact island"
+    Open-CatalogTool "Shelf"
+    Verify-NativeShelfDrops
+    Assert-HorizontalBounds
+    Save-OwnedScreenshot "shelf"
 
     $report.Stage = "Public-testing note editing persistence and deletion"
     Open-CatalogTool "Notes"

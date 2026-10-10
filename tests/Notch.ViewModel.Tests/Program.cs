@@ -49,6 +49,7 @@ MainViewModel ViewModel() => new(new DispatcherQueue(), dataDirectory: data);
 
 await ConnectionStatusCases.RegisterAsync(Case, data);
 await UpdateNotificationCases.RegisterAsync(Case, data);
+await ShelfWorkspaceCases.RegisterAsync(Case, data);
 
 await Case("Public testing grants every tool without inventing a paid entitlement", async () =>
 {

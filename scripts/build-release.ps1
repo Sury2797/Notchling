@@ -19,7 +19,8 @@ if ($allowedTimestamp.Scheme -ne 'https') { throw 'Timestamp service must use HT
 if (-not $env:NOTCH_SIGNING_PFX_BASE64 -or -not $env:NOTCH_SIGNING_PFX_PASSWORD) {
     throw 'Signing is required. Configure NOTCH_SIGNING_PFX_BASE64 and NOTCH_SIGNING_PFX_PASSWORD; unsigned public releases are refused.'
 }
-if (-not (Test-Path $Iscc)) { throw 'Install Inno Setup 6 and pass -Iscc with its compiler path.' }
+if (-not (Test-Path $Iscc)) { throw 'Install Inno Setup 6.7.1 or later and pass -Iscc with its compiler path.' }
+if ([version](Get-Item -LiteralPath $Iscc).VersionInfo.FileVersion -lt [version]'6.7.1') { throw 'Inno Setup 6.7.1 or later is required for the native themed wizard.' }
 $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
 $signtool = Get-ChildItem $sdkRoot -Filter signtool.exe -Recurse | Where-Object { $_.Directory.Name -eq 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
 if (-not $signtool) { throw 'Windows SDK x64 signtool.exe is required.' }
@@ -50,6 +51,8 @@ try {
     Invoke-Checked 'dotnet' @('run', '--project', (Join-Path $root 'tests/Notch.ViewModel.Tests/Notch.ViewModel.Tests.csproj'), '--configuration', 'Release')
     Invoke-Checked 'dotnet' @('run', '--project', (Join-Path $root 'tests/Notch.Native.Tests/Notch.Native.Tests.csproj'), '--configuration', 'Release')
     Invoke-Checked 'python' @('-m', 'unittest', 'discover', '-s', (Join-Path $root 'tests/release'), '-v')
+    $installerDocuments = Join-Path $publishRoot 'installer-documents'
+    Invoke-Checked 'python' @((Join-Path $root 'scripts/render-installer-documents.py'), '--output', $installerDocuments)
     $setupInteropOutput = Join-Path $publishRoot 'setup-interop'
     Invoke-Checked 'dotnet' @('build', (Join-Path $root 'packaging/windows/native-interop/Notchling.Setup.Interop.csproj'), '--configuration', 'Release', '--output', $setupInteropOutput)
     $setupInterop = Join-Path $setupInteropOutput 'Notchling.Setup.Interop.dll'
@@ -74,7 +77,7 @@ try {
         Invoke-Checked 'python' @((Join-Path $root 'scripts/bundle-notices.py'), '--publish', $publish, '--assets', (Join-Path $root 'src/Notch.Windows/obj/project.assets.json'), '--strict', '--installer-license', $installerLicense, '--installer-version', $installerVersion)
         $sizeReport = Join-Path $release "package-size-$architecture.json"
         Invoke-Checked 'python' @((Join-Path $root 'scripts/report-package-size.py'), '--publish', $publish, '--architecture', $architecture, '--require-app-only', '--output', $sizeReport)
-        Invoke-Checked $Iscc @("/DAppArchitecture=$architecture", "/DAppVersion=$Version", "/DPublishDirectory=$publish", "/DReleaseDirectory=$release", "/DNativeInteropPath=$setupInterop", "/Snotch=$signCommand", (Join-Path $root 'packaging/windows/Notch.iss'))
+        Invoke-Checked $Iscc @("/DAppArchitecture=$architecture", "/DAppVersion=$Version", "/DPublishDirectory=$publish", "/DReleaseDirectory=$release", "/DNativeInteropPath=$setupInterop", "/DInstallerDocumentsDirectory=$installerDocuments", "/Snotch=$signCommand", (Join-Path $root 'packaging/windows/Notch.iss'))
         $installer = Join-Path $release "Notchling-$Version-windows-$architecture-setup.exe"
         Assert-Signed $installer $certificate.Thumbprint
         Invoke-Checked 'python' @((Join-Path $root 'scripts/report-package-size.py'), '--publish', $publish, '--architecture', $architecture, '--require-app-only', '--installer', $installer, '--output', $sizeReport)
