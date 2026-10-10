@@ -97,6 +97,24 @@ namespace NotchlingInstallerUi {
             if (SendText(window, 0x000D, new IntPtr(text.Capacity), text, 2, 2000, out copied) == IntPtr.Zero) throw new InvalidOperationException("Native legal text could not be read.");
             return text.ToString();
         }
+        public static bool HasVisibleCaption(IntPtr window, string caption, bool prefix) {
+            bool found = false;
+            uint owner; GetWindowThreadProcessId(window, out owner);
+            EnumChildWindows(window, delegate(IntPtr handle, IntPtr unused) {
+                Rect bounds;
+                uint process; GetWindowThreadProcessId(handle, out process);
+                if (IsWindowVisible(handle) && GetWindowRect(handle, out bounds) &&
+                    process == owner && bounds.Right > bounds.Left && bounds.Bottom > bounds.Top) {
+                    string text = ReadText(handle).Replace("&", "");
+                    if (prefix ? text.StartsWith(caption, StringComparison.Ordinal) : String.Equals(text, caption, StringComparison.Ordinal)) {
+                        found = true;
+                        return false;
+                    }
+                }
+                return true;
+            }, IntPtr.Zero);
+            return found;
+        }
 
     }
 }
@@ -154,6 +172,18 @@ function Wait-Control([string]$Name, $Type = $null, [bool]$Enabled = $true) {
         Start-Sleep -Milliseconds 100
     } while ($wait.Elapsed.TotalSeconds -lt 8)
     throw "Owned installer control did not appear: $Name."
+}
+function Wait-Caption([string]$Caption, [bool]$Prefix = $false) {
+    # Delphi's native static labels need not expose ControlType.Text through
+    # the generic UIA host provider. Verify the exact visible window caption
+    # using bounded WM_GETTEXT reads; interactive actions still use UIA.
+    $wait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        Assert-Budget
+        if ([NotchlingInstallerUi.Native]::HasVisibleCaption([IntPtr]::new($root.Current.NativeWindowHandle), $Caption, $Prefix)) { return }
+        Start-Sleep -Milliseconds 100
+    } while ($wait.Elapsed.TotalSeconds -lt 8)
+    throw "Owned installer visible caption did not appear: $Caption."
 }
 function Invoke-Control($Control) {
     Assert-Budget
@@ -253,15 +283,15 @@ try {
     } while ($wait.Elapsed.TotalSeconds -lt 20)
     if (-not $root) { throw 'The launched installer did not show its branded native wizard.' }
     $report.WindowTitle = $root.Current.Name
-    Wait-Control '^Notchling$' ([System.Windows.Automation.ControlType]::Text) | Out-Null
-    Wait-Control 'A dynamic island for your Windows desktop' ([System.Windows.Automation.ControlType]::Text) | Out-Null
+    Wait-Caption 'Notchling'
+    Wait-Caption 'A dynamic island for your Windows desktop.' $true
     $report.WelcomeBranding = $true
     $report.BrandedWindowIcon = [NotchlingInstallerUi.Native]::HasIcon([IntPtr]::new($root.Current.NativeWindowHandle))
     if (-not $report.BrandedWindowIcon) { throw 'The native wizard did not expose an application window icon.' }
     Capture-Page 'welcome'
     Invoke-Control (Wait-Control '^Next(?: >)?$' ([System.Windows.Automation.ControlType]::Button))
     $report.Stage = 'Formatted terms and explicit acceptance'
-    Wait-Control '^Terms of use$' ([System.Windows.Automation.ControlType]::Text) | Out-Null
+    Wait-Caption 'Terms of use'
     $report.TermsNativeHeading = Verify-LegalPage 'product-terms' 'Notchling application terms'
     $report.TermsComplete = $true
     $next = Wait-Control '^Next(?: >)?$' ([System.Windows.Automation.ControlType]::Button) $false
@@ -275,7 +305,7 @@ try {
     $report.AcceptanceEnablesNext = $true
     Invoke-Control $next
     $report.Stage = 'Formatted privacy and local data controls'
-    Wait-Control '^Privacy and your controls$' ([System.Windows.Automation.ControlType]::Text) | Out-Null
+    Wait-Caption 'Privacy and your controls'
     $report.PrivacyNativeHeading = Verify-LegalPage 'privacy' 'Notchling privacy and data handling'
     $report.PrivacyComplete = $true
     Capture-Page 'privacy'
