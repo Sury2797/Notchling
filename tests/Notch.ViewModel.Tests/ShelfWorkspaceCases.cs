@@ -57,10 +57,19 @@ internal static class ShelfWorkspaceCases
             var workspace = Path.Combine(data, "workspace.json");
             if (File.Exists(workspace)) File.Delete(workspace);
             Directory.CreateDirectory(workspace);
-            await ExpectAsync<IOException>(vm.SaveShelfAsync);
-            Assert(vm.Shelf.Single().Path == capture && File.Exists(capture) && vm.HasUnsavedChanges && vm.SaveState.Contains("failed"),
-                "A shelf save failure dropped its recovery state or removed the captured file.");
-            Directory.Delete(workspace); await vm.SaveShelfAsync();
+            try
+            {
+                // The deliberately blocked destination produces IOException on
+                // Unix and UnauthorizedAccessException from Windows File.Move.
+                var writeFailed = false;
+                try { await vm.SaveShelfAsync(); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { writeFailed = true; }
+                Assert(writeFailed, "The deliberately blocked shelf destination unexpectedly saved successfully.");
+                Assert(vm.Shelf.Single().Path == capture && File.Exists(capture) && vm.HasUnsavedChanges && vm.SaveState.Contains("failed"),
+                    "A shelf save failure dropped its recovery state or removed the captured file.");
+            }
+            finally { if (Directory.Exists(workspace)) Directory.Delete(workspace); }
+            await vm.SaveShelfAsync();
             Assert(!vm.HasUnsavedChanges && JsonSerializer.Deserialize<MainViewModel.LocalData>(await File.ReadAllTextAsync(workspace))!.Shelf.Single().Path == capture,
                 "A failed shelf save could not be retried safely.");
         });

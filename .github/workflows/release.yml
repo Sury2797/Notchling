@@ -30,14 +30,7 @@ jobs:
           python-version: '3.13'
       - name: Install installer compiler
         shell: pwsh
-        run: |
-          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path $iscc)) {
-            choco install innosetup --yes --no-progress
-            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
-          }
-          if (-not (Test-Path $iscc)) { throw 'The Inno Setup 6 compiler is missing.' }
-          Write-Output "Installer compiler: $((Get-Item $iscc).VersionInfo.FileVersion)"
+        run: ./scripts/install-installer-compiler.ps1
       - name: Require publisher signing credentials
         shell: pwsh
         env:
@@ -81,6 +74,9 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - uses: actions/download-artifact@v6
         with:
           name: notchling-signed-release-candidate
@@ -103,6 +99,9 @@ jobs:
           path: |
             artifacts/windows-smoke.json
             artifacts/windows-ui-smoke.json
+            artifacts/windows-shelf-drop.json
+            artifacts/installer-ui-smoke.json
+            artifacts/installer-documents/
             artifacts/installer-smoke.log
             artifacts/setup-prerequisites.log
             artifacts/screenshots/

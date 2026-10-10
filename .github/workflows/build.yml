@@ -110,16 +110,7 @@ jobs:
         run: python scripts/report-package-size.py --publish artifacts/notchling-windows-${{ matrix.arch }} --architecture ${{ matrix.arch }} --require-app-only --output artifacts/package-size.json
       - name: Install evaluation installer compiler
         shell: pwsh
-        run: |
-          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path $iscc)) {
-            choco install innosetup --yes --no-progress
-            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
-          }
-          if (-not (Test-Path $iscc)) { throw 'The Inno Setup 6 compiler is missing.' }
-          $compilerVersion = [version](Get-Item $iscc).VersionInfo.FileVersion
-          if ($compilerVersion -lt [version]'6.7.1') { throw 'Inno Setup 6.7.1 or later is required for the native themed wizard.' }
-          Write-Output "Installer compiler: $compilerVersion"
+        run: ./scripts/install-installer-compiler.ps1
       - name: Bundle publisher and installer notices
         shell: pwsh
         run: |

@@ -20,7 +20,9 @@ if (-not $env:NOTCH_SIGNING_PFX_BASE64 -or -not $env:NOTCH_SIGNING_PFX_PASSWORD)
     throw 'Signing is required. Configure NOTCH_SIGNING_PFX_BASE64 and NOTCH_SIGNING_PFX_PASSWORD; unsigned public releases are refused.'
 }
 if (-not (Test-Path $Iscc)) { throw 'Install Inno Setup 6.7.1 or later and pass -Iscc with its compiler path.' }
-if ([version](Get-Item -LiteralPath $Iscc).VersionInfo.FileVersion -lt [version]'6.7.1') { throw 'Inno Setup 6.7.1 or later is required for the native themed wizard.' }
+$compilerInfo = (Get-Item -LiteralPath $Iscc).VersionInfo
+$compilerVersion = [version]::new($compilerInfo.FileMajorPart, $compilerInfo.FileMinorPart, $compilerInfo.FileBuildPart, $compilerInfo.FilePrivatePart)
+if ($compilerVersion -lt [version]'6.7.1') { throw 'Inno Setup 6.7.1 or later is required for the native themed wizard.' }
 $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
 $signtool = Get-ChildItem $sdkRoot -Filter signtool.exe -Recurse | Where-Object { $_.Directory.Name -eq 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
 if (-not $signtool) { throw 'Windows SDK x64 signtool.exe is required.' }

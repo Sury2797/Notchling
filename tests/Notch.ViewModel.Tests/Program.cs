@@ -21,7 +21,18 @@ async Task Case(string name, Func<Task> run)
     WindowsMediaService.StartFailure = null;
     WindowsSystemService.ReadFailure = null;
     try { await run().WaitAsync(TimeSpan.FromSeconds(15)); Console.WriteLine("PASS " + name); passed++; }
-    catch (Exception error) { failures.Add(name + ": " + error); Console.WriteLine("FAIL " + name + ": " + error.Message); }
+    catch (Exception error)
+    {
+        var detail = name + ": " + error;
+        failures.Add(detail); Console.WriteLine("FAIL " + name + ": " + error.Message);
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
+        {
+            // Preserve the original stack in the public run annotations, even
+            // when anonymous readers cannot access a job's full console log.
+            var annotation = detail.Replace("%", "%25").Replace("\r", "%0D").Replace("\n", "%0A");
+            Console.WriteLine("::error title=ViewModel regression failed::" + annotation);
+        }
+    }
 }
 static void Assert(bool result, string message) { if (!result) throw new InvalidOperationException(message); }
 static DispatcherTimer Tick() => DispatcherTimer.Instances.Single(timer => timer.Interval == TimeSpan.FromSeconds(1));

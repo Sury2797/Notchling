@@ -15,7 +15,7 @@
 | Text scaling / theme / high contrast | Pending |
 | Examiner / date | Pending |
 
-Run every row on Windows 10 22H2 and separately on each Windows 11 release and architecture selected for support. The v0.4.3 targets are native x64, x86 and ARM64 apps; a passing x86 app on an x64 cloud host does not fill a 32-bit Windows 10 result. Windows 11 has no x86 edition. Record native ARM64 results separately from emulation and keep unsupported configurations out of the download promise.
+Run every row on Windows 10 22H2 and separately on each Windows 11 release and architecture selected for support. The v0.4.4 targets are native x64, x86 and ARM64 apps; a passing x86 app on an x64 cloud host does not fill a 32-bit Windows 10 result. Windows 11 has no x86 edition. Record native ARM64 results separately from emulation and keep unsupported configurations out of the download promise.
 
 | Area | Steps | Expected result | Result / evidence |
 | --- | --- | --- | --- |
