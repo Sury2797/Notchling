@@ -7,6 +7,14 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+trap {
+  # Hosted log downloads may require sign-in. Preserve the actual failing
+  # stage in a public workflow annotation instead of an opaque exit code.
+  $detail = "$($_.Exception.GetType().FullName): $($_.Exception.Message) | $($_.ScriptStackTrace)"
+  $encoded = $detail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+  Write-Output "::error title=Windows installer qualification::$encoded"
+  break
+}
 if (-not $IsWindows -or $env:GITHUB_ACTIONS -ne 'true') { throw 'Installer qualification is restricted to a disposable Windows Actions desktop.' }
 $setup = (Resolve-Path -LiteralPath $SetupPath).Path
 $ReportDirectory = [IO.Path]::GetFullPath($ReportDirectory)
