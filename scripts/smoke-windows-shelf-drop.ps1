@@ -227,21 +227,6 @@ namespace NotchlingShelfOle {
         public int GiveFeedback(uint effect) { if (Interlocked.Increment(ref diagnostics.GiveFeedbackCalls) <= 3) diagnostics.Record("GiveFeedback effect=" + effect); return 0x00040102; }
     }
     [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
-    public sealed class FormatEnumerator : IEnumFORMATETC {
-        private readonly FORMATETC value;
-        private int position;
-        public FormatEnumerator(FORMATETC value, int position) { this.value = value; this.position = position; }
-        public int Next(int count, FORMATETC[] formats, int[] fetched) {
-            int copied = count > 0 && position == 0 ? 1 : 0;
-            if (copied != 0) { formats[0] = value; position = 1; }
-            if (fetched != null && fetched.Length != 0) fetched[0] = copied;
-            return copied == count ? 0 : 1;
-        }
-        public int Skip(int count) { int remaining = 1 - position; position = Math.Min(1, position + count); return count <= remaining ? 0 : 1; }
-        public int Reset() { position = 0; return 0; }
-        public void Clone(out IEnumFORMATETC clone) { clone = new FormatEnumerator(value, position); }
-    }
-    [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
     public sealed class DropData : IDataObject {
         private readonly byte[] bytes;
         private readonly FORMATETC format;
@@ -278,7 +263,16 @@ namespace NotchlingShelfOle {
         public IEnumFORMATETC EnumFormatEtc(DATADIR direction) {
             diagnostics.Record("EnumFormatEtc direction=" + direction);
             if (direction != DATADIR.DATADIR_GET) throw new COMException("The test source is read-only.", unchecked((int)0x80004001));
-            return new FormatEnumerator(format, 0);
+            // Use Windows' actual native enumerator. Returning a newly created
+            // managed enumerator CCW from this callback can stall its initial
+            // COM/array marshaling before DoDragDrop reaches any target.
+            IEnumFORMATETC enumerator;
+            int hr = Native.SHCreateStdEnumFmtEtc(1, new FORMATETC[] { format }, out enumerator);
+            diagnostics.Record("SHCreateStdEnumFmtEtc returned HRESULT=" + hr + " format=" + format.cfFormat);
+            if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+            if (enumerator == null) throw new COMException("Windows returned no native format enumerator.", unchecked((int)0x80004005));
+            diagnostics.Record("EnumFormatEtc returning native enumerator");
+            return enumerator;
         }
         public int DAdvise(ref FORMATETC asked, ADVF flags, IAdviseSink sink, out int connection) { connection = 0; return unchecked((int)0x80040003); }
         public void DUnadvise(int connection) { throw new COMException("Advice is unsupported.", unchecked((int)0x80040003)); }
@@ -305,6 +299,9 @@ namespace NotchlingShelfOle {
         [DllImport("ole32.dll")] private static extern int OleInitialize(IntPtr reserved);
         [DllImport("ole32.dll")] private static extern void OleUninitialize();
         [DllImport("ole32.dll")] private static extern int DoDragDrop([MarshalAs(UnmanagedType.Interface)] IDataObject data, [MarshalAs(UnmanagedType.Interface)] IDropSource source, int allowed, out int effect);
+        [DllImport("shell32.dll", ExactSpelling=true)] public static extern int SHCreateStdEnumFmtEtc(uint count,
+            [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex=0)] FORMATETC[] formats,
+            [MarshalAs(UnmanagedType.Interface)] out IEnumFORMATETC enumerator);
         [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr GlobalAlloc(uint flags, UIntPtr size);
         [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr GlobalLock(IntPtr memory);
         [DllImport("kernel32.dll")] public static extern bool GlobalUnlock(IntPtr memory);

@@ -701,6 +701,13 @@ namespace NotchlingUiSmoke {
             if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
                 throw new InvalidOperationException("Windows rejected keyboard input on the owned disposable test desktop.");
         }
+        public static void ClickLeftButton() {
+            var inputs = new Input[2];
+            inputs[0].Data.Mouse.Flags = 0x0002; // LEFTDOWN
+            inputs[1].Data.Mouse.Flags = 0x0004; // LEFTUP
+            if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
+                throw new InvalidOperationException("Windows rejected the owned editor focus click on the disposable test desktop.");
+        }
         public static Rect WindowBounds(IntPtr window) {
             Rect bounds; if (!GetWindowRect(window, out bounds)) throw new InvalidOperationException("Unable to read the owned HWND bounds.");
             return bounds;
@@ -866,8 +873,24 @@ namespace NotchlingUiSmoke {
     $report.ConnectionDraftPreserved = $true
     Set-Toggle "Keep Notchling expanded" $false
     Visit-Panel
+    # The toggle can scroll the editor out of view. Reacquire its current visible
+    # rectangle, click it like a user and wait for focus before injecting typing.
+    # UIA SetFocus alone does not prove asynchronous focus delivery on ARM64.
+    $endpoint = Scroll-ToSetting "HTTPS analytics endpoint" ([System.Windows.Automation.ControlType]::Edit) ([System.Windows.Automation.ValuePattern]::Pattern)
+    $editorBounds = $endpoint.Current.BoundingRectangle
+    Move-Cursor ([int]($editorBounds.Left + $editorBounds.Width / 2)) ([int]($editorBounds.Top + $editorBounds.Height / 2))
     [NotchlingUiSmoke.Native]::SetForegroundWindow([IntPtr]::new($WindowHandle)) | Out-Null
+    [NotchlingUiSmoke.Native]::ClickLeftButton()
     $endpoint.SetFocus()
+    $focusWait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        Assert-Budget
+        $endpoint = Find-Control "HTTPS analytics endpoint" ([System.Windows.Automation.ControlType]::Edit) $true ([System.Windows.Automation.ValuePattern]::Pattern)
+        if ($endpoint -and $endpoint.Current.HasKeyboardFocus -and
+            [NotchlingUiSmoke.Native]::GetForegroundWindow() -eq [IntPtr]::new($WindowHandle)) { break }
+        if ($focusWait.Elapsed.TotalSeconds -ge 3) { throw "The disposable desktop did not focus the visible owned endpoint editor before real typing." }
+        Start-Sleep -Milliseconds 50
+    } while ($true)
     [NotchlingUiSmoke.Native]::TypeCharacter('x')
     $typedWait = [Diagnostics.Stopwatch]::StartNew()
     do {
