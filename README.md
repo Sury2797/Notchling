@@ -54,7 +54,7 @@ The [validation notes](docs/validation-notes.md) record the exact revision, meas
 
 The [release checklist](docs/release-readiness.md) tracks acceptance. Build results establish compilation and packaging; measured responsiveness and native usability need their own evidence.
 
-### In development: v0.4.12 refinement
+### In development: v0.4.13 refinement
 
 The current source adds the following changes. **v0.3.4 remains the qualified download above until the new installers pass their own checks.**
 
@@ -73,7 +73,7 @@ A browser's Windows media session often omits its website. Selecting **YouTube**
 
 Candidate qualification and the remaining device checks are recorded in [validation](docs/validation-notes.md) and [flaws.md](flaws.md). This source work does not establish native x86/ARM64 release success, consumer Windows 10 compatibility or measured frame pacing.
 
-The earlier candidates remain unpublished. The [v0.4.9 run](https://github.com/Sury2797/Notchling/actions/runs/38043358404) passed both 432-check regression jobs and all four branded installer and matching-architecture launch checks. The x64 `windows-latest` and x86 jobs progressed through layouts, Settings drafts, eight connection states, updates, all 21 tools, help and Awake, then stopped before a Shelf transfer because a test-helper hashing command was unavailable. The other jobs exposed pin-persistence observation and initial-state assumptions in the driver. v0.4.12 removes those helper assumptions while retaining the actual interaction gates. The complete matrix must pass before publication; the [validation record](docs/validation-notes.md#candidate-qualification-sequence--10-october-2026-utc) preserves every revision, stage and limit.
+The earlier candidates remain unpublished. The [v0.4.9 run](https://github.com/Sury2797/Notchling/actions/runs/38043358404) passed both 432-check regression jobs and all four branded installer and matching-architecture launch checks. The x64 `windows-latest` and x86 jobs progressed through layouts, Settings drafts, eight connection states, updates, all 21 tools, help and Awake, then stopped before a Shelf transfer because a test-helper hashing command was unavailable. The other jobs exposed pin-persistence observation and initial-state assumptions in the driver. v0.4.13 removes those helper assumptions while retaining the actual interaction gates. The complete matrix must pass before publication; the [validation record](docs/validation-notes.md#candidate-qualification-sequence--10-october-2026-utc) preserves every revision, stage and limit.
 
 ## The experience
 
@@ -83,11 +83,11 @@ Hover over the notch to open it, choose a tool from the separate dock, and leave
 
 Recent text input, open dialogs, and active control manipulation defer passive navigation and temporary activities. A previously focused editor does not keep an unpinned island open indefinitely. Timers and reminders use a bounded activity queue; notification history keeps recent deliveries within reach.
 
-In the v0.4.12 source, normal footer feedback expires after eight seconds and follows only its originating tool. Unsaved-work guidance stays visible. Update notices go to history and the compact indicator without replacing the panel you are editing.
+In the v0.4.13 source, normal footer feedback expires after eight seconds and follows only its originating tool. Unsaved-work guidance stays visible. Update notices go to history and the compact indicator without replacing the panel you are editing.
 
 ### Guidance where you need it
 
-The v0.4.12 candidate adds a small **?** next to controls that benefit from explanation. Hover shows a short preview; click or keyboard activation opens a local, scrollable explanation. **Esc** closes it. Home and Settings include the same quick guide for opening, pinning, navigation, local tools and optional connections. There is no compulsory onboarding sequence.
+The v0.4.13 candidate adds a small **?** next to controls that benefit from explanation. Hover shows a short preview; click or keyboard activation opens a local, scrollable explanation. **Esc** closes it. Home and Settings include the same quick guide for opening, pinning, navigation, local tools and optional connections. There is no compulsory onboarding sequence.
 
 Shelf also gains explicit capture controls in this candidate. Files and folders remain references unless you select **Save file copies**; bitmap/virtual-file payloads become local captures. Browser images can use **Copy image → Paste image** without downloading their URLs. **Remove** keeps the underlying file. Saved captures have separate 50 MiB per-file and 250 MiB/100-file limits; the [Shelf guide](docs/getting-started.md#keep-files-and-images-on-shelf) explains storage and cleanup. These paths await native qualification.
 
@@ -139,7 +139,7 @@ Local tools work without an application account during public testing. Connected
 
 Polar, Dodo, and AdSense reporting are not connected. Built-in analytics OAuth, calendar account sync, and cloud workspace sync are not implemented. See the [provider contracts](src/Notch.Core/Providers/README.md) for schemas, attribution, and setup. Third-party accounts, service charges, and availability are separate from Notchling’s testing access or any future subscription.
 
-The v0.4.12 Media source menu separates provider identity from thumbnails. Known sources use bundled logos; other installed players retain their Windows-supplied icon. Browser choices are explicit, temporary labels, and do not create a new playback connection or change the active Windows media session.
+The v0.4.13 Media source menu separates provider identity from thumbnails. Known sources use bundled logos; other installed players retain their Windows-supplied icon. Browser choices are explicit, temporary labels, and do not create a new playback connection or change the active Windows media session.
 
 ## Free and Premium
 
@@ -171,7 +171,7 @@ Notchling’s workspace stays on your device. Optional connections make requests
 - **Clipboard:** off by default; when enabled, up to 50 text entries remain in memory and clear on disable or exit.
 - **Imports:** calendar and coding data come from files you choose.
 - **Recovery:** Settings provides export, validated restore, corrupt-file preservation/recovery, and note-deletion undo.
-- **Updates in v0.4.12 source:** explicit checks read official GitHub release metadata. Optional daily checks are off by default, run only while the app is open, and never install an update automatically.
+- **Updates in v0.4.13 source:** explicit checks read official GitHub release metadata. Optional daily checks are off by default, run only while the app is open, and never install an update automatically.
 
 The compatible data folder remains **`%LOCALAPPDATA%\Notch`**. The branding update retains that path and existing vault identities, so it does not create an empty workspace or discard saved connections. Export before making a manual backup; quit the app before copying the data folder. Vault credentials are not part of that folder backup.
 
@@ -190,7 +190,7 @@ Workspace limits include a 10 MB serialized file ceiling, bounded text, and up t
 | Windows app-only folder | Advanced evaluation with compatible shared runtimes already installed; keep all files together | `notchling-windows-x64-app-only` in [successful build runs](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) |
 | Windows `.msi` / `.msix` | No package currently produced; use Setup `.exe` | — |
 | Linux `.AppImage` / `.deb` / `.rpm` | Native application planned; no Linux app download yet | [Linux roadmap](docs/product-roadmap.md) |
-| Windows ARM64 / x86 | Native builds configured in v0.4.12 source; public installers await qualification | [Candidate status](#in-development-v0412-refinement) |
+| Windows ARM64 / x86 | Native builds configured in v0.4.13 source; public installers await qualification | [Candidate status](#in-development-v0413-refinement) |
 | macOS `.app` / `.dmg` | No application build configured | — |
 
 The app-only folder is an advanced distribution of the same Windows app, not a self-contained single executable. A Linux core test result does not provide a Linux desktop application.
@@ -205,7 +205,7 @@ Evaluation releases appear in [Releases](https://github.com/Sury2797/Notchling/r
 
 **One installer is the normal download.** Setup installs the app and checks for the shared .NET and Windows App SDK runtimes. If either is missing, Setup downloads its official installer and installs it; an Internet connection is required, and the .NET installer may request administrator approval. Existing compatible runtimes are reused. No SDK, developer tools, or manual DLL copying is required.
 
-The v0.4.12 candidate presents the approved Pixel Dragon on a branded native welcome screen and renders the complete application terms and privacy notice as formatted documents. These are generated from the canonical Markdown during the build; headings, emphasis, Unicode, links and all privacy-table descriptions are retained. Setup explains testing access, shared components and workspace preservation. The installer presentation must pass its own Windows UI check before the candidate becomes the download above.
+The v0.4.13 candidate presents the approved Pixel Dragon on a branded native welcome screen and renders the complete application terms and privacy notice as formatted documents. These are generated from the canonical Markdown during the build; headings, emphasis, Unicode, links and all privacy-table descriptions are retained. Setup explains testing access, shared components and workspace preservation. The installer presentation must pass its own Windows UI check before the candidate becomes the download above.
 
 The verified v0.3.4 setup EXE is **8,923,610 bytes (8.51 MiB)**; its extracted app files total **40,784,258 bytes (38.89 MiB)**. Separate cloud fixtures exercised real missing-runtime installation and signed-resource recovery; the final app Setup reused the verified runtimes. The official Windows App Runtime download remains approximately **106.9 MB**. A machine missing both runtimes needs roughly **147 MB total** for first-install downloads at current versions, including the estimated .NET download. Later installs reuse compatible shared runtimes. See [delivery measurements and limits](docs/release-delivery.md).
 
@@ -221,8 +221,8 @@ The [signed release workflow](https://github.com/Sury2797/Notchling/actions/work
 | --- | --- |
 | Windows 10 22H2 x64, build 19045 | Equal release target; native qualification required |
 | Supported Windows 11 x64 releases | Equal release target; native qualification required |
-| Windows 10 22H2 x86 | v0.4.12 native app/build target; consumer 32-bit OS qualification pending |
-| Windows 10/11 ARM64 | v0.4.12 native app/build target; ARM64 release qualification pending |
+| Windows 10 22H2 x86 | v0.4.13 native app/build target; consumer 32-bit OS qualification pending |
+| Windows 10/11 ARM64 | v0.4.13 native app/build target; ARM64 release qualification pending |
 | Linux | Portable core/checks available; native desktop app planned later |
 | macOS / ARM32 / Windows older than build 19045 | No application release target configured |
 

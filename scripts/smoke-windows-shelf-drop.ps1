@@ -174,8 +174,8 @@ try {
     if ($PSVersionTable.PSEdition -ne "Desktop") { throw "Run this helper with Windows PowerShell 5.1." }
     $process = Get-Process -Id $AppProcessId -ErrorAction Stop
     if ([IO.Path]::GetFileName($process.Path) -ne "Notchling.Windows.exe") { throw "The supplied process is not the expected app." }
-    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing
-    Add-Type -TypeDefinition @'
+    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing, System.Windows.Forms
+    Add-Type -ReferencedAssemblies System.dll, System.Core.dll, System.Drawing.dll, System.Windows.Forms.dll -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -191,7 +191,8 @@ namespace NotchlingShelfOle {
         public string Phase;
         public int CallerThread, WorkerThread, QueryContinueCalls, GiveFeedbackCalls, QueryGetDataCalls, GetDataCalls;
         public uint LastKeys;
-        public bool ButtonDownVerified, ButtonUpVerified, SourceSawRelease, DragReturned, TransferPumpCompleted;
+        public bool ButtonDownVerified, ButtonUpVerified, SourceWindowMouseDown, SourceSawRelease, DragReturned, TransferPumpCompleted;
+        public long SourceWindowHandle;
         public string[] Events { get { lock (events) return events.ToArray(); } }
         public void Record(string value) {
             lock (events) {
@@ -200,7 +201,7 @@ namespace NotchlingShelfOle {
         }
         public string Summary() {
             return "phase=" + Phase + "; queries=" + QueryContinueCalls + "; keys=0x" + LastKeys.ToString("X") +
-                "; sourceRelease=" + SourceSawRelease + "; physicalDown=" + ButtonDownVerified + "; physicalUp=" + ButtonUpVerified +
+                "; sourceRelease=" + SourceSawRelease + "; physicalDown=" + ButtonDownVerified + "; physicalUp=" + ButtonUpVerified + "; sourceMouseDown=" + SourceWindowMouseDown + "; sourceHwnd=" + SourceWindowHandle +
                 "; getData=" + GetDataCalls + "; dragReturned=" + DragReturned + "; pumpCompleted=" + TransferPumpCompleted +
                 "; events=[" + String.Join(" | ", Events) + "]";
         }
@@ -365,7 +366,8 @@ namespace NotchlingShelfOle {
         public static DragResult DropBitmap(int originX, int originY, int targetX, int targetY) { return Perform(BitmapFormat, Dib(), originX, originY, targetX, targetY); }
         private static DragResult Perform(short format, byte[] bytes, int originX, int originY, int targetX, int targetY) {
             DropData data = null; DropSource source = null;
-            var started = new ManualResetEvent(false); var finished = new ManualResetEvent(false);
+            System.Windows.Forms.Form sourceWindow = null;
+            var ready = new ManualResetEvent(false); var started = new ManualResetEvent(false); var finished = new ManualResetEvent(false);
             var diagnostics = new DragDiagnostics { CallerThread = Thread.CurrentThread.ManagedThreadId, Phase = "Preparing real drag" };
             var result = new DragResult { Diagnostics = diagnostics }; Exception error = null;
             LastDragResult = result;
@@ -375,32 +377,57 @@ namespace NotchlingShelfOle {
                     diagnostics.WorkerThread = Thread.CurrentThread.ManagedThreadId;
                     dpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
                     int hr = OleInitialize(IntPtr.Zero); if (hr < 0) Marshal.ThrowExceptionForHR(hr); initialized = true;
-                    // Create and first expose both CCWs in the same initialized
-                    // STA that owns the real native DoDragDrop operation.
-                    data = new DropData(format, bytes, diagnostics); source = new DropSource(diagnostics);
-                    diagnostics.Phase = "DoDragDrop"; diagnostics.Record("Entering DoDragDrop");
-                    started.Set(); result.HResult = DoDragDrop(data, source, 1, out result.Effect);
-                    diagnostics.DragReturned = true;
-                    diagnostics.Phase = "Transfer message pump"; diagnostics.Record("DoDragDrop returned HRESULT=" + result.HResult + " effect=" + result.Effect);
-                    // WinUI may read a DataPackage asynchronously after its
-                    // native Drop handler returns. Keep the source's apartment
-                    // pumping until the offered format is retrieved, rather
-                    // than manufacturing an unavailable-source failure.
-                    if (result.HResult == 0x00040100 && result.Effect == 1) {
-                        DateTime transferDeadline = DateTime.UtcNow.AddSeconds(3);
-                        DateTime? retrievedAt = null;
-                        do {
-                            Message message;
-                            while (PeekMessage(out message, IntPtr.Zero, 0, 0, 1)) { TranslateMessage(ref message); DispatchMessage(ref message); }
-                            if (data.RequestedFormats.Length != 0 && !retrievedAt.HasValue) retrievedAt = DateTime.UtcNow;
-                            if (retrievedAt.HasValue && DateTime.UtcNow - retrievedAt.Value >= TimeSpan.FromMilliseconds(200)) break;
-                            Thread.Sleep(10);
-                        } while (DateTime.UtcNow < transferDeadline);
-                    } else diagnostics.Record("No accepted Copy transfer: retention pump unnecessary");
-                    diagnostics.TransferPumpCompleted = true;
-                    result.RequestedFormats = data.RequestedFormats;
-                } catch (Exception caught) { error = caught; diagnostics.Record("Worker failed: " + caught.GetType().Name + ": " + caught.Message); started.Set(); }
+                    // A real source HWND owns the injected MouseDown and native
+                    // input queue. Start OLE in that event, never on Explorer's
+                    // desktop or on a windowless background thread.
+                    sourceWindow = new System.Windows.Forms.Form();
+                    sourceWindow.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None;
+                    sourceWindow.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
+                    sourceWindow.AutoScaleMode = System.Windows.Forms.AutoScaleMode.None;
+                    sourceWindow.ClientSize = new System.Drawing.Size(72, 48);
+                    sourceWindow.Location = new System.Drawing.Point(originX - 60, originY - 36);
+                    sourceWindow.Text = "Notchling owned OLE test source";
+                    sourceWindow.ShowInTaskbar = false; sourceWindow.TopMost = true;
+                    sourceWindow.BackColor = System.Drawing.Color.FromArgb(48, 48, 48);
+                    sourceWindow.Shown += delegate {
+                        diagnostics.SourceWindowHandle = sourceWindow.Handle.ToInt64();
+                        diagnostics.Phase = "Waiting for source MouseDown";
+                        diagnostics.Record("Owned source window shown"); ready.Set();
+                    };
+                    bool entered = false;
+                    sourceWindow.MouseDown += delegate(object sender, System.Windows.Forms.MouseEventArgs mouse) {
+                        if (entered || mouse.Button != System.Windows.Forms.MouseButtons.Left) return;
+                        entered = true;
+                        try {
+                            diagnostics.SourceWindowMouseDown = true; diagnostics.Record("Owned HWND received actual MouseDown");
+                            sourceWindow.Capture = true;
+                            data = new DropData(format, bytes, diagnostics); source = new DropSource(diagnostics);
+                            diagnostics.Phase = "DoDragDrop"; diagnostics.Record("Entering DoDragDrop from source HWND");
+                            started.Set(); result.HResult = DoDragDrop(data, source, 1, out result.Effect);
+                            diagnostics.DragReturned = true;
+                            diagnostics.Phase = "Transfer message pump"; diagnostics.Record("DoDragDrop returned HRESULT=" + result.HResult + " effect=" + result.Effect);
+                            // Retain the source apartment for a genuinely
+                            // accepted asynchronous WinUI data transfer.
+                            if (result.HResult == 0x00040100 && result.Effect == 1) {
+                                DateTime transferDeadline = DateTime.UtcNow.AddSeconds(3);
+                                DateTime? retrievedAt = null;
+                                do {
+                                    System.Windows.Forms.Application.DoEvents();
+                                    if (data.RequestedFormats.Length != 0 && !retrievedAt.HasValue) retrievedAt = DateTime.UtcNow;
+                                    if (retrievedAt.HasValue && DateTime.UtcNow - retrievedAt.Value >= TimeSpan.FromMilliseconds(200)) break;
+                                    Thread.Sleep(10);
+                                } while (DateTime.UtcNow < transferDeadline);
+                            } else diagnostics.Record("No accepted Copy transfer: retention pump unnecessary");
+                            diagnostics.TransferPumpCompleted = true;
+                            result.RequestedFormats = data.RequestedFormats;
+                        } catch (Exception caught) {
+                            error = caught; diagnostics.Record("Source event failed: " + caught.GetType().Name + ": " + caught.Message); started.Set();
+                        } finally { sourceWindow.Capture = false; sourceWindow.Close(); }
+                    };
+                    System.Windows.Forms.Application.Run(sourceWindow);
+                } catch (Exception caught) { error = caught; diagnostics.Record("Worker failed: " + caught.GetType().Name + ": " + caught.Message); ready.Set(); started.Set(); }
                 finally {
+                    if (sourceWindow != null) sourceWindow.Dispose();
                     diagnostics.Phase = "OleUninitialize"; diagnostics.Record("Leaving OLE apartment");
                     if (initialized) OleUninitialize(); if (dpi != IntPtr.Zero) SetThreadDpiAwarenessContext(dpi);
                     diagnostics.Phase = "Finished"; diagnostics.Record("Worker finished"); finished.Set();
@@ -408,11 +435,12 @@ namespace NotchlingShelfOle {
             });
             worker.IsBackground = true; worker.SetApartmentState(ApartmentState.STA);
             try {
+                worker.Start();
+                if (!ready.WaitOne(2000)) throw new TimeoutException("The owned STA source window did not appear.");
+                if (error != null) throw new InvalidOperationException("The native OLE source failed to initialize.", error);
                 MoveCursor(originX, originY); LeftButton(true); WaitLeftButton(true);
                 diagnostics.ButtonDownVerified = true; diagnostics.Record("Injected real left press verified");
-                worker.Start();
-                if (!started.WaitOne(1000)) throw new TimeoutException("The STA OLE drag did not initialize.");
-                if (error != null) throw new InvalidOperationException("The native OLE source failed to initialize.", error);
+                if (!started.WaitOne(1000)) throw new TimeoutException("The owned source HWND did not receive MouseDown. " + diagnostics.Summary());
                 Thread.Sleep(100);
                 MoveCursor(targetX, targetY);
                 // Genuine DragEnter/DragOver reaches the compact island and has
@@ -427,9 +455,12 @@ namespace NotchlingShelfOle {
             } finally {
                 if (source != null) source.Cancel = true;
                 try { LeftButton(false); MoveCursor(targetX, targetY); } catch (Exception cleanup) { diagnostics.Record("Input cleanup: " + cleanup.Message); }
+                if (sourceWindow != null && sourceWindow.IsHandleCreated && !sourceWindow.IsDisposed) {
+                    try { sourceWindow.BeginInvoke(new System.Windows.Forms.MethodInvoker(delegate { sourceWindow.Close(); })); } catch (InvalidOperationException) { }
+                }
                 if (worker.IsAlive) finished.WaitOne(1500);
                 if (data != null) result.RequestedFormats = data.RequestedFormats;
-                if (!worker.IsAlive) { started.Dispose(); finished.Dispose(); }
+                if (!worker.IsAlive) { ready.Dispose(); started.Dispose(); finished.Dispose(); }
             }
         }
     }

@@ -672,6 +672,10 @@ namespace NotchlingUiSmoke {
         [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+        public static uint ForegroundProcessId() {
+            uint process; GetWindowThreadProcessId(GetForegroundWindow(), out process); return process;
+        }
         [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
         [DllImport("user32.dll", SetLastError=true)] private static extern uint SendInput(uint count, Input[] inputs, int size);
         public static int NormalizeMouseCoordinate(int coordinate, int origin, int extent) {
@@ -877,18 +881,34 @@ namespace NotchlingUiSmoke {
     # rectangle, click it like a user and wait for focus before injecting typing.
     # UIA SetFocus alone does not prove asynchronous focus delivery on ARM64.
     $endpoint = Scroll-ToSetting "HTTPS analytics endpoint" ([System.Windows.Automation.ControlType]::Edit) ([System.Windows.Automation.ValuePattern]::Pattern)
-    $editorBounds = $endpoint.Current.BoundingRectangle
-    Move-Cursor ([int]($editorBounds.Left + $editorBounds.Width / 2)) ([int]($editorBounds.Top + $editorBounds.Height / 2))
+    # UIA rectangles can extend into clipped scroll content. Its clickable point
+    # is inside the actually exposed part of the input, unlike rectangle centre.
+    $editorPoint = $endpoint.GetClickablePoint()
+    Move-Cursor ([int]$editorPoint.X) ([int]$editorPoint.Y)
     [NotchlingUiSmoke.Native]::SetForegroundWindow([IntPtr]::new($WindowHandle)) | Out-Null
     [NotchlingUiSmoke.Native]::ClickLeftButton()
     $endpoint.SetFocus()
     $focusWait = [Diagnostics.Stopwatch]::StartNew()
+    $focusDetail = "No owned editor focus observed"
     do {
         Assert-Budget
         $endpoint = Find-Control "HTTPS analytics endpoint" ([System.Windows.Automation.ControlType]::Edit) $true ([System.Windows.Automation.ValuePattern]::Pattern)
-        if ($endpoint -and $endpoint.Current.HasKeyboardFocus -and
-            [NotchlingUiSmoke.Native]::GetForegroundWindow() -eq [IntPtr]::new($WindowHandle)) { break }
-        if ($focusWait.Elapsed.TotalSeconds -ge 3) { throw "The disposable desktop did not focus the visible owned endpoint editor before real typing." }
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $editorOwnsFocus = $endpoint -and $endpoint.Current.HasKeyboardFocus
+        if ($focused) {
+            $focusDetail = "focused='$($focused.Current.Name)', id='$($focused.Current.AutomationId)', process=$($focused.Current.ProcessId), foregroundProcess=$([NotchlingUiSmoke.Native]::ForegroundProcessId())"
+            # Some WinUI providers expose the inner text editor as the focused
+            # peer. Require it to belong to this exact input and app process.
+            if ($focused.Current.ProcessId -eq $AppProcessId) {
+                $ancestor = $focused
+                for ($level = 0; $endpoint -and $ancestor -and $level -lt 16; $level++) {
+                    if ($ancestor.Equals($endpoint)) { $editorOwnsFocus = $true; break }
+                    $ancestor = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($ancestor)
+                }
+            }
+        }
+        if ($editorOwnsFocus -and [NotchlingUiSmoke.Native]::ForegroundProcessId() -eq $AppProcessId) { break }
+        if ($focusWait.Elapsed.TotalSeconds -ge 3) { throw "The disposable desktop did not focus the visible owned endpoint editor before real typing: $focusDetail." }
         Start-Sleep -Milliseconds 50
     } while ($true)
     [NotchlingUiSmoke.Native]::TypeCharacter('x')
