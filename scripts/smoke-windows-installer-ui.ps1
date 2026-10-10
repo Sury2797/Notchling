@@ -238,8 +238,8 @@ function Read-HeadingFormat([IntPtr]$Handle, [string]$Title) {
             $provider = $null
             if (-not $element.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$provider)) { continue }
             $range = $provider.DocumentRange.Clone()
-            $range.MoveEndpointByRange([System.Windows.Automation.TextPatternRangeEndpoint]::End, $range, [System.Windows.Automation.TextPatternRangeEndpoint]::Start)
-            $range.MoveEndpointByUnit([System.Windows.Automation.TextPatternRangeEndpoint]::End, [System.Windows.Automation.TextUnit]::Character, $Title.Length) | Out-Null
+            $range.MoveEndpointByRange([System.Windows.Automation.Text.TextPatternRangeEndpoint]::End, $range, [System.Windows.Automation.Text.TextPatternRangeEndpoint]::Start)
+            $range.MoveEndpointByUnit([System.Windows.Automation.Text.TextPatternRangeEndpoint]::End, [System.Windows.Automation.Text.TextUnit]::Character, $Title.Length) | Out-Null
             if ($range.GetText(-1) -cne $Title) { throw 'The native heading text range did not match the complete document title.' }
             $font = $range.GetAttributeValue([System.Windows.Automation.TextPattern]::FontNameAttribute)
             $points = $range.GetAttributeValue([System.Windows.Automation.TextPattern]::FontSizeAttribute)

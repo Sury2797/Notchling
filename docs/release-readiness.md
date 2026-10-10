@@ -4,13 +4,13 @@ This checklist records **v0.3.4 public-testing release** acceptance and the rema
 
 Record the revision, build URL, OS build, GPU, monitor configuration and observed result for each subsequent validation. A Linux host can test portable logic and inspect source; full WinUI builds and native interaction require Windows.
 
-## v0.4.7 candidate acceptance
+## v0.4.8 candidate acceptance
 
 The current source adds vector icons/source logos, responsive reporting layouts, interruptible motion, scoped feedback, read-only evaluation release discovery and native x86/ARM64 delivery paths. **v0.3.4 remains the recommended public download until this candidate passes its own installed-app matrix and each public EXE is verified.** These checks do not inherit a pass from the previous release.
 
 - [x] Preceding v0.4.0 regressions: **407 passed** locally and on both Windows/Linux regression hosts — 141 Core, 76 Commerce, 81 Debug view-model, 31 Release view-model, 65 linked native API-double cases and 13 Python release cases. This candidate's native failures prevented publication.
 - [x] Preceding v0.4.3 source `ed50560` passed **432 local cases** and 432 hosted Linux cases — 141 Core, 76 Commerce, 85 Debug view-model, 35 Release view-model, 74 native/service doubles and 21 Python release cases. Native source/XAML projections compiled with zero warnings/errors. Windows Debug/native qualification did not pass.
-- [ ] The committed v0.4.7 candidate reruns these checks on both hosted regression jobs after geometry/helper/path/translation repairs and new Shelf/help/installer changes.
+- [ ] The committed v0.4.8 candidate reruns these checks on both hosted regression jobs after geometry/helper/path/translation repairs and new Shelf/help/installer changes.
 - [x] Native source/XAML projections compiled with zero warnings/errors; PowerShell and workflow YAML syntax parsed. These do not execute the Windows installer or WinUI renderer.
 - [ ] Actual x64 installed app and prerequisites pass on both hosted x64 Windows jobs.
 - [ ] Actual x86 app launches with its mixed app/native runtime-package plan on an x64 Windows host; consumer 32-bit Windows 10 remains a separate record.
@@ -29,7 +29,7 @@ All tools remain free for public testing and checkout stays paused throughout th
 
 The failed [v0.4.0 run](https://github.com/Sury2797/Notchling/actions/runs/37979741879) exposed shared WinUI geometry ownership and an x86 Setup compiler failure. [v0.4.1](https://github.com/Sury2797/Notchling/actions/runs/37980974718) then failed Windows PowerShell 5.1 parameter-path binding before prerequisite fixtures. The [v0.4.2 validation run](https://github.com/Sury2797/Notchling/actions/runs/37981575380) passed final Setup on all four Windows hosts but failed installed launch on an invalid native translation-animation target. These attempts remain unpublished, and the Setup pass does not fill an app-qualification checkbox. The [validation record](validation-notes.md#candidate-qualification-sequence--10-october-2026-utc) preserves exact revisions and stages.
 
-The [v0.4.3 run](https://github.com/Sury2797/Notchling/actions/runs/38029187998) passed native builds/publishes and prior prerequisite fixtures, then failed compiler installation before final Setup compilation. Windows regression also needed an operating-system-specific exception correction while preserving strict failure assertions. The [v0.4.4 run](https://github.com/Sury2797/Notchling/actions/runs/38029916759) passed both 432-check regression jobs; all four native jobs then rejected a no-argument compiler banner after hash/trusted-signature verification. v0.4.7 checks the pinned compiler's exact engine version through a disposable compilation. Final Setup, native launch and interactive qualification remain unchecked.
+The [v0.4.3 run](https://github.com/Sury2797/Notchling/actions/runs/38029187998) passed native builds/publishes and prior prerequisite fixtures, then failed compiler installation before final Setup compilation. Windows regression also needed an operating-system-specific exception correction while preserving strict failure assertions. The [v0.4.4 run](https://github.com/Sury2797/Notchling/actions/runs/38029916759) passed both 432-check regression jobs; all four native jobs then rejected a no-argument compiler banner after hash/trusted-signature verification. v0.4.8 checks the pinned compiler's exact engine version through a disposable compilation. Final Setup, native launch and interactive qualification remain unchecked.
 
 ## Build and deployment
 
