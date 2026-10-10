@@ -105,7 +105,10 @@ namespace NotchlingInstallerUi {
                 uint process; GetWindowThreadProcessId(handle, out process);
                 if (IsWindowVisible(handle) && GetWindowRect(handle, out bounds) &&
                     process == owner && bounds.Right > bounds.Left && bounds.Bottom > bounds.Top) {
-                    string text = ReadText(handle).Replace("&", "");
+                    // Inno appends a layout newline to WelcomeLabel1. Match
+                    // its visible wording without treating that whitespace as
+                    // part of the brand; document-body checks remain complete.
+                    string text = ReadText(handle).Replace("&", "").Trim();
                     if (prefix ? text.StartsWith(caption, StringComparison.Ordinal) : String.Equals(text, caption, StringComparison.Ordinal)) {
                         found = true;
                         return false;

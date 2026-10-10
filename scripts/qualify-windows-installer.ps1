@@ -61,7 +61,10 @@ try {
         throw ('Installer presentation probe produced no report. ' + $details.Substring(0, [Math]::Min(3000, $details.Length)))
     }
     $uiReport = Get-Content -LiteralPath $uiReportPath -Raw | ConvertFrom-Json
-    if ($helper.ExitCode -ne 0 -or -not $uiReport.Succeeded) { throw "Actual installer presentation failed: $($uiReport.Stage): $($uiReport.Error)." }
+    if ($helper.ExitCode -ne 0 -or -not $uiReport.Succeeded) {
+        $visible = @($uiReport.VisibleControls) -join ' | '
+        throw "Actual installer presentation failed: $($uiReport.Stage): $($uiReport.Error). Visible installer controls: $visible"
+    }
     $scope = "Actual $AppArchitecture installer welcome, complete formatted terms/privacy, acceptance and cancellation passed at $($uiReport.Dpi) DPI on $($uiReport.OS); window and actions fit the current work area. Other display configurations and consumer hardware are not certified."
     Write-Output "::notice::$(ConvertTo-WorkflowData $scope)"
 } finally {
