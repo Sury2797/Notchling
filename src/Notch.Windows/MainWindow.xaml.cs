@@ -40,6 +40,7 @@ public sealed partial class MainWindow : Window
     private ModuleId? _renderedModule;
     private bool _explicitOpening;
     private int _hoverDiagnosticCount;
+    private int _pinDiagnosticCount;
     public MainWindow()
     {
         InitializeComponent();
@@ -443,8 +444,31 @@ public sealed partial class MainWindow : Window
         // Toggle state changes also come from accessibility clients, without a Click event.
         if (_quitting || _closingAttempt || _vm is null || !_vm.IsReady ||
             sender is not Microsoft.UI.Xaml.Controls.Primitives.ToggleButton button ||
-            button.IsChecked is not bool pinned || pinned == _vm.Preferences.Pinned) return;
-        await _vm.ExecuteAsync(() => _vm.SetPreferencesAsync(_vm.Preferences with { Pinned = pinned }));
+            button.IsChecked is not bool pinned || pinned == _vm.Preferences.Pinned)
+        {
+            TracePin("Ignored", (sender as Microsoft.UI.Xaml.Controls.Primitives.ToggleButton)?.IsChecked);
+            return;
+        }
+        TracePin("Accepted", pinned);
+        await _vm.ExecuteAsync(async () =>
+        {
+            try { await _vm.SetPreferencesAsync(_vm.Preferences with { Pinned = pinned }); }
+            catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+            {
+                StartupDiagnostics.Write("MainWindow.Pin.Save", error, $"Requested pin: {pinned}; model pin: {_vm.Preferences.Pinned}");
+                throw;
+            }
+        });
+        TracePin("Completed", pinned);
+    }
+    private void TracePin(string stage, bool? requested)
+    {
+        if (_pinDiagnosticCount >= 24) return;
+        _pinDiagnosticCount++;
+        StartupDiagnostics.Write("MainWindow.Pin." + stage, null,
+            $"Requested: {requested}; ready: {_vm?.IsReady}; model pin: {_vm?.Preferences.Pinned}; " +
+            $"unsaved: {_vm?.HasUnsavedChanges}; quitting: {_quitting}; closing: {_closingAttempt}; " +
+            $"visible check: {PinButton?.IsChecked}; error present: {!string.IsNullOrWhiteSpace(_vm?.Error)}");
     }
     private void OnDismissActivity(object sender, RoutedEventArgs args) => _vm.Overlay.DismissActivity();
     private void OnOpenActivity(object sender, RoutedEventArgs args)

@@ -36,7 +36,7 @@ The desktop does not embed a browser or billing server. The optional `Notch.Bill
 
 Content animation runs through the compositor. The native host owns panel-size transitions and reduced-motion behavior. Rendered smoothness remains a Windows qualification requirement. CPU, memory, startup time, input latency and long-running resource use must be measured on real Windows hardware using the release matrix. Framework choice alone is not a performance result.
 
-## v0.4.9 source refinements
+## v0.4.10 source refinements
 
 These changes describe the current candidate; the published v0.3.4 evidence remains separate in [validation](validation-notes.md).
 
@@ -52,4 +52,4 @@ The optional update scheduler runs through the existing app tick, checks at most
 
 Packaging accepts matched x64/x86/ARM64 platform and runtime identifiers. Setup checks app-architecture .NET, app-architecture Windows App Runtime Framework/DDLM, and native-host Main/Singleton packages; a cross-architecture install also requires the native framework dependency. Microsoft-signed resource recovery follows that plan and validates package manifests before deployment. Package audits inspect PE headers and bootstrapper/runtime configuration; installed qualification records the actual process architecture.
 
-The v0.4.9 candidate also moves the signed-resource reader's AnyCPU compilation into the build. Setup packages that helper for prerequisite work; it does not add a compiler dependency or helper process to the running app. Translation targets the WinUI visual's property set. The v0.4.8 run passed actual installation, matching-architecture launch and hover cycles on all four hosts, then stopped at Settings bounds before the remaining UI assertions. The follow-up bounds check recognizes only typed tooltip surfaces and their related hosts/children, requires them to fit the monitor work area, and retains strict panel bounds for other content. Exact stages are recorded in [validation](validation-notes.md#candidate-qualification-sequence--10-october-2026-utc).
+The v0.4.10 candidate also moves the signed-resource reader's AnyCPU compilation into the build. Setup packages that helper for prerequisite work; it does not add a compiler dependency or helper process to the running app. Translation targets the WinUI visual's property set. The v0.4.8 run passed actual installation, matching-architecture launch and hover cycles on all four hosts, then stopped at Settings bounds before the remaining UI assertions. The follow-up bounds check recognizes only typed tooltip surfaces and their related hosts/children, requires them to fit the monitor work area, and retains strict panel bounds for other content. Exact stages are recorded in [validation](validation-notes.md#candidate-qualification-sequence--10-october-2026-utc).

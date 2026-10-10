@@ -62,6 +62,21 @@ $report = [ordered]@{
     Error = $null
 }
 
+function Read-OwnedAtomicText([string]$Path) {
+    # Observe JSON without blocking the app's atomic replacement on Windows.
+    # Get-Content can hold a reader without delete sharing during a save.
+    $stream = [IO.FileStream]::new($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+        ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    $reader = $null
+    try {
+        if ($stream.Length -gt 10MB) { throw "The owned JSON observation exceeds its size bound." }
+        $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+        return $reader.ReadToEnd()
+    } finally {
+        if ($reader) { $reader.Dispose() } else { $stream.Dispose() }
+    }
+}
+
 function Assert-Budget {
     if ($clock.Elapsed.TotalSeconds -gt 195) { throw "Public-testing UI interaction exceeded its 195-second operation budget." }
     $process = Get-Process -Id $AppProcessId -ErrorAction Stop
@@ -424,7 +439,7 @@ function Wait-ModuleControl([string]$Name, $ControlType, [bool]$RequireEnabled =
 function Read-Workspace {
     $workspaceFile = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "Notch/workspace.json"
     if (Test-Path -LiteralPath $workspaceFile -PathType Leaf) {
-        try { return Get-Content -LiteralPath $workspaceFile -Raw | ConvertFrom-Json } catch { }
+        try { return Read-OwnedAtomicText $workspaceFile | ConvertFrom-Json } catch { }
     }
     return $null
 }
@@ -618,7 +633,7 @@ function Wait-ScratchpadSave([string]$Expected) {
         Assert-Budget
         if (Test-Path -LiteralPath $workspaceFile -PathType Leaf) {
             try {
-                $saved = Get-Content -LiteralPath $workspaceFile -Raw | ConvertFrom-Json
+                $saved = Read-OwnedAtomicText $workspaceFile | ConvertFrom-Json
                 if ($saved.Scratchpad -eq $Expected) { return }
             } catch { } # Atomic replacement can briefly race the read; retry within the bound.
         }
@@ -707,7 +722,14 @@ namespace NotchlingUiSmoke {
     if (-not $root -or $root.Current.ProcessId -ne $AppProcessId) { throw "The supplied native window is not owned by the test app." }
 
     $report.Stage = "Open and pin the native notch"
-    Invoke-Button "Open Notchling"
+    # The native hover policy may already have opened the island during
+    # startup sampling. Reach its visible dock in either real initial state.
+    if (Find-Control "Open Notchling" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern)) {
+        Invoke-Button "Open Notchling"
+    } else {
+        Wait-Control "Notchling" ([System.Windows.Automation.ControlType]::Text) | Out-Null
+        $report.Actions += "Startup island was already expanded; verified its real Home content"
+    }
     # Match the unique accessible name, then require its actual Toggle pattern.
     $pin = Wait-Control "Keep Notchling expanded" $null $true ([System.Windows.Automation.TogglePattern]::Pattern)
     $toggle = $pin.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
@@ -718,11 +740,11 @@ namespace NotchlingUiSmoke {
         Assert-Budget
         $pinned = $false
         if (Test-Path -LiteralPath $preferencesFile -PathType Leaf) {
-            try { $pinned = (Get-Content -LiteralPath $preferencesFile -Raw | ConvertFrom-Json).Pinned -eq $true } catch { }
+            try { $pinned = (Read-OwnedAtomicText $preferencesFile | ConvertFrom-Json).Pinned -eq $true } catch { }
         }
         if ($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On -and $pinned) { break }
         if ($pinWait.Elapsed.TotalSeconds -ge 10) {
-            $savedPreferences = if (Test-Path -LiteralPath $preferencesFile) { Get-Content -LiteralPath $preferencesFile -Raw } else { "preferences file absent" }
+            $savedPreferences = if (Test-Path -LiteralPath $preferencesFile) { Read-OwnedAtomicText $preferencesFile } else { "preferences file absent" }
             throw "The expanded notch could not be pinned for interaction. Toggle state: $($toggle.Current.ToggleState); persisted pin: $pinned; preferences: $savedPreferences"
         }
         Start-Sleep -Milliseconds 100

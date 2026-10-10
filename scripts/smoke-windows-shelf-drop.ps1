@@ -34,6 +34,30 @@ $report = [ordered]@{
     Error = $null
 }
 
+function Get-OwnedFileSha256([string]$Path) {
+    # Framework crypto is available in Windows PowerShell 5.1 even when an
+    # inherited PowerShell module path cannot resolve Get-FileHash.
+    $inputStream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($inputStream)).Replace("-", "") }
+    finally { $algorithm.Dispose(); $inputStream.Dispose() }
+}
+
+function Read-OwnedAtomicText([string]$Path) {
+    # Observe JSON without blocking the app's atomic replacement on Windows.
+    # Get-Content can hold a reader without delete sharing during a save.
+    $stream = [IO.FileStream]::new($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+        ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    $reader = $null
+    try {
+        if ($stream.Length -gt 10MB) { throw "The owned JSON observation exceeds its size bound." }
+        $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+        return $reader.ReadToEnd()
+    } finally {
+        if ($reader) { $reader.Dispose() } else { $stream.Dispose() }
+    }
+}
+
 function Assert-Budget {
     if ($clock.Elapsed.TotalSeconds -gt 30) { throw "The owned Shelf drop check exceeded its 30-second operation budget." }
     $process = Get-Process -Id $AppProcessId -ErrorAction Stop
@@ -110,7 +134,7 @@ function Reach-Compact {
 function Read-Shelf {
     if (-not (Test-Path -LiteralPath $workspacePath -PathType Leaf)) { return @() }
     try {
-        $workspace = Get-Content -LiteralPath $workspacePath -Raw | ConvertFrom-Json
+        $workspace = Read-OwnedAtomicText $workspacePath | ConvertFrom-Json
         $property = $workspace.PSObject.Properties["Shelf"]
         if ($property) { return @($property.Value) }
     } catch { } # Atomic workspace replacement can race this bounded observation.
@@ -359,7 +383,7 @@ namespace NotchlingShelfOle {
     $sourceFile = Join-Path $fixtures ("notchling-ole-" + [guid]::NewGuid().ToString("N") + ".bmp")
     [NotchlingShelfOle.Native]::WriteFixtureBmp($sourceFile)
     $report.SourceFile = $sourceFile
-    $beforeHash = (Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash
+    $beforeHash = (Get-OwnedFileSha256 $sourceFile)
     $workspacePath = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "Notch/workspace.json"
     $captureDirectory = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "Notch/shelf-captures"))
 
@@ -371,7 +395,9 @@ namespace NotchlingShelfOle {
     if ($fileDrag.HResult -ne 0x00040100 -or $fileDrag.Effect -ne 1) { throw "Windows rejected the real file Copy drop (HRESULT $($fileDrag.HResult), effect $($fileDrag.Effect))." }
     if ($fileDrag.RequestedFormats -notcontains 13) { throw "The drop target did not retrieve the offered native CF_HDROP data." }
     $report.FileDropCopy = $true; $report.FileFormatRetrieved = $true
-    Wait-Control "" "ShelfDropTarget" | Out-Null
+    # Border is a visual drop surface rather than an interactive automation
+    # peer. Verify the Shelf's real actionable control before item/count checks.
+    Wait-Control "Choose files" "" ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
     Set-Pin $true
     $persistedFile = Wait-PersistedPath $sourceFile
     Assert-VisiblePath $persistedFile
@@ -387,7 +413,9 @@ namespace NotchlingShelfOle {
     if ($bitmapDrag.HResult -ne 0x00040100 -or $bitmapDrag.Effect -ne 1) { throw "Windows rejected the real bitmap Copy drop (HRESULT $($bitmapDrag.HResult), effect $($bitmapDrag.Effect))." }
     if ($bitmapDrag.RequestedFormats -notcontains 8) { throw "The drop target did not retrieve the offered native CF_DIB bytes." }
     $report.BitmapDropCopy = $true; $report.BitmapFormatRetrieved = $true
-    Wait-Control "" "ShelfDropTarget" | Out-Null
+    # Border is a visual drop surface rather than an interactive automation
+    # peer. Verify the Shelf's real actionable control before item/count checks.
+    Wait-Control "Choose files" "" ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
     Set-Pin $true
     $savedBitmap = Wait-PersistedPath "" $beforeBitmap
     Assert-VisiblePath $savedBitmap
@@ -421,7 +449,7 @@ namespace NotchlingShelfOle {
     $count = Wait-Control "" "ShelfCount"
     $report.ShelfCountObserved = $count.Current.Name
     if ($count.Current.Name -notmatch '^\d+ items?') { throw "Shelf did not expose an accessible real item count." }
-    if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf) -or (Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash -ne $beforeHash) {
+    if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf) -or (Get-OwnedFileSha256 $sourceFile) -ne $beforeHash) {
         throw "The Copy-only Shelf drop moved, removed or changed the original source file."
     }
     $report.OriginalFilePreserved = $true
