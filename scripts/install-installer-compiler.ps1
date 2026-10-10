@@ -31,9 +31,29 @@ try {
         if ($process.ExitCode -ne 0) { throw "The compiler installer failed with exit code $($process.ExitCode)." }
     } finally { $process.Dispose() }
     if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) { throw 'The pinned compiler was not installed at its configured path.' }
-    # Read the executable's own banner. Version resource display strings can
-    # include a suffix and should not be cast directly to System.Version.
+    # The no-argument ISCC banner reports only the major version. A valid,
+    # minimal compilation loads the engine and reports its complete version.
+    # All probe inputs/outputs stay in this owned temporary directory; the
+    # emitted Setup executable is never launched.
+    $probeScript = Join-Path $temporary 'compiler-probe.iss'
+    $probeOutput = Join-Path $temporary 'probe'
+    $probeSource = @"
+[Setup]
+AppName=Notchling compiler probe
+AppVersion=1.0
+DefaultDirName=$temporary\unused-app
+CreateAppDir=no
+Uninstallable=no
+PrivilegesRequired=lowest
+OutputDir=$probeOutput
+OutputBaseFilename=compiler-probe
+Compression=none
+SolidCompression=no
+"@
+    [IO.File]::WriteAllText($probeScript, $probeSource, [Text.UTF8Encoding]::new($true))
     $info = [Diagnostics.ProcessStartInfo]::new($compiler)
+    # ArgumentList quotes the complete path for Windows without a shell.
+    $info.ArgumentList.Add($probeScript)
     $info.UseShellExecute = $false; $info.CreateNoWindow = $true
     $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
     $probe = [Diagnostics.Process]::Start($info)
@@ -45,9 +65,11 @@ try {
             throw 'The installed compiler did not answer its bounded version probe.'
         }
         $banner = $output.GetAwaiter().GetResult() + $errors.GetAwaiter().GetResult()
-        if ($banner -notmatch ('(?i)(?:compiler engine version|Inno Setup).*?\b' + [regex]::Escape($version) + '\b')) {
-            throw 'The installed compiler did not report the exact pinned version.'
+        if ($probe.ExitCode -ne 0) { throw "The installed compiler could not compile its owned version probe (exit code $($probe.ExitCode))." }
+        if ($banner -notmatch ('(?im)^Compiler engine version:[^\r\n]*\b' + [regex]::Escape($version) + '(?:\s|$)')) {
+            throw 'The installed compiler engine did not report the exact pinned version after compilation.'
         }
+        if (-not (Test-Path -LiteralPath (Join-Path $probeOutput 'compiler-probe.exe') -PathType Leaf)) { throw 'The compiler version probe succeeded without its expected owned output.' }
     } finally { $probe.Dispose() }
     Write-Output "::notice title=Pinned installer compiler::Inno Setup $version; official SHA-256 and trusted Authenticode verified."
 } catch {

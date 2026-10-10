@@ -36,7 +36,7 @@ The desktop does not embed a browser or billing server. The optional `Notch.Bill
 
 Content animation runs through the compositor. The native host owns panel-size transitions and reduced-motion behavior. Rendered smoothness remains a Windows qualification requirement. CPU, memory, startup time, input latency and long-running resource use must be measured on real Windows hardware using the release matrix. Framework choice alone is not a performance result.
 
-## v0.4.4 source refinements
+## v0.4.5 source refinements
 
 These changes describe the current candidate; the published v0.3.4 evidence remains separate in [validation](validation-notes.md).
 
@@ -52,4 +52,4 @@ The optional update scheduler runs through the existing app tick, checks at most
 
 Packaging accepts matched x64/x86/ARM64 platform and runtime identifiers. Setup checks app-architecture .NET, app-architecture Windows App Runtime Framework/DDLM, and native-host Main/Singleton packages; a cross-architecture install also requires the native framework dependency. Microsoft-signed resource recovery follows that plan and validates package manifests before deployment. Package audits inspect PE headers and bootstrapper/runtime configuration; installed qualification records the actual process architecture.
 
-The v0.4.4 candidate also moves the signed-resource reader's AnyCPU compilation into the build. Setup packages that helper for prerequisite work; it does not add a compiler dependency or helper process to the running app. The validation-only v0.4.2 run passed actual x86 installation on its x64 host after script-body path initialization replaced early PowerShell parameter defaults. Installed launch then exposed a separate compositor-property error; translation now targets the WinUI visual's property set. That correction requires a new native launch before the candidate can be published. Exact stages are recorded in [validation](validation-notes.md#candidate-qualification-sequence--10-october-2026-utc).
+The v0.4.5 candidate also moves the signed-resource reader's AnyCPU compilation into the build. Setup packages that helper for prerequisite work; it does not add a compiler dependency or helper process to the running app. The validation-only v0.4.2 run passed actual x86 installation on its x64 host after script-body path initialization replaced early PowerShell parameter defaults. Installed launch then exposed a separate compositor-property error; translation now targets the WinUI visual's property set. That correction requires a new native launch before the candidate can be published. Exact stages are recorded in [validation](validation-notes.md#candidate-qualification-sequence--10-october-2026-utc).

@@ -16,7 +16,7 @@ The published v0.3.4 evaluation enables the complete catalog for **public testin
 | Calendar | Imported iCalendar events, recognized meeting links and local reminders | Unlocked. Single events, DAILY/WEEKLY rules, exclusions and OS time zones. Unsupported recurrence fails explicitly; no Google/Outlook OAuth or background account sync |
 | Weather | City geocoding, current conditions, hourly and daily forecasts | Tool unlocked; real data still requires the authenticated licensed weather proxy, which is not configured yet. Explicit city, no GPS lookup; attribution required and no silent public-endpoint fallback |
 | Focus | Pomodoro, countdown, stopwatch/laps and hydration timers | All controls unlocked. Deadlines account for missed UI ticks; restart and sleep/resume behavior need Windows QA |
-| Shelf | File/folder references; v0.4.4 adds explicit local file/image captures | Unlocked. References are the default; optional file copies and supplied bitmaps/virtual files stay locally. Originals are never moved; native drop/picker/paste/restart behavior awaits candidate qualification |
+| Shelf | File/folder references; v0.4.5 adds explicit local file/image captures | Unlocked. References are the default; optional file copies and supplied bitmaps/virtual files stay locally. Originals are never moved; native drop/picker/paste/restart behavior awaits candidate qualification |
 | Clipboard | Text history | Unlocked; off by default. Memory-only plain text, capped at 50 items and 100,000 characters per item; disabling clears captured history |
 | Servers | Listening local TCP ports | Unlocked. Read-only system information; does not stop servers or execute commands |
 | System | CPU, memory, battery and volume | Unlocked. Battery can be unavailable; endpoint changes and missing audio devices need Windows QA |
@@ -33,7 +33,7 @@ The published v0.3.4 evaluation enables the complete catalog for **public testin
 
 The catalog contains Home plus 20 tool panels. Settings handles configuration; All tools is a navigation index. The later commercial model is a light Free edition and US$2/month Premium. Its feature restrictions are inactive during public testing; see [pricing](pricing.md).
 
-The v0.4.4 candidate supplies a local quick guide in Home and Settings and small contextual help controls for source identity, focus modes, reporting semantics, clipboard privacy, screen time, connection fields and placement. Hover gives a short preview; explicit activation opens the full explanation. See [Getting started](getting-started.md). Guidance describes actual capabilities and requirements, rather than treating an unlocked panel as an operational connection.
+The v0.4.5 candidate supplies a local quick guide in Home and Settings and small contextual help controls for source identity, focus modes, reporting semantics, clipboard privacy, screen time, connection fields and placement. Hover gives a short preview; explicit activation opens the full explanation. See [Getting started](getting-started.md). Guidance describes actual capabilities and requirements, rather than treating an unlocked panel as an operational connection.
 
 Shelf in this candidate accepts supported drops onto the compact notch, opens its panel, and offers **Choose files**, **Save file copies** and **Paste image**. Files/folders normally retain their original paths; folders are never recursively copied. Supplied bitmap/virtual-file payloads and opted-in file copies are saved in `%LOCALAPPDATA%\Notch\shelf-captures`, with limits of 50 MiB per file, 250 MiB and 100 capture files, alongside the 100-entry Shelf limit. It never downloads an image URL. Removing a Shelf entry keeps its file/copy; **Reveal saved copies** exposes retained files for management. See the [Shelf guide](getting-started.md#keep-files-and-images-on-shelf) and [Privacy](privacy.md) for ownership, clipboard and backup behavior. Actual native file/image acceptance remains pending.
 
@@ -45,7 +45,7 @@ Use **Settings → Provider connections** to save/remove the Stripe reporting ke
 
 Disconnecting a service must remove its saved credential and invalidate in-flight results. Never include credential values in setup scripts, examples, test output or screenshots. The Revenue adapter's Stripe credential is separate from the Notchling subscription service.
 
-## Media source identity in v0.4.4 source
+## Media source identity in v0.4.5 source
 
 The compact strip shows a **source logo**, while the expanded player keeps artwork/thumbnail and source identity separate. Bundled logos cover YouTube, YouTube Music, Spotify, Chrome, Edge, Firefox, VLC, Apple Music and Media Player. An unknown registered player can retain its Windows-supplied application icon. Metadata remains the selected Windows session's title, artist and album; a logo does not create a playback integration.
 
@@ -82,7 +82,7 @@ Core tests use fixtures and do not contact these services. Optional live connect
 | Development weather geocoding | `geocoding-api.open-meteo.com` |
 | Development weather forecast | `api.open-meteo.com` |
 | Analytics | The explicitly configured HTTPS endpoint |
-| Release discovery in v0.4.4 source | Official `api.github.com` release metadata, with the canonical `github.com/Sury2797/Notchling` release feed/asset listing as fallback; explicit action or opt-in daily check |
+| Release discovery in v0.4.5 source | Official `api.github.com` release metadata, with the canonical `github.com/Sury2797/Notchling` release feed/asset listing as fallback; explicit action or opt-in daily check |
 | Verified signed updates | Canonical GitHub stable manifest and allowed official GitHub release-asset hosts; explicit install only |
 | SDK bootstrap | `builds.dotnet.microsoft.com` and the official artifact origin in release metadata |
 | Native dependency restore | NuGet endpoints, including `api.nuget.org` |
