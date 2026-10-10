@@ -7,7 +7,7 @@
 | Data | Location / behavior |
 | --- | --- |
 | Notes, scratchpad, reminders, links and shelf references | Plaintext JSON in `%LOCALAPPDATA%\Notch`; bounded local saves |
-| Shelf file/image captures in v0.4.8 source | Files in `%LOCALAPPDATA%\Notch\shelf-captures`; explicit drops, Paste image or opt-in file copies only. Up to 50 MiB per copy, 250 MiB and 100 saved files in total; no image-URL download |
+| Shelf file/image captures in v0.4.9 source | Files in `%LOCALAPPDATA%\Notch\shelf-captures`; explicit drops, Paste image or opt-in file copies only. Up to 50 MiB per copy, 250 MiB and 100 saved files in total; no image-URL download |
 | Provider tokens | Windows Credential Locker, separate from workspace JSON |
 | Clipboard | Off by default; when enabled, up to 50 text entries in memory; clears on disable or exit |
 | Calendar and coding imports | Files you choose explicitly; no automatic home-directory scan |
@@ -21,7 +21,7 @@ Notchling does not provide a cloud workspace synchronization service. There is n
 
 The data folder keeps its existing `Notch` name for compatibility. The branding change does not relocate local files or replace existing Windows vault identities.
 
-In the v0.4.8 candidate, local files and folders added to Shelf remain references by default. **Save file copies** deliberately creates an independent local file; folders remain references and their contents are not copied. Bitmap images and virtual files supplied by another app are saved locally because they may have no persistent original path. **Paste image** reads an image only when you request it; it does not enable clipboard-history capture. Removing a Shelf item removes its workspace entry and keeps the original or saved copy. **Reveal saved copies** opens the retained capture folder so you can manage or delete those files yourself. Successfully completed copies can remain there after a later operation/save failure. Notebook JSON exports contain paths, not the captured file contents; back up captured files separately. Upgrade and uninstall retain this workspace folder. These new native capture paths remain subject to release qualification.
+In the v0.4.9 candidate, local files and folders added to Shelf remain references by default. **Save file copies** deliberately creates an independent local file; folders remain references and their contents are not copied. Bitmap images and virtual files supplied by another app are saved locally because they may have no persistent original path. **Paste image** reads an image only when you request it; it does not enable clipboard-history capture. Removing a Shelf item removes its workspace entry and keeps the original or saved copy. **Reveal saved copies** opens the retained capture folder so you can manage or delete those files yourself. Successfully completed copies can remain there after a later operation/save failure. Notebook JSON exports contain paths, not the captured file contents; back up captured files separately. Upgrade and uninstall retain this workspace folder. These new native capture paths remain subject to release qualification.
 
 ## Optional network requests
 

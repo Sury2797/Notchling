@@ -509,6 +509,10 @@ function Scroll-ToSettingId([string]$Id) {
 function Assert-HorizontalBounds {
     Assert-Budget
     $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
+    $work = [NotchlingUiSmoke.Native]::WorkArea([IntPtr]::new($WindowHandle))
+    $tooltipCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::ToolTip)
     $elements = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition)
     foreach ($element in $elements) {
@@ -516,8 +520,35 @@ function Assert-HorizontalBounds {
             $current = $element.Current
             if ($current.IsOffscreen -or $current.BoundingRectangle.IsEmpty) { continue }
             $rectangle = $current.BoundingRectangle
+            # Native tooltips are separate popup surfaces. They may extend
+            # beyond the panel, but must stay within the monitor work area.
+            # Recognize their actual UIA role; never skip arbitrary popups
+            # or overflowing controls merely because their name is PopupHost.
+            $isTooltip = $current.ControlType -eq [System.Windows.Automation.ControlType]::ToolTip
+            if (-not $isTooltip -and $current.Name -eq 'PopupHost') {
+                $isTooltip = $null -ne $element.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $tooltipCondition)
+            }
+            if (-not $isTooltip) {
+                $ancestor = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($element)
+                for ($level = 0; $ancestor -and $level -lt 12; $level++) {
+                    if ($ancestor.Current.ControlType -eq [System.Windows.Automation.ControlType]::ToolTip) { $isTooltip = $true; break }
+                    if ($ancestor.Current.NativeWindowHandle -eq $WindowHandle) { break }
+                    $ancestor = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($ancestor)
+                }
+            }
+            if ($isTooltip) {
+                if ($rectangle.Left -lt $work.Left - 2 -or $rectangle.Right -gt $work.Right + 2 -or
+                    $rectangle.Top -lt $work.Top - 2 -or $rectangle.Bottom -gt $work.Bottom + 2) {
+                    throw "The native tooltip is clipped outside the monitor work area: '$($current.Name)'."
+                }
+                continue
+            }
             if ($rectangle.Left -lt $bounds.Left - 2 -or $rectangle.Right -gt $bounds.Right + 2) {
-                throw "Visible tool content exceeds the native notch width: '$($current.Name)' ($($rectangle.Left)..$($rectangle.Right), notch $($bounds.Left)..$($bounds.Right))."
+                $details = @($element.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                    [System.Windows.Automation.Condition]::TrueCondition) | Select-Object -First 5 | ForEach-Object {
+                        "$($_.Current.ControlType.ProgrammaticName)/$($_.Current.ClassName): $($_.Current.Name)"
+                    }) -join ' | '
+                throw "Visible tool content exceeds the native notch width: '$($current.Name)' ($($rectangle.Left)..$($rectangle.Right), notch $($bounds.Left)..$($bounds.Right)); type=$($current.ControlType.ProgrammaticName); class=$($current.ClassName); children=$details."
             }
         } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
     }
