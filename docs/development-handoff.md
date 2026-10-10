@@ -22,3 +22,12 @@ After the current qualification blockers, implement automatic local discovery an
 - Show remaining allowance, usage windows and reset times only when the source actually supplies them. Unsupported providers or unavailable account quotas must say unavailable or connection required; missing data must not appear as zero usage. Mark stale data and show its source and last successful refresh.
 - Refresh automatically with efficient background loading, caching, rate-limit backoff and recovery from offline/authentication failures. Keep the island responsive and provide a manual refresh action.
 - Build a precise, polished native usage panel with consistent provider icons, aligned counters and readable progress/reset information across supported display sizes and scaling. Verify values against actual provider/local records and test failure states before claiming an integration works.
+
+## Owner-requested next feature: complete in-app updating
+
+Complete the existing updater so users can check, download and install a newer Notchling version directly inside the app, without visiting the release page. This is a saved implementation request; existing release discovery and signed-install controls do not establish that the complete flow is available for current unsigned evaluations.
+
+- Reuse and extend the existing updater services and UI. Show the installed/latest version, concise release notes, update availability and an explicit Update action with download progress, cancellation, retry and clear completion/restart guidance.
+- Select the correct x64, x86 or ARM64 installer automatically. Verify official release provenance and artifact integrity before execution; preserve the existing trusted publisher/signature checks. Resolve the unsigned evaluation versus signed production delivery policy explicitly rather than silently bypassing verification.
+- Preserve user data and settings, handle save/close/relaunch safely, and leave the current app usable when checking, downloading or installation fails. Optional automatic checks must remain quiet and efficient; installation requires the user's action.
+- Test the actual end-to-end upgrade on supported Windows hosts, including wrong architecture, interrupted download, invalid artifact, installer failure and successful relaunch. Do not label a release-page link or simulated progress as in-app updating.
