@@ -12,7 +12,7 @@ Release and Debug both enable the complete public-testing catalog; checkout is p
 | Portable core | Timers, state machine, local storage, conversions and provider/import adapters; checks run on Windows and Linux |
 | Connected data | Read-only Stripe reporting, configured HTTPS analytics and explicit calendar/coding imports; licensed weather backend still unconfigured |
 | Build and packaging | Single Windows x64 Setup EXE with automatic shared prerequisites; qualified v0.3.4 delivery and full public-testing UI in [CI](https://github.com/Sury2797/Notchling/actions/runs/37944357692) |
-| v0.4.10 source candidate | Bundled vector controls/source logos, responsive reporting forms, interruptible geometry motion, scoped feedback, quiet release discovery and x64/x86/ARM64 packaging; new installed-app qualification pending |
+| v0.4.11 source candidate | Bundled vector controls/source logos, responsive reporting forms, interruptible geometry motion, scoped feedback, quiet release discovery and x64/x86/ARM64 packaging; new installed-app qualification pending |
 | Interactive release QA | Both hosted Windows installations and full public-testing UI passed; consumer accessibility, monitor behavior, live services and performance measurement remain required |
 | Access and subscriptions | Entire catalog free during public testing; checkout paused; future Free/Premium gates and signed entitlement validation retained; production activation and live sandbox validation pending |
 | Linux desktop | Planned; the core is portable, while the UI and operating-system services are Windows-specific |

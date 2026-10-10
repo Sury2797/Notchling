@@ -193,7 +193,10 @@ public sealed partial class MainWindow : Window
         var expanded = mode == OverlayMode.Expanded;
         var contentChanged = _renderedMode != mode || _renderedModule != _vm.SelectedModule;
         if (expanded && _renderedMode != OverlayMode.Expanded) _hoverInteraction.Begin(_explicitOpening);
-        if (expanded && !_vm.Preferences.Pinned) _hoverMonitor.Start(); else _hoverMonitor.Stop();
+        // Native pointer sampling also recovers a compact hover after a
+        // resized surface or tooltip consumes WinUI's routed enter/move event.
+        if (mode == OverlayMode.Collapsed || expanded && !_vm.Preferences.Pinned) _hoverMonitor.Start();
+        else _hoverMonitor.Stop();
         var activity = mode == OverlayMode.Activity;
         var definition = ModuleCatalog.Get(_vm.SelectedModule);
         var (contentWidth, contentHeight) = _vm.SelectedModule switch
@@ -384,7 +387,19 @@ public sealed partial class MainWindow : Window
         || KeyboardEditorFocused() && _hoverInteraction.HasRecentKeyboardInput;
     private void CheckHoverDismissal()
     {
-        if (_quitting || _vm.Overlay.Mode != OverlayMode.Expanded || _vm.Preferences.Pinned)
+        if (_quitting) { _hoverMonitor.Stop(); return; }
+        if (_vm.Overlay.Mode == OverlayMode.Collapsed)
+        {
+            if (!_vm.IsReady || !_host.IsVisible || _closingAttempt || HasOpenDialog)
+            { _openDelay.Stop(); return; }
+            if (_host.IsPointerInsideWindow)
+            {
+                if (!_openDelay.IsEnabled) _openDelay.Start();
+            }
+            else _openDelay.Stop();
+            return;
+        }
+        if (_vm.Overlay.Mode != OverlayMode.Expanded || _vm.Preferences.Pinned)
         { _hoverMonitor.Stop(); return; }
         if (!_host.IsVisible) return;
         var inside = _host.IsPointerInsideWindow;

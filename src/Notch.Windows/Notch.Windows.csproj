@@ -29,9 +29,9 @@
     <TieredPGO>true</TieredPGO>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>Assets\Notchling.ico</ApplicationIcon>
-    <Version>0.4.10</Version>
-    <AssemblyVersion>0.4.10.0</AssemblyVersion>
-    <FileVersion>0.4.10.0</FileVersion>
+    <Version>0.4.11</Version>
+    <AssemblyVersion>0.4.11.0</AssemblyVersion>
+    <FileVersion>0.4.11.0</FileVersion>
     <Product>Notchling</Product>
     <Title>Notchling</Title>
     <AssemblyTitle>Notchling</AssemblyTitle>
