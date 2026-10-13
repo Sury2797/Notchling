@@ -21,6 +21,8 @@ internal sealed class FakeUpdateService : IWindowsUpdateService
     public int Discoveries { get; private set; }
     public int Downloads { get; private set; }
     public int Opens { get; private set; }
+    public int CancelledInstallations { get; private set; }
+    public void CancelPendingInstallation() => CancelledInstallations++;
     public bool CancellationObserved { get; private set; }
     public Task<bool> CanVerifyPublisherAsync(CancellationToken cancellationToken = default)
     { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(Result?.CanInstallVerified == true); }
@@ -38,7 +40,8 @@ internal sealed class FakeUpdateService : IWindowsUpdateService
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested(); Downloads++;
-        return Task.FromResult(new PreparedUpdate(update.Version, "synthetic-verified-installer.exe", update.Sha256, update.Architecture));
+        return Task.FromResult(new PreparedUpdate(update.Version, "synthetic-verified-installer.exe", update.Sha256,
+            update.Architecture, update.Trust, update.Provenance, update.SizeBytes));
     }
     public Task OpenInstallerAsync(PreparedUpdate update, CancellationToken cancellationToken = default)
     { cancellationToken.ThrowIfCancellationRequested(); Opens++; return Task.CompletedTask; }
@@ -175,12 +178,57 @@ internal static class UpdateNotificationCases
             finally { store.FailWrites = false; }
             await vm.InstallAvailableUpdateAsync();
             Assert(updates.Downloads == 2 && updates.Opens == 1 && !vm.HasUnsavedChanges && vm.IsReady
-                && vm.UpdateStatus.Contains("Setup opened", StringComparison.Ordinal)
+                && vm.UpdateStatus.Contains("close safely", StringComparison.Ordinal)
                 && !vm.IsCheckingUpdates && !vm.IsInstallingUpdate,
                 "An explicit install could not recover after the notebook became durable.");
             using var savedStore = new LocalStore(data);
             var saved = await savedStore.ReadAsync<MainViewModel.LocalData>("workspace");
             Assert(saved?.Notes.Single().Text == "Keep this while updating", "The successful install handoff did not preserve the saved notebook.");
+        });
+
+        await run("Unsigned in-app installation requires consent for the exact available artifact", async () =>
+        {
+            var artifact = new AvailableUpdate("999.0.0",
+                "https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-999.0.0/Notchling-999.0.0-windows-x64-evaluation-setup.exe",
+                new string('b', 64), 64, 19045, Trust: UpdateTrustPolicy.OfficialUnsignedEvaluation,
+                Provenance: new(42, 73, "notchling-evaluation-999.0.0", new string('c', 40)));
+            var updates = new FakeUpdateService { Result = new("999.0.0",
+                "https://github.com/Sury2797/Notchling/releases/tag/notchling-evaluation-999.0.0",
+                "x64", UpdateChannel.Evaluation, true, artifact) };
+            await using var vm = Create(data, updates);
+            await vm.InitializeAsync();
+            var ready = 0; vm.UpdateInstallerReady += (_, _) => ready++;
+            await vm.CheckForUpdatesAsync();
+            await vm.InstallAvailableUpdateAsync();
+            await vm.InstallAvailableUpdateAsync(allowUnsignedEvaluation: true);
+            await vm.InstallAvailableUpdateAsync(allowUnsignedEvaluation: true, acceptedUpdate: artifact with { Sha256 = new string('d', 64) });
+            Assert(vm.CanInstallAvailableUpdate && updates.Downloads == 0 && updates.Opens == 0 && ready == 0,
+                "Discovery, missing consent or consent for different bytes started an unsigned update.");
+            await vm.InstallAvailableUpdateAsync(allowUnsignedEvaluation: true, acceptedUpdate: artifact);
+            Assert(updates.Downloads == 1 && updates.Opens == 1 && ready == 1 && vm.IsReady && !vm.IsCheckingUpdates,
+                "An explicitly accepted exact update failed to finish preparation before asking for graceful shutdown.");
+            vm.CancelPendingUpdateInstallation();
+            Assert(updates.CancelledInstallations == 1 && vm.UpdateStatus.Contains("not installed", StringComparison.Ordinal),
+                "Cancelling graceful restart failed to cancel the external installation handoff.");
+        });
+
+        await run("Consent cannot transfer to a replacement evaluation release", async () =>
+        {
+            var artifact = new AvailableUpdate("999.0.0",
+                "https://github.com/Sury2797/Notchling/releases/download/notchling-evaluation-999.0.0/Notchling-999.0.0-windows-x64-evaluation-setup.exe",
+                new string('a', 64), 64, 19045, Trust: UpdateTrustPolicy.OfficialUnsignedEvaluation,
+                Provenance: new(7, 8, "notchling-evaluation-999.0.0", new string('b', 40)));
+            var release = new ReleaseUpdate("999.0.0",
+                "https://github.com/Sury2797/Notchling/releases/tag/notchling-evaluation-999.0.0",
+                "x64", UpdateChannel.Evaluation, true, artifact);
+            var updates = new FakeUpdateService { Result = release };
+            await using var vm = Create(data, updates);
+            await vm.InitializeAsync(); await vm.CheckForUpdatesAsync();
+            updates.Result = release with { VerifiedUpdate = artifact with { Sha256 = new string('c', 64), Provenance = artifact.Provenance! with { AssetId = 9 } } };
+            await vm.CheckForUpdatesAsync();
+            await vm.InstallAvailableUpdateAsync(allowUnsignedEvaluation: true, acceptedUpdate: artifact);
+            Assert(updates.Downloads == 0 && updates.Opens == 0 && vm.IsReady,
+                "Replacing the same version's artifact inherited consent for the previous bytes.");
         });
 
         await run("Release metadata failure stays in Settings and permits a harmless retry", async () =>

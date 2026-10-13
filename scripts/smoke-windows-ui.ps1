@@ -45,7 +45,11 @@ $report = [ordered]@{
     FeaturedNavigationStartsAtTop = $false
     ContextualHelpRoundTrip = $false
     ShelfDrops = $null
+    ActualAiUsageRead = $false
+    AiUsageStates = @()
+    EditorHitTargets = @()
     UnsignedUpdateGuidance = $false
+    VerifiedUpdateActionAvailable = $false
     UpdateActionPreservesSettingsScroll = $false
     UpdateActionCreatedNoDownload = $false
     EvaluationUpdateStatus = "Not run"
@@ -110,7 +114,7 @@ function Read-ElementBounds($Element) {
 }
 
 function Test-OwnedDescendant($Element, $Owner) {
-    if (-not $Element -or -not $Owner -or $Element.Current.ProcessId -ne $AppProcessId) { return $false }
+    if (-not $Element -or -not $Owner -or $Element.Current.ProcessId -ne $AppProcessId -or $Owner.Current.ProcessId -ne $AppProcessId) { return $false }
     $ancestor = $Element
     for ($level = 0; $ancestor -and $level -lt 16; $level++) {
         if ($ancestor.Equals($Owner)) { return $true }
@@ -472,6 +476,60 @@ function Wait-ModuleControl([string]$Name, $ControlType, [bool]$RequireEnabled =
     return Wait-Control $Name $ControlType $RequireEnabled $Pattern
 }
 
+function Reach-ModuleId([string]$Id, $Pattern = $null) {
+    $control = Find-AutomationId $Id $Pattern
+    if ($control) { return $control }
+    $viewport = Find-AutomationId "ModuleScroll" ([System.Windows.Automation.ScrollPattern]::Pattern)
+    if (-not $viewport) { throw "The current tool does not expose its native viewport: $Id." }
+    $scroll = $viewport.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    if ($scroll.Current.HorizontallyScrollable) { throw "The current tool exposes horizontal scrolling: $Id." }
+    for ($percent = 0; $percent -le 100; $percent += 10) {
+        if ($scroll.Current.VerticallyScrollable) {
+            $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, $percent)
+            Start-Sleep -Milliseconds 70
+        }
+        $control = Find-AutomationId $Id $Pattern
+        if ($control) { return $control }
+    }
+    throw "The current tool control has no reachable native viewport position: $Id."
+}
+
+function Verify-ActualAiUsage {
+    # Opening this panel starts its first bounded background read. Wait for the
+    # native action to become enabled before requesting an explicit second read.
+    Wait-ModuleControl "Refresh actual local AI usage" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
+    $refresh = Reach-ModuleId "AiUsageRefresh" ([System.Windows.Automation.InvokePattern]::Pattern)
+    if ($refresh.Current.Name -ne "Refresh actual local AI usage") { throw "The AI usage action does not identify the real local source." }
+    $refresh.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $wait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        Assert-Budget
+        $refresh = Find-AutomationId "AiUsageRefresh" ([System.Windows.Automation.InvokePattern]::Pattern)
+        $status = Find-AutomationId "AiUsageStatus"
+        if ($refresh -and $status -and $status.Current.Name -match '^Checked .+\. Refreshes every 45 seconds while this panel is open\.$') { break }
+        if ($wait.Elapsed.TotalSeconds -ge 18) { throw "The actual local AI check did not finish with a readable timestamped source status." }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+    foreach ($provider in @("Codex", "Claude")) {
+        $state = Reach-ModuleId ("AiUsage" + $provider + "State")
+        # Hosted test desktops contain no authenticated CLI/account fixtures.
+        # Missing local records must remain unavailable, never fabricated zero
+        # activity or an inferred remaining subscription percentage.
+        if ($state.Current.Name -notin @("No local records found", "No token usage recorded")) {
+            throw "The unconfigured disposable AI source did not expose its real missing-record state: $provider / $($state.Current.Name)."
+        }
+        $report.AiUsageStates += "$provider : $($state.Current.Name)"
+        $tokens = Reach-ModuleId ("AiUsage" + $provider + "Tokens")
+        if ($tokens.Current.Name -ne "No token reading") { throw "The unconfigured $provider source fabricated a token reading: $($tokens.Current.Name)." }
+        Assert-HorizontalBounds
+    }
+    Wait-ModuleControl "Claude plan allowance is unavailable from supported local records. Token counts do not reveal your remaining quota." ([System.Windows.Automation.ControlType]::Text) | Out-Null
+    Wait-ModuleControl "No provider-reported quota observation found. Run Codex normally, then refresh; no allowance is estimated." ([System.Windows.Automation.ControlType]::Text) | Out-Null
+    if (Find-Control "Notchling error" $null $false) { throw "Reading actual local AI usage displayed an application error." }
+    $report.ActualAiUsageRead = $true
+    $report.Actions += "Verified actual local AI refresh, timestamp, honest missing-record/token/quota guidance and native layout; no provider account fixture"
+}
+
 function Read-Workspace {
     $workspaceFile = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "Notch/workspace.json"
     if (Test-Path -LiteralPath $workspaceFile -PathType Leaf) {
@@ -559,6 +617,8 @@ function Scroll-ToSettingId([string]$Id) {
 
 function Reach-SettingsEditorPoint([string]$Name) {
     $report.Operation = "Reach physically hit-testable Settings editor '$Name'"
+    [NotchlingUiSmoke.Native]::SetForegroundWindow([IntPtr]::new($WindowHandle)) | Out-Null
+    Start-Sleep -Milliseconds 100
     $scroll = Get-SettingsScroll
     $positions = @($scroll.Current.VerticalScrollPercent) + @(0..10 | ForEach-Object { $_ * 10 })
     $detail = "No exposed editor rectangle"
@@ -578,19 +638,33 @@ function Reach-SettingsEditorPoint([string]$Name) {
         $right = [Math]::Min($rectangle.Right, [Math]::Min($clip.Right, $window.Right))
         $top = [Math]::Max($rectangle.Top, [Math]::Max($clip.Top, $window.Top))
         $bottom = [Math]::Min($rectangle.Bottom, [Math]::Min($clip.Bottom, $window.Bottom))
-        $detail = "scroll=$percent; editor=$rectangle; viewport=$clip; exposed=$left,$top..$right,$bottom"
+        $detail = "expectedAppProcess=$AppProcessId; ownedHwnd=$WindowHandle; scroll=$percent; editor=$rectangle; viewport=$clip; exposed=$left,$top..$right,$bottom"
         if ($right - $left -lt 4 -or $bottom - $top -lt 4) { continue }
         # GetClickablePoint is optional for WinUI text peers. Use actual finite
-        # screen geometry, then prove a user click lands on this exact editor
-        # (or its own inner text peer), rather than clipped or covered content.
+        # screen geometry and the actual topmost HWND under the physical point.
+        # Some WinUI hit-test providers expose only an owned ancestor Pane; the
+        # subsequent physical click + exact focused editor + real changed text
+        # are required even when this coarse ancestor is the accessible hit.
         foreach ($fraction in @(.5, .25, .75)) {
             $x = [int][Math]::Floor($left + ($right - $left) * $fraction)
             $y = [int][Math]::Floor($top + ($bottom - $top) / 2)
-            $hit = [System.Windows.Automation.AutomationElement]::FromPoint([System.Windows.Point]::new($x, $y))
-            if (Test-OwnedDescendant $hit $editor) {
-                return [pscustomobject]@{ Element = $editor; X = $x; Y = $y }
+            Move-Cursor $x $y
+            for ($attempt = 0; $attempt -lt 3; $attempt++) {
+                $nativeHit = [NotchlingUiSmoke.Native]::TargetAtPoint($x, $y, [IntPtr]::new($WindowHandle), $AppProcessId)
+                $hit = [System.Windows.Automation.AutomationElement]::FromPoint([System.Windows.Point]::new($x, $y))
+                $relatedHit = (Test-OwnedDescendant $hit $editor) -or (Test-OwnedDescendant $editor $hit)
+                if ($nativeHit.Owned -and $relatedHit) {
+                    $report.EditorHitTargets += "expectedAppProcess=$AppProcessId; UIA=$($hit.Current.ControlType.ProgrammaticName)/$($hit.Current.ClassName); native=$($nativeHit.Description); point=$x,$y"
+                    $report.EditorHitTargets = @($report.EditorHitTargets | Select-Object -Last 4)
+                    return [pscustomobject]@{ Element = $editor; X = $x; Y = $y }
+                }
+                $hitDetail = if ($hit) { "'$($hit.Current.Name)'/$($hit.Current.ControlType.ProgrammaticName), process=$($hit.Current.ProcessId)" } else { "no UIA hit" }
+                $detail += "; attempt=$attempt; UIA=$hitDetail; native=$($nativeHit.Description); related=$relatedHit"
+                if ($attempt -lt 2) {
+                    [NotchlingUiSmoke.Native]::SetForegroundWindow([IntPtr]::new($WindowHandle)) | Out-Null
+                    Start-Sleep -Milliseconds 100
+                }
             }
-            if ($hit) { $detail += "; hit='$($hit.Current.Name)'/$($hit.Current.ControlType.ProgrammaticName), process=$($hit.Current.ProcessId)" }
         }
     }
     throw "The visible Settings editor has no reachable owned click position after viewport scanning: $Name; $detail."
@@ -729,6 +803,7 @@ try {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 namespace NotchlingUiSmoke {
     public static class Native {
         [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
@@ -751,6 +826,23 @@ namespace NotchlingUiSmoke {
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+        [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+        [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+        [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
+        [DllImport("user32.dll", EntryPoint="GetClassNameW", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder name, int length);
+        public sealed class PointTarget {
+            public bool Owned;
+            public string Description;
+        }
+        public static PointTarget TargetAtPoint(int x, int y, IntPtr expectedWindow, uint expectedProcess) {
+            IntPtr window = WindowFromPoint(new Point { X = x, Y = y });
+            IntPtr ancestor = window == IntPtr.Zero ? IntPtr.Zero : GetAncestor(window, 2); // GA_ROOT
+            uint process; GetWindowThreadProcessId(window, out process);
+            var name = new StringBuilder(128); GetClassName(window, name, name.Capacity);
+            bool related = window != IntPtr.Zero && (window == expectedWindow || ancestor == expectedWindow || IsChild(expectedWindow, window));
+            return new PointTarget { Owned = process == expectedProcess && related,
+                Description = "hwnd=" + window.ToInt64() + ", root=" + ancestor.ToInt64() + ", process=" + process + ", class=" + name + ", owned=" + related };
+        }
         public static uint ForegroundProcessId() {
             uint process; GetWindowThreadProcessId(GetForegroundWindow(), out process); return process;
         }
@@ -1030,7 +1122,7 @@ namespace NotchlingUiSmoke {
     Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
     $installedSignature = Get-AuthenticodeSignature -LiteralPath $process.Path
     if ($installedSignature.Status -eq [System.Management.Automation.SignatureStatus]::Valid) {
-        # A future signed smoke run must not exercise the stable update channel.
+        # A signed smoke run must not exercise the public-test update channel.
         # Record that this evaluation-specific regression was not performed.
         $report.EvaluationUpdateStatus = "Skipped: installed application is signed; this regression covers unsigned evaluation builds."
     } else {
@@ -1054,8 +1146,9 @@ namespace NotchlingUiSmoke {
         $supportTop = (Read-ElementBounds (Wait-Control "Updates and troubleshooting" $null $true ([System.Windows.Automation.ExpandCollapsePattern]::Pattern))).Top
         Invoke-Button "Check for updates"
         # Discovery uses bounded public metadata requests. Anonymous GitHub
-        # quotas/offline runners can produce retry guidance; exact discovery
-        # results and cancellation are separately exercised with API fixtures.
+        # quotas/offline runners can produce retry/manual guidance. Checking
+        # must not start an installer download even when a pinned official
+        # evaluation update is available for a separate explicit user action.
         $updateWait = [Diagnostics.Stopwatch]::StartNew()
         do {
             Assert-Budget
@@ -1067,14 +1160,18 @@ namespace NotchlingUiSmoke {
         $updateStatus = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, "UpdateStatus"))
         if ($null -eq $updateStatus -or $updateStatus.Current.IsOffscreen -or
-            ($updateStatus.Current.Name -notmatch '^Notchling .+ is available\. This evaluation uses manual updates;' -and
-             $updateStatus.Current.Name -ne 'No newer compatible release was found. Open Release page to view downloads.' -and
-             $updateStatus.Current.Name -notmatch '^Couldn.t check online\. Try again or open Release page for manual downloads\.$')) {
+            ($updateStatus.Current.Name -notmatch '^Notchling .+ is available\. (Update and restart when ready\.|In-app installation unavailable)' -and
+             $updateStatus.Current.Name -notmatch '^You.re up to date\.' -and
+             $updateStatus.Current.Name -notmatch '^Couldn.t check online\.')) {
             throw "The visible Settings live region did not expose a completed read-only release result or actionable offline guidance."
         }
-        if (Find-Control "Install verified update" ([System.Windows.Automation.ControlType]::Button) $false) { throw "Unsigned evaluation discovery exposed automatic installer execution." }
+        $installable = $updateStatus.Current.Name -match '^Notchling .+ is available\. Update and restart when ready\.'
+        $installAction = Find-Control "Update and restart" ([System.Windows.Automation.ControlType]::Button) $false ([System.Windows.Automation.InvokePattern]::Pattern)
+        if ($installable -and -not $installAction) { throw "A verified available update omitted its explicit native Update and restart action." }
+        if (-not $installable -and $installAction) { throw "An unavailable or unverified release exposed an installer action." }
+        $report.VerifiedUpdateActionAvailable = $installable
         Wait-Control "Release page" ([System.Windows.Automation.ControlType]::Button) | Out-Null
-        if (Find-Control "Notchling error" $null $false) { throw "An unsigned evaluation update check displayed a red application error instead of manual-update guidance." }
+        if (Find-Control "Notchling error" $null $false) { throw "An evaluation update check displayed a red application error instead of usable update/retry guidance." }
         $report.UnsignedUpdateGuidance = $true
         Wait-Control "Check for updates" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
         Start-Sleep -Milliseconds 300
@@ -1091,7 +1188,7 @@ namespace NotchlingUiSmoke {
         }
         $report.UpdateActionCreatedNoDownload = $true
         $report.EvaluationUpdateStatus = "Passed: " + $updateStatus.Current.Name + " Daily checks default off; no error or installer download."
-        $report.Actions += "Verified unsigned update guidance, no application error, retained Settings viewport, and no installer download"
+        $report.Actions += "Verified truthful evaluation update discovery, explicit action only for verified available release, no app error, retained Settings viewport and no installer download"
     }
 
     $report.Stage = "Explicit sample-data preview and exit to real data"
@@ -1112,7 +1209,7 @@ namespace NotchlingUiSmoke {
     $report.ExplicitSamplePreviewExited = $true
     $report.Actions += "Verified work-area dock bounds, vertical layout, toggle scroll position, unapplied draft retention, and explicit preview exit"
 
-    $report.Stage = "All twenty-one tools open without public-testing paywalls"
+    $report.Stage = "All twenty-two tools open without public-testing paywalls"
     Invoke-Button "All tools"
     Save-OwnedScreenshot "all-tools"
     $toolCases = @(
@@ -1121,6 +1218,7 @@ namespace NotchlingUiSmoke {
         @{ Module = "Revenue"; Name = "Connect a payment provider"; Type = [System.Windows.Automation.ControlType]::Text },
         @{ Module = "Analytics"; Name = "Your website"; Type = [System.Windows.Automation.ControlType]::Text },
         @{ Module = "Coding"; Name = "Connect your local usage logs"; Type = [System.Windows.Automation.ControlType]::Text },
+        @{ Module = "AiUsage"; Name = "AI usage"; Type = [System.Windows.Automation.ControlType]::Text },
         @{ Module = "Calendar"; Name = "Previous month"; Type = [System.Windows.Automation.ControlType]::Button },
         @{ Module = "Weather"; Name = "Weather"; Type = [System.Windows.Automation.ControlType]::Text },
         @{ Module = "Focus"; Name = "Start / pause Pomodoro"; Type = [System.Windows.Automation.ControlType]::Button },
@@ -1152,10 +1250,11 @@ namespace NotchlingUiSmoke {
                 Start-Sleep -Milliseconds 100
             }
         }
+        if ($case.Module -eq "AiUsage") { Verify-ActualAiUsage }
         $report.ToolsOpened += $case.Module
     }
     $report.FeaturedNavigationStartsAtTop = $true
-    $report.Actions += "Verified twenty-one public-testing tools open into their actual content without a subscription"
+    $report.Actions += "Verified twenty-two public-testing tools open into their actual content without a subscription"
 
     $report.Stage = "Public-testing native Awake power request releases cleanly"
     Invoke-Button "Keep awake"

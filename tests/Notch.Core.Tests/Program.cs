@@ -14,4 +14,5 @@ ProviderCases.Register(suite);
 ConnectionCases.Register(suite);
 CalendarCases.Register(suite);
 CodingCases.Register(suite);
+AiUsageCases.Register(suite);
 return await suite.RunAsync();

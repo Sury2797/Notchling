@@ -61,6 +61,7 @@ MainViewModel ViewModel() => new(new DispatcherQueue(), dataDirectory: data);
 await ConnectionStatusCases.RegisterAsync(Case, data);
 await UpdateNotificationCases.RegisterAsync(Case, data);
 await ShelfWorkspaceCases.RegisterAsync(Case, data);
+await AiUsageViewModelCases.RegisterAsync(Case, data);
 
 await Case("Public testing grants every tool without inventing a paid entitlement", async () =>
 {
@@ -270,7 +271,7 @@ await Case("Unsigned evaluation update check gives manual guidance without savin
     await vm.InitializeAsync();
     var originalFiles = Directory.GetFiles(data).ToDictionary(path => path, File.ReadAllBytes);
     var writes = store.Writes;
-    const string guidance = "Notchling 999.0.0 is available. This evaluation uses manual updates; open Release page to download its installer.";
+    const string guidance = "Notchling 999.0.0 is available. In-app installation unavailable: its release integrity could not be verified. The release page offers manual downloads.";
     var updateNotifications = new List<string>();
     vm.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(vm.UpdateStatus)) updateNotifications.Add(vm.UpdateStatus); };
     store.FailWrites = true;

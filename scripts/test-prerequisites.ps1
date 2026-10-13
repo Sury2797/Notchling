@@ -38,8 +38,8 @@ if (Test-Path -LiteralPath $fixtureLog) { Remove-Item -LiteralPath $fixtureLog -
 # The same packaged assembly is loaded by Unit and real recovery fixtures.
 # Its architecture query runs before any test substitutes package responses.
 Import-SetupNativeInterop
-if ((Get-PowerShellProcessArchitecture) -ne (Get-NativeWindowsArchitecture)) {
-    throw 'The prerequisite fixture must use native Windows PowerShell.'
+if (-not (Test-CompatibleSetupProcess (Get-NativeWindowsArchitecture) (Get-PowerShellProcessArchitecture) ([Environment]::OSVersion.Version.Build))) {
+    throw 'The prerequisite fixture must use native Windows PowerShell or the Windows 10 ARM x86 helper.'
 }
 
 if ($Mode -ne 'Unit') {
@@ -105,7 +105,7 @@ if ($Mode -ne 'Unit') {
         $scope = if ($Mode -eq 'Integration') { 'Actual Microsoft installer execution through the production missing-runtime branch; initial detection forced false. This is not bare Windows 10/11 qualification.' } else { 'Real official download, Microsoft signature verification, resource extraction, manifest validation and package registration after an injected native 0x8007007E. Existing healthy registrations can be reused; this is not bare Windows 10/11 qualification.' }
         $report = [ordered]@{
             mode = $Mode
-            host = ('Windows PowerShell 5.1 native ' + (Get-NativeWindowsArchitecture))
+            host = ('Windows PowerShell 5.1 process ' + (Get-PowerShellProcessArchitecture) + '; native OS ' + (Get-NativeWindowsArchitecture))
             appArchitecture = $AppArchitecture
             baselineDotNetRuntimePresent = $baselineRuntimePresent
             forcedMissingRuntimeBranch = ($Mode -eq 'Integration')
@@ -331,15 +331,41 @@ foreach ($targetArchitecture in @('x64', 'x86', 'arm64')) {
         $file = Get-DotNetRuntimeInstallerFromMetadata (New-RuntimeMetadata) $targetArchitecture
         Assert-Fixture ($file.rid -eq "win-$targetArchitecture" -and $file.name -eq "dotnet-runtime-win-$targetArchitecture.exe" -and $file.hash.Length -eq 128) 'Wrong architecture or missing integrity metadata selected.'
     }
-    Invoke-Fixture "Native Windows 10/11 host policy accepts $targetArchitecture" {
+    Invoke-Fixture "Native Windows host policy accepts $targetArchitecture" {
         Assert-SupportedSetupHost $targetArchitecture $targetArchitecture 19045 ($targetArchitecture -ne 'x86')
-        Assert-SupportedSetupHost $targetArchitecture $targetArchitecture 26100 ($targetArchitecture -ne 'x86')
+        # Windows 11 has no 32-bit OS edition. Its x86 application case is
+        # exercised with a native x64 host below, not an invented x86 OS.
+        if ($targetArchitecture -ne 'x86') {
+            Assert-SupportedSetupHost $targetArchitecture $targetArchitecture 26100 $true
+        }
         Assert-FixtureThrows { Assert-SupportedSetupHost $targetArchitecture $targetArchitecture 19044 ($targetArchitecture -ne 'x86') } 'Windows 10 22H2'
     }
 }
 Invoke-Fixture 'x86 on x64 uses a native 64-bit prerequisite host' {
     Assert-SupportedSetupHost 'x86' 'x64' 19045 $true
+    Assert-SupportedSetupHost 'x86' 'x64' 26100 $true
     Assert-FixtureThrows { Assert-SupportedSetupHost 'x86' 'x64' 19045 $false } 'native Windows PowerShell'
+}
+Invoke-Fixture 'Windows 10 ARM allows its x86 helper for native ARM64 and x86 apps' {
+    Assert-SupportedSetupHost 'arm64' 'arm64' 19045 $false
+    Assert-SupportedSetupHost 'x86' 'arm64' 19045 $false
+    Assert-Fixture (Test-CompatibleSetupProcess 'arm64' 'x86' 19045) 'Windows 10 ARM x86 Framework helper was rejected.'
+    Assert-Fixture (-not (Test-CompatibleSetupProcess 'arm64' 'x64' 19045)) 'Windows 10 ARM accepted an x64 emulated prerequisite helper.'
+    $plan = @(Get-WindowsAppRuntimeArchitecturePlan 'arm64' 'arm64')
+    Assert-Fixture (($plan -join ',') -eq 'arm64,arm64,arm64,arm64') 'The x86 helper changed native ARM64 app runtime selection.'
+}
+Invoke-Fixture 'Windows 11 ARM still requires a native ARM64 prerequisite helper' {
+    Assert-SupportedSetupHost 'arm64' 'arm64' 22000 $true
+    Assert-Fixture (Test-CompatibleSetupProcess 'arm64' 'arm64' 22000) 'Windows 11 ARM native helper was rejected.'
+    Assert-Fixture (-not (Test-CompatibleSetupProcess 'arm64' 'x86' 22000)) 'Windows 11 ARM accepted the Windows 10-only x86 fallback.'
+    Assert-Fixture (-not (Test-CompatibleSetupProcess 'arm64' 'x64' 26100)) 'Windows 11 ARM accepted x64 emulated PowerShell.'
+    Assert-FixtureThrows { Assert-SupportedSetupHost 'arm64' 'arm64' 22000 $false } 'native Windows PowerShell'
+}
+Invoke-Fixture 'Windows 10 ARM fallback does not relax other OS or architecture guards' {
+    Assert-Fixture (-not (Test-CompatibleSetupProcess 'arm64' 'x86' 19044)) 'Older Windows ARM build accepted the fallback.'
+    Assert-Fixture (-not (Test-CompatibleSetupProcess 'x64' 'x86' 19045)) 'x64 Windows accepted an emulated prerequisite host.'
+    Assert-Fixture (-not (Test-CompatibleSetupProcess 'x86' 'arm64' 19045)) 'x86 Windows accepted an ARM64 prerequisite host.'
+    Assert-FixtureThrows { Assert-SupportedSetupHost 'x64' 'arm64' 19045 $false } 'does not match'
 }
 Invoke-Fixture 'ARM64 installer cannot run on an x64 PC' {
     Assert-FixtureThrows { Assert-SupportedSetupHost 'arm64' 'x64' 26100 $true } 'does not match'
@@ -567,6 +593,6 @@ Invoke-Fixture 'Offline setup returns failure, identifies the phase, and writes 
     Assert-Fixture ($resultText.Contains($fixtureLog)) 'Failure did not identify the diagnostic log.'
 }
 
-[ordered]@{ mode = $Mode; host = ('Windows PowerShell 5.1 native ' + (Get-NativeWindowsArchitecture)); appArchitecture = $AppArchitecture; passed = $script:passed.Count; tests = @($script:passed); scope = 'Executable fixture cases; runtime/network/process responses are doubled. No installers run in Unit mode.' } |
+[ordered]@{ mode = $Mode; host = ('Windows PowerShell 5.1 process ' + (Get-PowerShellProcessArchitecture) + '; native OS ' + (Get-NativeWindowsArchitecture)); appArchitecture = $AppArchitecture; passed = $script:passed.Count; tests = @($script:passed); scope = 'Executable fixture cases; runtime/network/process responses are doubled. No installers run in Unit mode.' } |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'unit.json') -Encoding UTF8
 Write-Host "PASS: $($script:passed.Count) prerequisite fixture cases."

@@ -156,6 +156,7 @@ var
   ResultText: AnsiString;
   Parameters: String;
   PowerShellPath: String;
+  WindowsVersion: TWindowsVersion;
 begin
   Result := '';
   if CheckForMutexes('Notch.Desktop.Running') then begin
@@ -169,7 +170,13 @@ begin
   Parameters := '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
     ExpandConstant('{tmp}\install-prerequisites.ps1') + '" -Architecture {#AppArchitecture} -NativeInteropPath "' +
     ExpandConstant('{tmp}\Notchling.Setup.Interop.dll') + '" -ResultPath "' + ResultFile + '"';
-  if IsWin64 and not Is64BitInstallMode then
+  GetWindowsVersionEx(WindowsVersion);
+  // Windows 10 ARM supplies the x86 Windows PowerShell/.NET Framework
+  // helper. App/runtime selection remains ARM64 when installing the ARM64
+  // app; using this helper does not select a 32-bit app or native packages.
+  if IsArm64 and (WindowsVersion.Build < 22000) then
+    PowerShellPath := ExpandConstant('{syswow64}\WindowsPowerShell\v1.0\powershell.exe')
+  else if IsWin64 and not Is64BitInstallMode then
     PowerShellPath := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe')
   else
     PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');

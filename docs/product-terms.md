@@ -1,12 +1,12 @@
 # Notchling application terms
 
-**Public-testing policy and draft commercial terms — 9 October 2026 UTC.** All catalog tools are enabled without a subscription during the current public-testing phase. Billing is paused until the owner chooses a commercial release, completes its configuration and publishes the required identity and consumer disclosures. This document is not an active checkout or a claim that legal review has occurred.
+**Public-testing policy and draft commercial terms — 13 October 2026.** All catalog tools are enabled without a subscription during the current public-testing phase. Billing is paused until the owner chooses a commercial release, completes its configuration and publishes the required identity and consumer disclosures. This document is not an active checkout or a claim that legal review has occurred.
 
 Contact the project maintainer through [GitHub Issues](https://github.com/Sury2797/Notchling/issues). The source is governed separately by [LICENSE](../LICENSE). Official application usage follows the applicable product terms; a subscription does not transfer source ownership, permit resale or grant redistribution rights.
 
 ## Public testing
 
-Official public-testing builds may be used for evaluation without a subscription, with the supported catalog unlocked for everyone. There is no owner-only unlock and no automatic conversion to a paid subscription. Local tools require no application account; optional providers, imported files and Windows permissions still require their own setup. The unlocked Weather panel does not supply an undeployed licensed service.
+Official public-testing builds may be used for evaluation without a subscription, with the supported catalog unlocked for everyone. There is no owner-only unlock and no automatic conversion to a paid subscription. Local tools require no application account; optional providers, imported files and Windows permissions still require their own setup. The v0.4.14 AI usage tool reads supported local CLI metadata; it does not supply AI credits or query account allowance that its source does not provide. In-app evaluation updates require explicit acceptance of an official unsigned release; integrity checks do not make it publisher-signed. The unlocked Weather panel does not supply an undeployed licensed service.
 
 The testing phase is separate from purchased Premium status. It does not create, alter or bypass signed subscription proofs. Features and future editions may change in later releases; this permission does not promise permanent free access to every future version, ownership, resale or redistribution rights. Preserve independent backups.
 

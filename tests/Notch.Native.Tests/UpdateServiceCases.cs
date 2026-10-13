@@ -32,15 +32,31 @@ internal static class UpdateServiceCases
                 .Select(arch => new { architecture = arch, installerUrl = AssetUrl(arch: arch), sha256 = Hash, sizeBytes = Payload.Length }).ToArray() });
     private static WindowsUpdateService Service(HttpClient http, bool signed = false, Architecture arch = Architecture.X64,
         Func<string, byte[]?>? installerPublisher = null, TimeSpan? timeout = null, int build = 19045, Version? version = null,
-        Func<byte[]?>? installedPublisher = null)
+        Func<byte[]?>? installedPublisher = null,
+        Func<PreparedUpdate, byte[]?, CancellationToken, Task>? handoff = null)
         => new(http, new WindowsUpdateService.WindowsUpdateEnvironment(version ?? new(0, 3, 4), arch, build, true,
-            installedPublisher ?? (() => signed ? Publisher : null), installerPublisher ?? (_ => Publisher)), timeout);
+            installedPublisher ?? (() => signed ? Publisher : null), installerPublisher ?? (_ => Publisher), handoff), timeout);
     private static HttpResponseMessage Reply(byte[] bytes, HttpStatusCode status = HttpStatusCode.OK)
         => new(status) { Content = new ByteArrayContent(bytes) };
     private static HttpClient Client(DelegateHandler handler) => new(handler) { Timeout = Timeout.InfiniteTimeSpan };
     private static AvailableUpdate Update(string version = "0.4.0", string arch = "x64", string? hash = null, long? size = null)
         => new(version, AssetUrl(version, arch), hash ?? Hash, size ?? Payload.Length, 19045, arch);
     private static void Remove(PreparedUpdate prepared) => Directory.Delete(Path.GetDirectoryName(prepared.InstallerPath)!, true);
+
+    private static readonly string SourceCommit = new('a', 40);
+    private static object PinnedRelease(string version = "0.4.0", string arch = "x64", string? digest = null,
+        long assetId = 501, bool immutable = false)
+        => new { id = 101, immutable, draft = false, prerelease = true, tag_name = "notchling-evaluation-" + version,
+            html_url = Repo + "/releases/tag/notchling-evaluation-" + version, body = "A real release note from the official source.",
+            assets = new[] { new { id = assetId, name = AssetUrl(version, arch, true).Split('/')[^1],
+                browser_download_url = AssetUrl(version, arch, true), size = Payload.Length, state = "uploaded", digest = digest ?? "sha256:" + Hash } } };
+    private static byte[] SourceReference(string commit = "", string type = "commit")
+        => JsonSerializer.SerializeToUtf8Bytes(new { @ref = "refs/tags/notchling-evaluation-0.4.0", @object = new { type, sha = commit == "" ? SourceCommit : commit } });
+    private static HttpResponseMessage EvaluationResponse(HttpRequestMessage request, object? release = null, string? commit = null)
+        => request.RequestUri!.Host == "github.com" ? Reply(Payload)
+            : request.RequestUri.AbsolutePath.Contains("/git/ref/") ? Reply(SourceReference(commit ?? SourceCommit))
+            : request.RequestUri.AbsolutePath.EndsWith("/releases/101") ? Reply(JsonSerializer.SerializeToUtf8Bytes(release ?? PinnedRelease()))
+            : Reply(Releases(release ?? PinnedRelease()));
 
     public static async Task<int> RunAsync()
     {
@@ -312,6 +328,76 @@ internal static class UpdateServiceCases
             await Reject<InvalidDataException>(() => service.OpenInstallerAsync(new("0.4.0", Path.Combine(Path.GetTempPath(), "arbitrary.exe"), Hash)));
             var prepared = await service.DownloadAsync(Update());
             try { await File.WriteAllBytesAsync(prepared.InstallerPath, [1, 2]); await Reject<InvalidDataException>(() => service.OpenInstallerAsync(prepared)); }
+            finally { Remove(prepared); }
+        });
+        await Case("official evaluations pin real digest release asset and tag commit without requiring immutability", async () =>
+        {
+            using var http = Client(new((request, _) => Task.FromResult(EvaluationResponse(request))));
+            var handoffs = 0;
+            var service = Service(http, handoff: (prepared, publisher, _) =>
+            {
+                Require(prepared.Trust == UpdateTrustPolicy.OfficialUnsignedEvaluation && publisher is null, "Unsigned evaluation impersonated a trusted publisher.");
+                handoffs++; return Task.CompletedTask;
+            });
+            var release = await service.DiscoverAsync();
+            Require(release is { CanInstallVerified: true, RequiresEvaluationConsent: true, VerifiedUpdate.Provenance.SourceCommit: not null }
+                && release.VerifiedUpdate.Provenance == new ReleaseProvenance(101, 501, "notchling-evaluation-0.4.0", SourceCommit)
+                && release.ReleaseNotes.Contains("real release note"), "Discovery did not bind the explicit evaluation trust policy to source metadata.");
+            var prepared = await service.DownloadAsync(release!.VerifiedUpdate!);
+            try { await service.OpenInstallerAsync(prepared); Require(handoffs == 1, "A fully checked official evaluation did not reach the install handoff."); }
+            finally { Remove(prepared); }
+        });
+        await Case("evaluation installation keeps the running x64 x86 or ARM64 architecture", async () =>
+        {
+            foreach (var (architecture, name) in new[] { (Architecture.X64, "x64"), (Architecture.X86, "x86"), (Architecture.Arm64, "arm64") })
+            {
+                var handoffs = 0;
+                using var http = Client(new((request, _) => Task.FromResult(EvaluationResponse(request, PinnedRelease(arch: name)))));
+                var service = Service(http, arch: architecture, handoff: (prepared, _, _) =>
+                { Require(prepared.Architecture == name, "Evaluation handoff switched application architecture."); handoffs++; return Task.CompletedTask; });
+                var release = await service.DiscoverAsync();
+                Require(release?.VerifiedUpdate?.InstallerUrl == AssetUrl(arch: name, evaluation: true), "Evaluation discovery selected the host OS instead of running application architecture.");
+                var prepared = await service.DownloadAsync(release!.VerifiedUpdate!);
+                try { await service.OpenInstallerAsync(prepared); Require(handoffs == 1, "Architecture-matched evaluation did not reach handoff."); }
+                finally { Remove(prepared); }
+            }
+        });
+        await Case("evaluation wrong architecture missing digest and undiscovered provenance never execute", async () =>
+        {
+            using var http = Client(new((request, _) => Task.FromResult(EvaluationResponse(request, PinnedRelease(arch: "arm64")))));
+            Require(await Service(http).DiscoverAsync() is null, "The wrong evaluation architecture was offered.");
+            using var invalid = Client(new((request, _) => Task.FromResult(EvaluationResponse(request, PinnedRelease(digest: "sha256:bad")))));
+            Require(await Service(invalid).DiscoverAsync() is { CanInstallVerified: false, VerifiedUpdate: null }, "A missing real digest authorized execution.");
+            var injected = new AvailableUpdate("0.4.0", AssetUrl(evaluation: true), Hash, Payload.Length, 19045, "x64",
+                UpdateTrustPolicy.OfficialUnsignedEvaluation, new(101, 501, "notchling-evaluation-0.4.0", SourceCommit));
+            await Reject<InvalidDataException>(() => Service(invalid).DownloadAsync(injected));
+        });
+        await Case("changed evaluation artifact or source pin is rejected before download and before install", async () =>
+        {
+            foreach (var changedCommit in new[] { false, true })
+            {
+                var changed = false; var handoffs = 0;
+                using var http = Client(new((request, _) => Task.FromResult(EvaluationResponse(request,
+                    changed && !changedCommit ? PinnedRelease(digest: "sha256:" + new string('0', 64)) : PinnedRelease(),
+                    changed && changedCommit ? new string('b', 40) : SourceCommit))));
+                var service = Service(http, handoff: (_, _, _) => { handoffs++; return Task.CompletedTask; });
+                var release = await service.DiscoverAsync(); changed = true;
+                await Reject<InvalidDataException>(() => service.DownloadAsync(release!.VerifiedUpdate!));
+                changed = false; var prepared = await service.DownloadAsync(release!.VerifiedUpdate!); changed = true;
+                try { await Reject<InvalidDataException>(() => service.OpenInstallerAsync(prepared)); Require(handoffs == 0, "Changed provenance reached installer handoff."); }
+                finally { Remove(prepared); }
+            }
+        });
+        await Case("signed installs cannot fall back to unsigned and failed handoffs can be retried", async () =>
+        {
+            var signed = false; var handoffs = 0;
+            using var http = Client(new((request, _) => Task.FromResult(EvaluationResponse(request))));
+            var service = Service(http, installedPublisher: () => signed ? Publisher : null,
+                handoff: (_, _, _) => ++handoffs == 1 ? Task.FromException(new IOException("Helper startup failed")) : Task.CompletedTask);
+            var release = await service.DiscoverAsync(); signed = true;
+            await Reject<InvalidOperationException>(() => service.DownloadAsync(release!.VerifiedUpdate!));
+            signed = false; var prepared = await service.DownloadAsync(release!.VerifiedUpdate!);
+            try { await Reject<IOException>(() => service.OpenInstallerAsync(prepared)); await service.OpenInstallerAsync(prepared); Require(handoffs == 2, "A failed helper launch consumed prepared update recovery."); }
             finally { Remove(prepared); }
         });
         Console.WriteLine($"PASS: {passed} updater regression cases (HTTP/publisher doubles; no installer executed).");

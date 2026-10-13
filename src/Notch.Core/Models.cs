@@ -1,6 +1,6 @@
 namespace Notch.Core;
 
-public enum ModuleId { Home, Media, Revenue, Analytics, Coding, Calendar, Weather, Focus, Shelf, Clipboard, Servers, System, ScreenTime, Notes, Scratchpad, Files, Links, Emoji, Sounds, Convert, Awake, Settings, Tools }
+public enum ModuleId { Home, Media, Revenue, Analytics, Coding, Calendar, Weather, Focus, Shelf, Clipboard, Servers, System, ScreenTime, Notes, Scratchpad, Files, Links, Emoji, Sounds, Convert, Awake, Settings, Tools, AiUsage }
 public enum OverlayMode { Collapsed, Expanded, Activity }
 public enum ActivityKind { Sale, Meeting, Agent, Focus, Information }
 public enum RevenueProvider { Stripe, Polar, Dodo, AdSense }
@@ -64,6 +64,7 @@ public static class ModuleCatalog
         new(ModuleId.Revenue,"Revenue","\uE8C7",900,410,"Payments and revenue, at a glance."),
         new(ModuleId.Analytics,"Analytics","\uE9D9",900,410,"See who’s on your site right now."),
         new(ModuleId.Coding,"Coding","\uE943",900,410,"Local coding activity, without guesswork."),
+        new(ModuleId.AiUsage,"AI usage","\uE945",760,470,"Real local Claude and Codex usage, with source and freshness."),
         new(ModuleId.Calendar,"Calendar","\uE787",760,410,"Your schedule and reminders, one hover away."),
         new(ModuleId.Weather,"Weather","\uE9BD",760,410,"Hourly and seven-day forecasts, instantly."),
         new(ModuleId.Focus,"Focus","\uE916",790,320,"Pomodoro, countdowns, stopwatch and hydration."),
@@ -81,8 +82,9 @@ public static class ModuleCatalog
         new(ModuleId.Convert,"Convert","\uE8AB",620,330,"A small, precise conversion tool."),
         new(ModuleId.Awake,"Awake","\uE7F4",620,330,"Keep the display awake when you need it."),
         new(ModuleId.Settings,"Settings","\uE713",790,470,"Make the notch your own."),
-        new(ModuleId.Tools,"All tools","\uECA5",900,460,"21 tools. One small notch."),
+        new(ModuleId.Tools,"All tools","\uECA5",900,460,"22 tools. One small notch."),
     ];
     public static ModuleDefinition Get(ModuleId id) => All.First(module => module.Id == id);
+    public static int ToolCount => All.Count(module => module.Id is not ModuleId.Settings and not ModuleId.Tools);
     public static readonly ModuleId[] Toolbar = [ModuleId.Home,ModuleId.Media,ModuleId.Revenue,ModuleId.Analytics,ModuleId.Coding,ModuleId.Focus,ModuleId.Calendar,ModuleId.Weather,ModuleId.Shelf,ModuleId.Clipboard,ModuleId.Tools];
 }

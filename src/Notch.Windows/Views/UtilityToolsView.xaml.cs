@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using Notch.Core;
 using Notch.Windows.ViewModels;
 using Notch.Windows.Interop;
+using Notch.Windows.Services;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -32,6 +33,7 @@ public sealed partial class UtilityToolsView : UserControl
     private bool _invalidDrafts;
     private TextBlock? _saveStateText;
     private TextBlock? _updateStatusText;
+    private TextBlock? _updateVersionText, _updateReleaseNotesText, _updateTrustText;
     private Button? _checkUpdatesButton, _installUpdateButton, _cancelUpdateButton;
     private StackPanel? _notificationPanel;
     private TextBlock? _screenTimeText;
@@ -94,6 +96,8 @@ public sealed partial class UtilityToolsView : UserControl
         else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName == nameof(MainViewModel.SubscriptionStatus) && _subscriptionStatusText is not null) _subscriptionStatusText.Text = _vm.SubscriptionStatus;
         else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName is nameof(MainViewModel.IsCheckingUpdates) or nameof(MainViewModel.IsInstallingUpdate)
             or nameof(MainViewModel.CanInstallAvailableUpdate) or nameof(MainViewModel.HasAvailableUpdate)) UpdateUpdateControls();
+        else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName is nameof(MainViewModel.AvailableUpdateVersion)
+            or nameof(MainViewModel.UpdateReleaseNotes) or nameof(MainViewModel.UpdateTrustDescription)) UpdateReleaseDetails();
         else if (_vm.SelectedModule == ModuleId.Settings && args.PropertyName is nameof(MainViewModel.ConnectionStatuses) or nameof(MainViewModel.IsCheckingConnections)) UpdateConnectionStatus();
     }
     private TextBlock Text(string value, double size = 13, bool muted = false) => new()
@@ -296,13 +300,14 @@ public sealed partial class UtilityToolsView : UserControl
         _responsiveLayouts.Clear();
         _settingsToggles.Clear();
         _updateStatusText = null;
+        _updateVersionText = _updateReleaseNotesText = _updateTrustText = null;
         _checkUpdatesButton = _installUpdateButton = _cancelUpdateButton = null;
         _notificationPanel = null;
         _subscriptionStatusText = null;
         _connectionRows.Clear(); _checkConnectionsButton = null;
         var definition = ModuleCatalog.Get(_vm.SelectedModule);
         Header(definition.Title, _vm.SelectedModule == ModuleId.Tools
-            ? _vm.IsPublicTesting ? "All 21 tools are free during public testing. Choose what you need." : "Choose a tool. Availability and connection requirements are shown below."
+            ? _vm.IsPublicTesting ? $"All {ModuleCatalog.ToolCount} tools are free during public testing. Choose what you need." : "Choose a tool. Availability and connection requirements are shown below."
             : definition.Description);
         switch (_vm.SelectedModule)
         {
@@ -705,18 +710,25 @@ public sealed partial class UtilityToolsView : UserControl
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(_updateStatusText, "UpdateStatus");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(_updateStatusText, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         _checkUpdatesButton = UpdateActionButton("Check for updates", "CheckUpdates", _vm.CheckForUpdatesAsync);
-        _installUpdateButton = UpdateActionButton("Install verified update", "InstallUpdate", _vm.InstallAvailableUpdateAsync, primary: true);
+        _updateVersionText = Text("", 13); _updateVersionText.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+        _updateReleaseNotesText = Text("", 12, true);
+        _updateTrustText = Text("", 11, true);
+        _installUpdateButton = UpdateActionButton("Update and restart", "InstallUpdate", ReviewAndInstallUpdateAsync, primary: true);
         _cancelUpdateButton = UpdateActionButton("Cancel", "CancelUpdate", () => { _vm.CancelUpdateCheck(); return Task.CompletedTask; });
         ContentStack.Children.Add(SettingsDetails("support", "Updates and troubleshooting", "Get updates or reconnect optional Windows services.",
             Toggle("Check for updates daily", "Checks only when Notchling is running. Installation always needs your action.", preferences.CheckForUpdatesAutomatically,
                 value => _vm.Preferences with { CheckForUpdatesAutomatically = value }),
             Row(_checkUpdatesButton, _installUpdateButton, _cancelUpdateButton),
+            _updateVersionText,
             _updateStatusText,
-            Text("Signed updates are verified before installation. Evaluation releases are downloaded from the release page.", 11, true),
+            _updateReleaseNotesText,
+            _updateTrustText,
+            Text("Updates keep your notebook and settings. Download and restart here; the release page is also available for manual installs.", 11, true),
             Button("Release page", () => OpenLink(_vm.UpdateReleasePage)),
             Button("Retry media and clipboard services", _vm.RetryNativeServicesAsync),
             Text("Ctrl + Shift + Space opens Notchling. Esc collapses the panel. You can also reopen it from the Windows tray.", 12, true)));
         UpdateUpdateControls();
+        UpdateReleaseDetails();
         _notificationPanel = new StackPanel { Spacing = 12 };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(_notificationPanel, "RecentNotifications");
         ContentStack.Children.Add(SettingsDetails("notifications", "Recent notifications", "Your last ten notices from this session. Choose a notice to open its tool.", _notificationPanel));
@@ -824,6 +836,46 @@ public sealed partial class UtilityToolsView : UserControl
             _cancelUpdateButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
             _cancelUpdateButton.IsEnabled = busy;
         }
+    }
+    private void UpdateReleaseDetails()
+    {
+        if (_updateVersionText is not null) _updateVersionText.Text = "Installed " + _vm.InstalledUpdateVersion
+            + (_vm.AvailableUpdateVersion is { } version ? " · Available " + version : "");
+        if (_updateReleaseNotesText is not null)
+        {
+            _updateReleaseNotesText.Text = _vm.UpdateReleaseNotes;
+            _updateReleaseNotesText.Visibility = string.IsNullOrWhiteSpace(_vm.UpdateReleaseNotes) ? Visibility.Collapsed : Visibility.Visible;
+        }
+        if (_updateTrustText is not null)
+        {
+            _updateTrustText.Text = _vm.UpdateTrustDescription;
+            _updateTrustText.Visibility = string.IsNullOrWhiteSpace(_vm.UpdateTrustDescription) ? Visibility.Collapsed : Visibility.Visible;
+        }
+    }
+    private async Task ReviewAndInstallUpdateAsync()
+    {
+        if (!_vm.CanInstallAvailableUpdate || HasOpenDialog) return;
+        var accepted = _vm.AvailableUpdateDetails;
+        if (accepted is null) return;
+        var evaluation = accepted.Trust == UpdateTrustPolicy.OfficialUnsignedEvaluation;
+        if (evaluation)
+        {
+            HasOpenDialog = true;
+            try
+            {
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = XamlRoot, Title = "Update Notchling " + accepted.Version + "?",
+                    Content = "This official public-test release is unsigned. Notchling checks its official source and installer integrity before Setup. Your notebook and settings will be kept. The app will close, update and restart.",
+                    PrimaryButtonText = "Update and restart", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close,
+                };
+                if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            }
+            finally { HasOpenDialog = false; }
+        }
+        if (accepted != _vm.AvailableUpdateDetails) return;
+        FlushDrafts();
+        await _vm.InstallAvailableUpdateAsync(allowUnsignedEvaluation: evaluation, acceptedUpdate: accepted);
     }
     private void UpdateConnectionStatus()
     {

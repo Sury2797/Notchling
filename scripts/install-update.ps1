@@ -7,6 +7,15 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+# Load the trusted signature verifier from the executing Windows shell.
+$nativeModules = Join-Path $PSHOME 'Modules'
+Import-Module -Name (Join-Path $nativeModules 'Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
+function Get-FileSha256([string]$Path) {
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '') }
+    finally { $hasher.Dispose(); $stream.Dispose() }
+}
 Add-Type -AssemblyName System.Net.Http
 # Trust is supplied by the installed/signed release, never taken from the remote
 # manifest. The default GitHub stable channel is the only permitted source.
@@ -95,7 +104,7 @@ try {
         if ($outputStream) { $outputStream.Dispose() }; if ($inputStream) { $inputStream.Dispose() }
         if ($reply) { $reply.Dispose() }; $client.Dispose(); $handler.Dispose(); $installerDeadline.Dispose()
     }
-    $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+    $actualHash = (Get-FileSha256 $installer)
     if ($actualHash -ne $asset.sha256) { throw 'Installer SHA-256 verification failed.' }
     $signature = Get-AuthenticodeSignature -LiteralPath $installer
     if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) { throw 'Installer Authenticode signature is invalid or untrusted.' }
@@ -106,6 +115,8 @@ try {
     Write-Output 'Verified update downloaded. Save your work and quit Notchling before continuing in Setup.'
     # Interactive installer retains user control, checks the running-app mutex,
     # uses per-user versioned files, and preserves the existing workspace.
-    Start-Process -FilePath $installer -Wait
+    $setup = Start-Process -FilePath $installer -PassThru -Wait
+    if ($setup.ExitCode -notin @(0, 3010)) { throw "Notchling Setup did not complete (code $($setup.ExitCode)). Your existing workspace is preserved." }
+    Write-Output $(if ($setup.ExitCode -eq 3010) { 'Notchling updated. Restart Windows to finish shared component changes.' } else { 'Notchling Setup completed.' })
 }
 finally { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }

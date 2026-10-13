@@ -108,9 +108,23 @@ function Assert-SupportedSetupHost(
         ($TargetArchitecture -eq 'x64' -and $NativeArchitecture -ne 'x64')) {
         throw "This $TargetArchitecture download does not match your $NativeArchitecture PC. Download the native Notchling installer for your PC."
     }
-    if (($NativeArchitecture -ne 'x86') -ne $Is64BitProcess) {
+    # Windows 10 ARM includes x86 Windows PowerShell/.NET Framework. Native
+    # ARM64 Framework first arrived in 4.8.1; do not reject that existing x86
+    # helper when preparing a native ARM64 app. Native OS/package selection
+    # still comes from IsWow64Process2, not the helper's process bitness.
+    $windows10ArmHelper = $NativeArchitecture -eq 'arm64' -and $WindowsBuild -lt 22000 -and -not $Is64BitProcess
+    if (-not $windows10ArmHelper -and (($NativeArchitecture -ne 'x86') -ne $Is64BitProcess)) {
         throw 'Setup must run the native Windows PowerShell component check. Restart the installer for your PC architecture.'
     }
+}
+
+function Test-CompatibleSetupProcess(
+    [ValidateSet('x64', 'x86', 'arm64')][string]$NativeArchitecture,
+    [ValidateSet('x64', 'x86', 'arm64')][string]$ProcessArchitecture,
+    [int]$WindowsBuild) {
+    return $ProcessArchitecture -eq $NativeArchitecture -or
+        ($NativeArchitecture -eq 'arm64' -and $ProcessArchitecture -eq 'x86' -and
+            $WindowsBuild -ge 19045 -and $WindowsBuild -lt 22000)
 }
 
 function Get-PortableExecutableArchitecture([string]$Path) {
@@ -476,10 +490,13 @@ function Invoke-NotchlingPrerequisites {
         New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
         Write-SetupLog 'Checking Notchling shared runtime prerequisites.'
         $nativeArchitecture = Get-NativeWindowsArchitecture
-        Assert-SupportedSetupHost $Architecture $nativeArchitecture ([Environment]::OSVersion.Version.Build) ([Environment]::Is64BitProcess)
-        if ((Get-PowerShellProcessArchitecture) -ne $nativeArchitecture) {
+        $windowsBuild = [Environment]::OSVersion.Version.Build
+        $processArchitecture = Get-PowerShellProcessArchitecture
+        Assert-SupportedSetupHost $Architecture $nativeArchitecture $windowsBuild ([Environment]::Is64BitProcess)
+        if (-not (Test-CompatibleSetupProcess $nativeArchitecture $processArchitecture $windowsBuild)) {
             throw 'Setup must run the native Windows PowerShell component check, rather than an emulated PowerShell process.'
         }
+        Write-SetupLog "Setup architecture: app=$Architecture; native=$nativeArchitecture; helper=$processArchitecture; Windows build=$windowsBuild."
         # A PowerShell 7 parent can pass its module search path into Windows PowerShell.
         # Import the Windows PowerShell security module explicitly so certificate
         # verification never resolves an incompatible PowerShell 7 binary module.

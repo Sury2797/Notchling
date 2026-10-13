@@ -148,6 +148,13 @@ jobs:
         run: |
           $setup = Get-ChildItem artifacts/installer/*-evaluation-setup.exe | Select-Object -First 1 -ExpandProperty FullName
           ./scripts/qualify-windows-installer.ps1 -SetupPath $setup -AppArchitecture ${{ matrix.arch }} -ReportDirectory artifacts
+      - name: Qualify actual update helper upgrade, graceful shutdown and relaunch
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem artifacts/installer/*-evaluation-setup.exe | Select-Object -First 1 -ExpandProperty FullName
+          $windowsPowerShell = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell/v1.0/powershell.exe'
+          & $windowsPowerShell -NoLogo -NoProfile -NonInteractive -Mta -ExecutionPolicy Bypass -File ./scripts/smoke-windows-update-handoff.ps1 -SetupPath $setup -AppArchitecture ${{ matrix.arch }} -Platform ${{ matrix.platform }} -ReportDirectory artifacts
+          if ($LASTEXITCODE -ne 0) { throw 'Actual updater upgrade/relaunch qualification failed.' }
       - uses: actions/upload-artifact@v6
         with:
           name: notchling-windows-${{ matrix.artifact_suffix }}-installer
@@ -171,6 +178,9 @@ jobs:
             artifacts/windows-smoke.json
             artifacts/windows-ui-smoke.json
             artifacts/windows-shelf-drop.json
+            artifacts/windows-update-handoff.json
+            artifacts/windows-update-result.json
+            artifacts/windows-update-setup.log
             artifacts/installer-smoke.log
             artifacts/installer-ui-smoke.json
             artifacts/installer-ui.log
@@ -217,7 +227,9 @@ jobs:
           cat > evaluation-notes.md <<EOF
           Choose the **x64** setup for most Intel/AMD laptops, **ARM64** for Windows on ARM, or **x86** for 32-bit Windows 10. Download only your app Setup EXE below. No developer SDK or manual dependency setup is required.
 
-          **All 21 tools are free for everyone during public testing.** Checkout is paused. External data still requires provider credentials or optional service setup.
+          **All 22 catalog panels are free for everyone during public testing.** Checkout is paused. External data still requires provider credentials or optional service setup.
+
+          This update adds formatted branded Setup pages, clearer icons and responsive controls, real local Codex/Claude Code usage, and in-app update preparation with safe save/restart. Codex allowance is an observed local quota snapshot, not a live account query; unavailable sources remain clearly labelled.
 
           All three application architectures passed the branded installer and full formatted legal pages, installation, native launch, all-tool navigation, contextual help, hover/typing recovery, real file/image Shelf drops, connection states, credential alignment, notes/Awake, media controls, Pomodoro, scratchpad persistence and uninstall in [cloud CI](https://github.com/$GH_REPO/actions/runs/$NOTCH_EVALUATION_RUN). Source: $NOTCH_EVALUATION_REVISION.
 

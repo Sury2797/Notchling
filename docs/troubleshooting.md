@@ -40,14 +40,24 @@ If the process actually exits, share the final startup-log lines and the action 
 
 Evaluation installers are unsigned. In v0.2.11 and later, **Settings → Updates and troubleshooting → Check for updates** explains manual updates without displaying a signing error. Open **Release page**, download the newest evaluation Setup EXE and run it over the existing installation; your local notebook is retained. Check the app version in Settings after reopening.
 
-The automatic stable updater is reserved for signed releases. It continues to verify the installed publisher, the manifest and installer integrity; evaluation guidance does not bypass those protections.
+Signed production updates continue to verify the installed publisher, manifest and installer integrity. Older evaluation builds use the manual flow above; v0.4.14 adds the separate accepted unsigned-evaluation flow below without weakening signed-install protections.
 
-In the **v0.4.13 source candidate**, **Check for updates** reads official release metadata and offers the compatible release page. The optional **Check for updates daily** switch is off by default. Update availability appears quietly in the compact indicator and Recent notifications; it does not replace your current tool. A failed online check leaves the manual release link available. Cancel stops pending work. Evaluation builds do not download or execute an installer through this action; **Install verified update** becomes available only with trusted signed update eligibility.
+In the **v0.4.14 source candidate**, **Check for updates** discovers compatible official releases. **Update and restart** requires acceptance of the exact unsigned evaluation and verifies its API asset digest/size, release identity and pinned source commit before installation. Signed installed apps cannot switch to unsigned evaluations. Daily checks default off; availability stays in the compact indicator/history without replacing your tool. Cancel stops preparation or a pending restart. Missing integrity metadata leaves the manual Release page fallback available. The new handoff still needs its own Windows qualification.
 
 ## Compact media shows a browser logo
 
-In v0.4.13 source, a source logo appears in the compact strip and the actual cover/video thumbnail stays in expanded Media. If Windows identifies only Chrome, Edge or Firefox, the browser logo is the available automatic identity. Use the Media source menu to select YouTube or another supported provider for that track. The tooltip marks the selection, and a changed track/session clears it. This does not change the Windows player connection or scan browser tabs.
+In v0.4.14 source, a source logo appears in the compact strip and the actual cover/video thumbnail stays in expanded Media. If Windows identifies only Chrome, Edge or Firefox, the browser logo is the available automatic identity. Use the Media source menu to select YouTube or another supported provider for that track. The tooltip marks the selection, and a changed track/session clears it. This does not change the Windows player connection or scan browser tabs.
 
 ## Choosing an architecture-specific candidate
 
 The published v0.3.4 EXE is x64. The current source configures future x64, x86 and ARM64 installers; check **Settings → System → About → System type** and choose the native architecture after the corresponding release is qualified. A 32-bit x86 app on 64-bit Windows requires its own x86 .NET/runtime packages plus native Windows App Runtime dependencies. Setup checks that mixture. An unrelated installed runtime, a renamed EXE or an extracted app folder does not resolve an architecture mismatch.
+
+## AI usage shows unavailable or stale
+
+In v0.4.14, open AI usage after your supported CLI has written readable local records, then use Refresh. Codex and Claude Code data folders are discovered automatically; account credentials are not read. Missing records, unknown schemas or unsupported providers stay unavailable. Bounded scans can show partial coverage. Codex quotas are the last provider observation and become stale after five minutes or a recorded reset; Claude transcripts cannot supply remaining subscription allowance. A stale reading is not a live account limit. See [the supported locations and limits](../src/Notch.Core/AiUsage/README.md).
+
+## Update and restart is unavailable or fails
+
+Check for updates again to refresh the exact release identity. In-app evaluation installation requires GitHub's asset digest/size and a pinned canonical release/source commit, followed by your explicit acceptance of the unsigned update. Feed-only discovery can show availability but cannot authorize Setup. Signed installs require the existing trusted publisher and cannot switch to unsigned evaluation updates.
+
+Save errors keep Notchling open and prevent installation. Cancel stops preparation or the pending restart; Setup that has already begun reports its own result. On relaunch, Settings shows the latest local result. Update diagnostics are in `%LOCALAPPDATA%\Notchling\Updates\setup-update.log`; do not delete your notebook to repair an update. The v0.4.14 handoff is a candidate until its actual Windows fixture passes.

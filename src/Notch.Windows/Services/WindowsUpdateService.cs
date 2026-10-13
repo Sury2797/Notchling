@@ -9,8 +9,13 @@ using System.Xml.Linq;
 
 namespace Notch.Windows.Services;
 
-public sealed record AvailableUpdate(string Version, string InstallerUrl, string Sha256, long SizeBytes, int MinimumWindowsBuild, string Architecture = "x64");
-public sealed record PreparedUpdate(string Version, string InstallerPath, string Sha256, string Architecture = "x64");
+public enum UpdateTrustPolicy { SignedPublisher, OfficialUnsignedEvaluation }
+public sealed record ReleaseProvenance(long ReleaseId, long AssetId, string Tag, string SourceCommit, bool Immutable = false);
+public sealed record AvailableUpdate(string Version, string InstallerUrl, string Sha256, long SizeBytes, int MinimumWindowsBuild,
+    string Architecture = "x64", UpdateTrustPolicy Trust = UpdateTrustPolicy.SignedPublisher, ReleaseProvenance? Provenance = null);
+public sealed record PreparedUpdate(string Version, string InstallerPath, string Sha256, string Architecture = "x64",
+    UpdateTrustPolicy Trust = UpdateTrustPolicy.SignedPublisher, ReleaseProvenance? Provenance = null, long SizeBytes = 0);
+public sealed record UpdateInstallationResult(string State, string Version, string Architecture, string Message, DateTimeOffset CheckedAtUtc, int? InstallerExitCode);
 public enum UpdateChannel { Stable, Evaluation }
 public enum UpdateDownloadStage { Downloading, Verifying, Ready }
 public sealed record UpdateDownloadProgress(UpdateDownloadStage Stage, long ReceivedBytes, long TotalBytes)
@@ -18,7 +23,14 @@ public sealed record UpdateDownloadProgress(UpdateDownloadStage Stage, long Rece
     public double Fraction => TotalBytes > 0 ? Math.Clamp((double)ReceivedBytes / TotalBytes, 0, 1) : 0;
 }
 public sealed record ReleaseUpdate(string Version, string ReleasePageUrl, string Architecture, UpdateChannel Channel,
-    bool CanInstallVerified, AvailableUpdate? VerifiedUpdate);
+    bool CanInstallVerified, AvailableUpdate? VerifiedUpdate, string ReleaseNotes = "")
+{
+    public bool RequiresEvaluationConsent => VerifiedUpdate?.Trust == UpdateTrustPolicy.OfficialUnsignedEvaluation;
+    public string TrustDescription => RequiresEvaluationConsent
+        ? "Unsigned public evaluation from the official GitHub repository. Release, source commit, installer size and SHA-256 are checked again before Setup. This is not publisher signing."
+        : CanInstallVerified ? "Installer integrity and the trusted installed publisher are verified before Setup."
+        : "In-app installation needs an official evaluation digest and pinned source commit, or a trusted signed publisher.";
+}
 
 public interface IWindowsUpdateService
 {
@@ -28,11 +40,16 @@ public interface IWindowsUpdateService
     Task<PreparedUpdate> DownloadAsync(AvailableUpdate update, CancellationToken cancellationToken = default);
     Task<PreparedUpdate> DownloadAsync(AvailableUpdate update, IProgress<UpdateDownloadProgress>? progress, CancellationToken cancellationToken = default);
     Task OpenInstallerAsync(PreparedUpdate update, CancellationToken cancellationToken = default);
+    void CancelPendingInstallation() { }
+    Task<UpdateInstallationResult?> ReadLastInstallationResultAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult<UpdateInstallationResult?>(null);
 }
 
 /// <summary>
-/// Read-only release discovery for evaluations; signed stable installers additionally
+/// Official release discovery and installation; signed stable installers additionally
 /// require an exact official asset, bounded bytes, SHA-256 and the installed publisher.
+/// An unsigned evaluation can install only an explicitly accepted, source-pinned
+/// official GitHub evaluation release with an API-supplied asset digest.
 /// </summary>
 public sealed class WindowsUpdateService : IWindowsUpdateService
 {
@@ -49,12 +66,43 @@ public sealed class WindowsUpdateService : IWindowsUpdateService
     private readonly Dictionary<string, PreparedUpdate> _prepared = new(StringComparer.OrdinalIgnoreCase);
     private Task<ReleaseUpdate?>? _discoveryFlight;
     private Task<AvailableUpdate?>? _checkFlight;
+    private readonly Dictionary<AvailableUpdate, ReleaseProvenance> _evaluations = [];
+    private string? _pendingHandoffCancelPath;
 
     public WindowsUpdateService(HttpClient http) : this(http, WindowsUpdateEnvironment.Installed, TimeSpan.FromSeconds(20)) { }
     internal WindowsUpdateService(HttpClient http, WindowsUpdateEnvironment environment, TimeSpan? requestTimeout = null)
     {
         _http = http; _environment = environment;
         _requestTimeout = requestTimeout ?? TimeSpan.FromSeconds(20);
+    }
+
+    public void CancelPendingInstallation()
+    {
+        var path = Interlocked.Exchange(ref _pendingHandoffCancelPath, null);
+        if (path is null) return;
+        try { File.WriteAllText(path, "cancel"); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+
+    public async Task<UpdateInstallationResult?> ReadLastInstallationResultAsync(CancellationToken cancellationToken = default)
+    {
+        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Notchling", "Updates", "latest-result.json");
+        try
+        {
+            if (!File.Exists(path)) return null;
+            await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
+            if (file.Length > 32768) return null;
+            using var bytes = new MemoryStream();
+            var buffer = new byte[4096]; int count;
+            while ((count = await file.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+            { if (bytes.Length + count > 32768) return null; bytes.Write(buffer, 0, count); }
+            var result = JsonSerializer.Deserialize<UpdateInstallationResult>(bytes.ToArray(), JsonOptions);
+            if (result is null || result.State is not ("WaitingForApp" or "Installing" or "Completed" or "Failed" or "Cancelled")
+                || result.Architecture != ArchitectureName || result.Message is null or { Length: > 1000 }
+                || result.CheckedAtUtc > DateTimeOffset.UtcNow.AddMinutes(5) || result.CheckedAtUtc < DateTimeOffset.UtcNow.AddDays(-30)) return null;
+            _ = ParseVersion(result.Version);
+            return result;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidDataException) { return null; }
     }
 
     public async Task<bool> CanVerifyPublisherAsync(CancellationToken cancellationToken = default)
@@ -148,7 +196,7 @@ public sealed class WindowsUpdateService : IWindowsUpdateService
         { throw new TimeoutException("The update check timed out. Try again or open the release page.", error); }
     }
 
-    private Task<ReleaseUpdate?> DiscoverApiAsync(byte[] bytes, CancellationToken token)
+    private async Task<ReleaseUpdate?> DiscoverApiAsync(byte[] bytes, CancellationToken token)
     {
         using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 16 });
         if (document.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException("The release response is invalid.");
@@ -168,15 +216,100 @@ public sealed class WindowsUpdateService : IWindowsUpdateService
                 continue;
             var expected = InstallerUrl(version, ArchitectureName, releaseChannel);
             var expectedName = expected[(expected.LastIndexOf('/') + 1)..];
-            var compatible = assets.EnumerateArray().Any(asset => asset.ValueKind == JsonValueKind.Object && asset.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String
+            var compatibleAsset = assets.EnumerateArray().FirstOrDefault(asset => asset.ValueKind == JsonValueKind.Object && asset.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String
                 && name.GetString() == expectedName && asset.TryGetProperty("browser_download_url", out var uri) && uri.ValueKind == JsonValueKind.String
                 && uri.GetString() == expected && asset.TryGetProperty("size", out var size) && size.ValueKind == JsonValueKind.Number && size.TryGetInt64(out var count)
                 && count > 0 && count <= MaximumInstallerBytes
                 && asset.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.String && state.GetString() == "uploaded");
-            if (compatible && ParseVersion(version) > CurrentVersion && (newest is null || ParseVersion(version) > ParseVersion(newest.Version)))
-                newest = new(version, Repository + "/releases/tag/" + tag, ArchitectureName, releaseChannel, false, null);
+            if (compatibleAsset.ValueKind == JsonValueKind.Object && ParseVersion(version) > CurrentVersion
+                && (newest is null || ParseVersion(version) > ParseVersion(newest.Version)))
+            {
+                AvailableUpdate? evaluation = null;
+                if (releaseChannel == UpdateChannel.Evaluation && TryEvaluationAsset(release, compatibleAsset, version, tag, out var asset))
+                {
+                    var commit = await ReadTagCommitAsync(tag, token).ConfigureAwait(false);
+                    evaluation = asset with { Provenance = asset.Provenance! with { SourceCommit = commit } };
+                    lock (_evaluations) _evaluations[evaluation] = evaluation.Provenance!;
+                }
+                var notes = release.TryGetProperty("body", out var body) && body.ValueKind == JsonValueKind.String
+                    ? LimitNotes(body.GetString()) : "";
+                newest = new(version, Repository + "/releases/tag/" + tag, ArchitectureName, releaseChannel,
+                    evaluation is not null, evaluation, notes);
+            }
         }
-        return Task.FromResult(newest);
+        return newest;
+    }
+
+    private bool TryEvaluationAsset(JsonElement release, JsonElement asset, string version, string tag, out AvailableUpdate update)
+    {
+        update = null!;
+        if (!release.TryGetProperty("id", out var releaseId) || (releaseId.ValueKind != JsonValueKind.Number || !releaseId.TryGetInt64(out var releaseNumber)) || releaseNumber <= 0
+            || !asset.TryGetProperty("id", out var assetId) || (assetId.ValueKind != JsonValueKind.Number || !assetId.TryGetInt64(out var assetNumber)) || assetNumber <= 0
+            || !asset.TryGetProperty("digest", out var digest) || digest.ValueKind != JsonValueKind.String
+            || digest.GetString() is not { } digestText || !digestText.StartsWith("sha256:", StringComparison.Ordinal)
+            || digestText.Length != 71 || !digestText[7..].All(Uri.IsHexDigit)) return false;
+        update = new(version, InstallerUrl(version, ArchitectureName, UpdateChannel.Evaluation), digestText[7..],
+            asset.GetProperty("size").GetInt64(), 19045, ArchitectureName, UpdateTrustPolicy.OfficialUnsignedEvaluation,
+            new(releaseNumber, assetNumber, tag, "", release.TryGetProperty("immutable", out var immutable) && immutable.ValueKind == JsonValueKind.True));
+        return true;
+    }
+    private async Task<string> ReadTagCommitAsync(string tag, CancellationToken token)
+    {
+        var bytes = await ReadBoundedAsync("https://api.github.com/repos/Sury2797/Notchling/git/ref/tags/" + tag,
+            32 * 1024, token).ConfigureAwait(false);
+        using var reference = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 8 });
+        if (reference.RootElement.ValueKind != JsonValueKind.Object
+            || !reference.RootElement.TryGetProperty("ref", out var name) || name.ValueKind != JsonValueKind.String || name.GetString() != "refs/tags/" + tag
+            || !reference.RootElement.TryGetProperty("object", out var target) || target.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("The evaluation source tag did not match the official release.");
+        for (var depth = 0; depth < 3; depth++)
+        {
+            if (!target.TryGetProperty("sha", out var shaProperty) || shaProperty.ValueKind != JsonValueKind.String
+                || !target.TryGetProperty("type", out var typeProperty) || typeProperty.ValueKind != JsonValueKind.String)
+                throw new InvalidDataException("The evaluation source reference is invalid.");
+            var sha = shaProperty.GetString();
+            var type = typeProperty.GetString();
+            if (sha is null || sha.Length != 40 || !sha.All(Uri.IsHexDigit))
+                throw new InvalidDataException("The evaluation source commit is invalid.");
+            if (type == "commit") return sha.ToLowerInvariant();
+            if (type != "tag") break;
+            var annotation = await ReadBoundedAsync("https://api.github.com/repos/Sury2797/Notchling/git/tags/" + sha,
+                32 * 1024, token).ConfigureAwait(false);
+            using var document = JsonDocument.Parse(annotation, new JsonDocumentOptions { MaxDepth = 8 });
+            if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("object", out var annotatedTarget)
+                || annotatedTarget.ValueKind != JsonValueKind.Object) throw new InvalidDataException("The annotated evaluation tag is invalid.");
+            target = annotatedTarget.Clone();
+        }
+        throw new InvalidDataException("The evaluation tag did not resolve to a pinned source commit.");
+    }
+    private static string LimitNotes(string? value)
+    {
+        var bounded = new string((value ?? "").Where(character => !char.IsControl(character) || character is '\n' or '\t').Take(6000).ToArray());
+        // Release notes are text, not executable/rendered HTML. Keep a concise
+        // native summary instead of exposing GitHub Markdown/table syntax.
+        var lines = bounded.Split('\n').Select(line => line.Trim()).Where(line => !line.StartsWith('|') && !line.StartsWith("```", StringComparison.Ordinal));
+        var text = string.Join("\n", lines.Take(12));
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\[([^\]\r\n]{1,200})\]\([^\)\r\n]{1,2048}\)", "$1",
+            System.Text.RegularExpressions.RegexOptions.NonBacktracking);
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"(?m)^#{1,6}\s+", "",
+            System.Text.RegularExpressions.RegexOptions.NonBacktracking);
+        text = text.Replace("**", "", StringComparison.Ordinal).Replace("__", "", StringComparison.Ordinal).Replace("`", "", StringComparison.Ordinal);
+        return text.Length > 1200 ? text[..1200].TrimEnd() + "…" : text;
+    }
+
+    private async Task RequireEvaluationProvenanceAsync(AvailableUpdate update, CancellationToken token)
+    {
+        lock (_evaluations)
+            if (!_evaluations.TryGetValue(update, out var provenance) || provenance != update.Provenance)
+                throw new InvalidDataException("This evaluation was not discovered and pinned by this update operation.");
+        var bytes = await ReadBoundedAsync("https://api.github.com/repos/Sury2797/Notchling/releases/" + update.Provenance!.ReleaseId,
+            1024 * 1024, token).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 16 });
+        // Apply the same strict release/architecture checks used during discovery.
+        var array = System.Text.Encoding.UTF8.GetBytes("[" + document.RootElement.GetRawText() + "]");
+        var refreshed = await DiscoverApiAsync(array, token).ConfigureAwait(false);
+        if (refreshed?.VerifiedUpdate != update)
+            throw new InvalidDataException("The official evaluation release or installer identity changed. Check for updates again.");
     }
 
     private async Task<ReleaseUpdate?> DiscoverFeedAsync(CancellationToken token)
@@ -213,13 +346,22 @@ public sealed class WindowsUpdateService : IWindowsUpdateService
     public async Task<PreparedUpdate> DownloadAsync(AvailableUpdate update, IProgress<UpdateDownloadProgress>? progress, CancellationToken cancellationToken = default)
     {
         ValidateUpdate(update, requireNewer: true);
+        CancelPendingInstallation();
         if (!await _downloadGate.WaitAsync(0, cancellationToken)) throw new InvalidOperationException("An update download is already running.");
         string? directory = null;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromMinutes(5));
         try
         {
-            var publisher = await ReadPublisherKeyAsync(_environment.InstalledPublisherKey, cancellationToken).ConfigureAwait(false)
+            byte[]? publisher;
+            if (update.Trust == UpdateTrustPolicy.OfficialUnsignedEvaluation)
+            {
+                if (await CanVerifyPublisherAsync(deadline.Token).ConfigureAwait(false))
+                    throw new InvalidOperationException("A signed installation cannot switch to unsigned evaluation updates.");
+                await RequireEvaluationProvenanceAsync(update, deadline.Token).ConfigureAwait(false);
+                publisher = null;
+            }
+            else publisher = await ReadPublisherKeyAsync(_environment.InstalledPublisherKey, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("The installed publisher signature cannot be verified.");
             directory = Path.Combine(Path.GetTempPath(), "Notchling.Update", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
@@ -245,10 +387,10 @@ public sealed class WindowsUpdateService : IWindowsUpdateService
             }
             progress?.Report(new(UpdateDownloadStage.Verifying, update.SizeBytes, update.SizeBytes));
             await RequireHashAsync(path, update.Sha256, deadline.Token).ConfigureAwait(false);
-            if (await ReadPublisherKeyAsync(() => _environment.ReadPublisherKey(path), deadline.Token).ConfigureAwait(false) is not { } actual
-                || !CryptographicOperations.FixedTimeEquals(publisher, actual))
+            if (publisher is not null && (await ReadPublisherKeyAsync(() => _environment.ReadPublisherKey(path), deadline.Token).ConfigureAwait(false) is not { } actual
+                || !CryptographicOperations.FixedTimeEquals(publisher, actual)))
                 throw new InvalidDataException("The installer signature does not match the trusted application publisher.");
-            var prepared = new PreparedUpdate(update.Version, path, update.Sha256, update.Architecture);
+            var prepared = new PreparedUpdate(update.Version, path, update.Sha256, update.Architecture, update.Trust, update.Provenance, update.SizeBytes);
             lock (_prepared) _prepared[path] = prepared;
             progress?.Report(new(UpdateDownloadStage.Ready, update.SizeBytes, update.SizeBytes));
             return prepared;
@@ -278,17 +420,82 @@ public sealed class WindowsUpdateService : IWindowsUpdateService
         deadline.CancelAfter(_requestTimeout);
         try
         {
-            var publisher = await ReadPublisherKeyAsync(_environment.InstalledPublisherKey, deadline.Token).ConfigureAwait(false)
+            byte[]? publisher;
+            if (update.Trust == UpdateTrustPolicy.OfficialUnsignedEvaluation)
+            {
+                if (await CanVerifyPublisherAsync(deadline.Token).ConfigureAwait(false))
+                    throw new InvalidOperationException("A signed installation cannot switch to unsigned evaluation updates.");
+                await RequireEvaluationProvenanceAsync(new(update.Version,
+                    InstallerUrl(update.Version, update.Architecture, UpdateChannel.Evaluation), update.Sha256, update.SizeBytes,
+                    19045, update.Architecture, update.Trust, update.Provenance), deadline.Token).ConfigureAwait(false);
+                publisher = null;
+            }
+            else publisher = await ReadPublisherKeyAsync(_environment.InstalledPublisherKey, deadline.Token).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("The application publisher cannot be verified.");
             await RequireHashAsync(update.InstallerPath, update.Sha256, deadline.Token).ConfigureAwait(false);
-            if (await ReadPublisherKeyAsync(() => _environment.ReadPublisherKey(update.InstallerPath), deadline.Token).ConfigureAwait(false) is not { } actual
-                || !CryptographicOperations.FixedTimeEquals(publisher, actual))
+            if (publisher is not null && (await ReadPublisherKeyAsync(() => _environment.ReadPublisherKey(update.InstallerPath), deadline.Token).ConfigureAwait(false) is not { } actual
+                || !CryptographicOperations.FixedTimeEquals(publisher, actual)))
                 throw new InvalidDataException("The prepared installer failed signature verification.");
             deadline.Token.ThrowIfCancellationRequested();
-            Process.Start(new ProcessStartInfo(update.InstallerPath) { UseShellExecute = true });
+            if (_environment.BeginHandoff is { } handoff) await handoff(update, publisher, deadline.Token).ConfigureAwait(false);
+            else await BeginHandoffAsync(update, publisher, deadline.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested)
         { throw new TimeoutException("Installer verification timed out. No installer was opened.", error); }
+    }
+
+    private async Task BeginHandoffAsync(PreparedUpdate update, byte[]? publisher, CancellationToken token)
+    {
+        var current = Environment.ProcessPath ?? throw new InvalidOperationException("The current application path is unavailable.");
+        var currentDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+        if (currentDirectory.Parent?.Name != "app" || currentDirectory.Parent.Parent is not { } installation
+            || Path.GetFileName(current) != "Notchling.Windows.exe"
+            || !string.Equals(Path.GetDirectoryName(current), currentDirectory.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("In-app updates require the installed Notchling application. Development builds can use the release installer.");
+        var packagedScript = Path.Combine(AppContext.BaseDirectory, "Update", "update-handoff.ps1");
+        if (!File.Exists(packagedScript)) throw new FileNotFoundException("The installed update helper is missing. Repair Notchling using its official installer.", packagedScript);
+        var directory = Path.GetDirectoryName(update.InstallerPath)!;
+        CancelPendingInstallation();
+        var nonce = Guid.NewGuid().ToString("N");
+        var script = Path.Combine(directory, "update-handoff-" + nonce + ".ps1");
+        var requestPath = Path.Combine(directory, "request-" + nonce + ".json");
+        var readyPath = Path.Combine(directory, "ready-" + nonce);
+        var cancelPath = Path.Combine(directory, "cancel-" + nonce);
+        File.Copy(packagedScript, script, overwrite: false);
+        var process = Process.GetCurrentProcess();
+        var request = new
+        {
+            SchemaVersion = 1, ParentId = process.Id, ParentStartedUtcTicks = process.StartTime.ToUniversalTime().Ticks,
+            CurrentExecutable = current, ExpectedExecutable = Path.Combine(installation.FullName, "app", update.Version, "Notchling.Windows.exe"),
+            InstallDirectory = installation.FullName, update.Version, update.Architecture, update.InstallerPath,
+            update.Sha256, update.SizeBytes, Trust = update.Trust.ToString(), update.Provenance,
+            PublisherKeySha256 = publisher is null ? null : Convert.ToHexString(publisher), ReadyPath = readyPath, Nonce = nonce,
+        };
+        await File.WriteAllBytesAsync(requestPath, JsonSerializer.SerializeToUtf8Bytes(request), token).ConfigureAwait(false);
+        var start = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"))
+        { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = directory };
+        foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-RequestPath", requestPath })
+            start.ArgumentList.Add(argument);
+        Interlocked.Exchange(ref _pendingHandoffCancelPath, cancelPath);
+        using var worker = Process.Start(start) ?? throw new IOException("The Windows update helper could not be started.");
+        try
+        {
+            while (!File.Exists(readyPath))
+            {
+                token.ThrowIfCancellationRequested();
+                if (worker.HasExited) throw new IOException("The update helper stopped before Setup was ready. The current app remains usable.");
+                await Task.Delay(100, token).ConfigureAwait(false);
+            }
+            if (await File.ReadAllTextAsync(readyPath, token).ConfigureAwait(false) != nonce)
+                throw new InvalidDataException("The update helper readiness response did not match this operation.");
+        }
+        catch
+        {
+            // Cancellation before handoff must not become an installation when
+            // the user happens to close the application later.
+            try { File.WriteAllText(cancelPath, nonce); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     private AvailableUpdate ValidateManifest(Manifest manifest)
@@ -311,10 +518,14 @@ public sealed class WindowsUpdateService : IWindowsUpdateService
     {
         var version = ParseVersion(update.Version);
         if (update.Architecture != ArchitectureName
-            || update.InstallerUrl != InstallerUrl(update.Version, update.Architecture, UpdateChannel.Stable)
-            || update.Sha256.Length != 64 || !update.Sha256.All(Uri.IsHexDigit)
+            || update.InstallerUrl != InstallerUrl(update.Version, update.Architecture, update.Trust == UpdateTrustPolicy.OfficialUnsignedEvaluation ? UpdateChannel.Evaluation : UpdateChannel.Stable)
+            || update.Sha256 is not { Length: 64 } || !update.Sha256.All(Uri.IsHexDigit)
             || update.SizeBytes <= 0 || update.SizeBytes > MaximumInstallerBytes || update.MinimumWindowsBuild < 19045)
             throw new InvalidDataException("Invalid update asset or integrity information.");
+        if (!Enum.IsDefined(update.Trust) || (update.Trust == UpdateTrustPolicy.OfficialUnsignedEvaluation
+            && (update.Provenance is not { ReleaseId: > 0, AssetId: > 0 } || update.Provenance.Tag != "notchling-evaluation-" + update.Version
+                || update.Provenance.SourceCommit is not { Length: 40 } || !update.Provenance.SourceCommit.All(Uri.IsHexDigit))))
+            throw new InvalidDataException("Invalid evaluation provenance.");
         RequireSupportedPlatform();
         if (_environment.WindowsBuild < update.MinimumWindowsBuild) throw new InvalidOperationException("This update requires a newer Windows build.");
         if (requireNewer && version <= CurrentVersion) throw new InvalidDataException("Update installers must be newer than the running application.");
@@ -387,7 +598,8 @@ public sealed class WindowsUpdateService : IWindowsUpdateService
     private static void DeleteDownload(string directory)
     { try { Directory.Delete(directory, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
     internal sealed record WindowsUpdateEnvironment(Version Version, Architecture ProcessArchitecture, int WindowsBuild, bool IsWindows,
-        Func<byte[]?> InstalledPublisherKey, Func<string, byte[]?> ReadPublisherKey)
+        Func<byte[]?> InstalledPublisherKey, Func<string, byte[]?> ReadPublisherKey,
+        Func<PreparedUpdate, byte[]?, CancellationToken, Task>? BeginHandoff = null)
     {
         internal static WindowsUpdateEnvironment Installed => new(typeof(WindowsUpdateService).Assembly.GetName().Version ?? new(0, 0, 0),
             RuntimeInformation.ProcessArchitecture, Environment.OSVersion.Version.Build, OperatingSystem.IsWindows(), ReadInstalledPublisherKey, ReadTrustedPublisherKey);

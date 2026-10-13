@@ -24,6 +24,7 @@ public sealed partial class MainWindow : Window
     private readonly WindowIcon _windowIcon;
     private FeaturedToolsView? _featured;
     private UtilityToolsView? _utilities;
+    private AiUsageView? _aiUsage;
     private readonly Dictionary<ModuleId, Button> _buttons = [];
     private readonly DispatcherTimer _openDelay = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly DispatcherTimer _hoverMonitor = new() { Interval = TimeSpan.FromMilliseconds(200) };
@@ -50,6 +51,14 @@ public sealed partial class MainWindow : Window
         NativeTheme.ApplyCardFeedback(RootGrid);
         _host = new(this);
         _vm = new(DispatcherQueue) { WindowHandle = _host.Handle };
+        _vm.CanReadAiUsage = () => _host.IsVisible;
+        _vm.UpdateInstallerReady += (_, _) => DispatcherQueue.TryEnqueue(async () =>
+        {
+            // Finish the update operation before shutdown awaits pending work.
+            // A cancelled save/close must cancel the prepared external handoff.
+            await QuitAsync();
+            if (!_quitting) _vm.CancelPendingUpdateInstallation();
+        });
         RootGrid.AllowDrop = true;
         RootGrid.DragOver += OnShelfDragOver;
         RootGrid.DragLeave += OnShelfDragLeave;
@@ -78,7 +87,7 @@ public sealed partial class MainWindow : Window
             if (_quitting) return;
             args.Cancel = true;
             if (_closingAttempt) return;
-            if (_tray.IsAvailable) _host.Hide();
+            if (_tray.IsAvailable) Hide();
             else _ = QuitAsync(); // Keep the HWND alive for save/export recovery when no tray is available.
         };
         Activated += (_, args) =>
@@ -140,8 +149,9 @@ public sealed partial class MainWindow : Window
     {
         var menu = new MenuFlyout();
         void Item(string name, Action action) { var item = new MenuFlyoutItem { Text = name }; item.Click += (_, _) => action(); menu.Items.Add(item); }
-        Item("Open " + ProductIdentity.DisplayName, () => Open()); Item("Settings", OpenSettings); Item("Hide " + ProductIdentity.DisplayName, _host.Hide); menu.Items.Add(new MenuFlyoutSeparator()); Item("Quit " + ProductIdentity.DisplayName, () => _ = QuitAsync()); return menu;
+        Item("Open " + ProductIdentity.DisplayName, () => Open()); Item("Settings", OpenSettings); Item("Hide " + ProductIdentity.DisplayName, Hide); menu.Items.Add(new MenuFlyoutSeparator()); Item("Quit " + ProductIdentity.DisplayName, () => _ = QuitAsync()); return menu;
     }
+    private void Hide() { _vm.SetAiUsagePanelVisible(false); _host.Hide(); }
     private void BuildToolbar()
     {
         _pendingModule = null; _switchDelay.Stop();
@@ -223,8 +233,10 @@ public sealed partial class MainWindow : Window
         ExpandedContent.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         ActivityContent.Visibility = activity ? Visibility.Visible : Visibility.Collapsed;
         ToolbarGrid.Visibility = expanded && _host.ToolbarVisible ? Visibility.Visible : Visibility.Collapsed;
-        object? content = !expanded ? null : _vm.SelectedModule is ModuleId.Home or ModuleId.Media or ModuleId.Revenue or ModuleId.Analytics or ModuleId.Coding or ModuleId.Calendar or ModuleId.Weather or ModuleId.Focus
-            ? _featured ??= new(_vm) : _utilities ??= new(_vm);
+        _vm.SetAiUsagePanelVisible(expanded && !_host.IsHidden && _vm.SelectedModule == ModuleId.AiUsage);
+        object? content = !expanded ? null : _vm.SelectedModule == ModuleId.AiUsage ? _aiUsage ??= new(_vm)
+            : _vm.SelectedModule is ModuleId.Home or ModuleId.Media or ModuleId.Revenue or ModuleId.Analytics or ModuleId.Coding or ModuleId.Calendar or ModuleId.Weather or ModuleId.Focus
+                ? _featured ??= new(_vm) : _utilities ??= new(_vm);
         if (!ReferenceEquals(ToolContent.Content, content)) ToolContent.Content = content;
         ToolContent.IsEnabled = _vm.IsReady && !_closingAttempt;
         PinButton.IsEnabled = _vm.IsReady && !_closingAttempt;
@@ -529,7 +541,7 @@ public sealed partial class MainWindow : Window
             if (discard) await _vm.DiscardAndDisposeAsync(); else await _vm.DisposeAsync();
             _vm.PropertyChanged -= OnViewModelChanged;
             NativeTheme.Changed -= OnThemeChanged;
-            _utilities?.Dispose(); _featured?.Dispose(); _tray.Dispose(); _windowIcon.Dispose(); _host.Dispose(); Close(); Application.Current.Exit();
+            _aiUsage?.Dispose(); _utilities?.Dispose(); _featured?.Dispose(); _tray.Dispose(); _windowIcon.Dispose(); _host.Dispose(); Close(); Application.Current.Exit();
         }
         catch (Exception error)
         {

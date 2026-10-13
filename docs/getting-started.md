@@ -1,8 +1,8 @@
 # Getting started with Notchling
 
-Notchling keeps media, focus, notes and everyday controls in a compact notch at the top of your desktop. All 21 tools are free for everyone during public testing; purchasing is paused. Local tools need no application account. Optional connections still need their own player, credential, imported file or configured service.
+Notchling keeps media, focus, notes and everyday controls in a compact notch at the top of your desktop. All 22 tools in the v0.4.14 source are free for everyone during public testing; purchasing is paused. Local tools need no application account. Optional connections still need their own player, credential, imported file or configured service.
 
-The qualified download is listed in the [README](../README.md#try-notchling). The v0.4.13 candidate adds the contextual help and formatted installer described below; its own release qualification is still pending. Check your installed version in Settings.
+The qualified download is listed in the [README](../README.md#try-notchling). The v0.4.14 candidate adds the contextual help and formatted installer described below; its own release qualification is still pending. Check your installed version in Settings.
 
 ## Open and move around
 
@@ -26,16 +26,17 @@ Settings lets you choose a display, adjust placement, switch hover navigation an
 | Media | Start playback in a player that shares Windows media controls, then use Notchling's available transport controls. Unsupported seeking or absent output stays unavailable |
 | Focus | Start a Pomodoro. Pause retains the time left; Reset uses the saved interval. Countdown and Stopwatch maintain their own times |
 | Notes / Scratchpad | Capture text locally. Settings offers Save now, Export notebook and Restore export |
-| Shelf in v0.4.13 source | Drop a file onto the compact notch or use Choose files. Leave Save file copies off to retain a reference; use Paste image for a copied bitmap |
+| Shelf in v0.4.14 source | Drop a file onto the compact notch or use Choose files. Leave Save file copies off to retain a reference; use Paste image for a copied bitmap |
 | Clipboard | Enable capture deliberately in Settings. Up to 50 plain-text entries remain in memory; disabling capture or quitting clears them |
 | System | Inspect device CPU, memory and battery. Volume controls the current Windows audio output |
 | Screen time | Inspect active time for this Notchling session. It starts over at relaunch and keeps no history of window titles or screenshots |
+| AI usage in v0.4.14 | Open the tool to read supported local Codex and Claude Code logs; inspect source, observation time and coverage, or choose Refresh |
 
 Notes and exports are plaintext on your device. Keep independent backups. File shortcuts and Shelf references leave the original files in place. See [Privacy](privacy.md) for storage and request details.
 
 ## Keep files and images on Shelf
 
-The v0.4.13 candidate opens Shelf when a supported file/image drag reaches the compact notch. Drop onto the panel, or select **Choose files**. Local files and folders become references by default; Notchling never moves their originals. **Save file copies** opts into an independent local file. Folder contents are not copied.
+The v0.4.14 candidate opens Shelf when a supported file/image drag reaches the compact notch. Drop onto the panel, or select **Choose files**. Local files and folders become references by default; Notchling never moves their originals. **Save file copies** opts into an independent local file. Folder contents are not copied.
 
 Images supplied as bitmaps and virtual files without a persistent path are saved under `%LOCALAPPDATA%\Notch\shelf-captures`. If a browser supplies only an image link, choose **Copy image** in the browser and then **Paste image** in Shelf. Notchling does not download an image URL. Pasting does not turn on clipboard-history capture.
 
@@ -57,10 +58,20 @@ Calendar and Coding import files you choose. Revenue reports captured payment to
 
 Missing setup stays visible as an empty or unavailable state. It does not become sample data. Sample-data preview is an explicit session choice in Settings; **Exit preview** returns to real sources. Preview does not start audio or perform real release checks.
 
+## Read real AI usage
+
+Open **All tools → AI usage**. The tool automatically finds supported Codex and Claude Code session logs in their own local data folders; it needs neither login nor an API key. Keep the panel open for a refresh every 45 seconds, or use **Refresh**. Collapsing, hiding or leaving it stops scheduled reads.
+
+Tokens are measured from actual recognized records and deduplicated across repeated/copied logs. Codex rate-limit bars are the latest locally recorded provider observations, with reset/freshness labels. A quota becomes stale after five minutes or its recorded reset. Claude Code remaining allowance and other unsupported AI providers stay unavailable. This tool does not query a live account or estimate credits from token counts. Use [Privacy](privacy.md#local-ai-usage) to understand the bounded transcript parsing.
+
 ## Read help and check updates
 
-The v0.4.13 candidate adds small **?** controls beside selected labels. Hover gives a short preview; click or keyboard activation opens the full local explanation. Long explanations scroll, and **Esc** closes them. Home and Settings both offer the Notchling quick guide. Help does not send a network request; opening the separate provider setup link uses your browser.
+The v0.4.14 candidate adds small **?** controls beside selected labels. Hover gives a short preview; click or keyboard activation opens the full local explanation. Long explanations scroll, and **Esc** closes them. Home and Settings both offer the Notchling quick guide. Help does not send a network request; opening the separate provider setup link uses your browser.
 
-**Settings → Updates and troubleshooting → Check for updates** reads official release metadata in the candidate. Evaluation updates remain manual downloads from **Release page**. **Check for updates daily** is off by default and checks only while Notchling is running. Updates do not install automatically or replace the panel you are using.
+In v0.4.14, open **Settings → Updates and troubleshooting → Check for updates**, review the available version and release notes, then choose **Update and restart**. An official unsigned evaluation requires explicit acceptance of that exact update. Download progress and **Cancel** are available. The app verifies the selected architecture, official release/source identity, size and SHA-256; signed production installs additionally require the trusted publisher.
+
+Once verified, Notchling saves successfully, closes normally, installs and reopens without sending you to a release page. A failed save prevents handoff. Update results appear in Settings and notification history on the next launch. If integrity metadata is unavailable, **Release page** remains the manual fallback; it does not bypass in-app verification. This new handoff awaits its own Windows release checks.
+
+**Check for updates daily** is off by default and checks only while Notchling is running. Checking never installs automatically or replaces the panel you are using.
 
 If Setup or the app fails to open, use [Troubleshooting](troubleshooting.md). Preserve your notebook; deleting app data is not an installation repair.

@@ -20,7 +20,7 @@ public enum VisualIconKind
     Links, Emoji, Sounds, Convert, Awake, Settings, Tools, Revenue, Analytics,
     Coding, ChevronLeft, ChevronRight, ChevronDown, Refresh, Play, Pause, Previous, Next,
     Volume, Equalizer, Droplet, CheckCircle, Close, Pin, Notification, Download,
-    Check, Info, Warning, Help,
+    Check, Info, Warning, Help, AiUsage,
 }
 
 /// <summary>
@@ -93,6 +93,7 @@ public sealed class VisualIcon : UserControl
         [VisualIconKind.Info] = "M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M12 11 L12 17 M12 7 L12.1 7",
         [VisualIconKind.Warning] = "M12 3 L22 21 L2 21 Z M12 9 L12 14 M12 17 L12.1 17",
         [VisualIconKind.Help] = "M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M9 9 C9 5.5 15 5.5 15 9 C15 11 12 11 12 14 M12 17 L12.1 17",
+        [VisualIconKind.AiUsage] = "M11 3 L13.5 9.5 L20 12 L13.5 14.5 L11 21 L8.5 14.5 L2 12 L8.5 9.5 Z M20 2 L20 6 M18 4 L22 4",
     };
 
     public VisualIconKind Kind { get => (VisualIconKind)GetValue(KindProperty); set => SetValue(KindProperty, value); }
@@ -134,6 +135,7 @@ public sealed class VisualIcon : UserControl
         ModuleId.Sounds => VisualIconKind.Sounds, ModuleId.Convert => VisualIconKind.Convert,
         ModuleId.Awake => VisualIconKind.Awake, ModuleId.Settings => VisualIconKind.Settings,
         ModuleId.Tools => VisualIconKind.Tools,
+        ModuleId.AiUsage => VisualIconKind.AiUsage,
         _ => VisualIconKind.Tools,
     };
 

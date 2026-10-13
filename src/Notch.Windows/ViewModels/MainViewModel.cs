@@ -7,6 +7,7 @@ using System.Collections.ObjectModel;
 using System.Net;
 using System.Collections.Specialized;
 using Notch.Core.Commerce;
+using Notch.Core.AiUsage;
 
 namespace Notch.Windows.ViewModels;
 
@@ -70,7 +71,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private CodingSnapshot? _coding;
     private AnalyticsSnapshot? _analytics;
     private string _status = "Local first. Ready when you are.";
-    private string _updateStatus = "Evaluation builds use manual updates from Release page. Verified automatic updates require a signed release.";
+    private string _updateStatus = "Check for updates to get the latest compatible Notchling version.";
     private string _error = "";
     private string _scratchpad = "";
     private IReadOnlyList<int> _ports = [];
@@ -160,12 +161,13 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsReady => _loaded && !_disposed;
     private string WorkspaceRecoveryMessage => $"Your saved notebook could not be read. Its file is preserved and notebook saving is paused. Back up and repair or rename {Path.Combine(_dataDirectory, "workspace.json")}, then restart {ProductIdentity.DisplayName}.";
 
-    public MainViewModel(DispatcherQueue dispatcher, string? dataDirectory = null, IDataStore? store = null, IMediaService? mediaService = null, ISystemService? systemService = null, ISecretVault? vault = null, IWindowsUpdateService? updateService = null, TimeProvider? timeProvider = null)
+    public MainViewModel(DispatcherQueue dispatcher, string? dataDirectory = null, IDataStore? store = null, IMediaService? mediaService = null, ISystemService? systemService = null, ISecretVault? vault = null, IWindowsUpdateService? updateService = null, TimeProvider? timeProvider = null, IAiUsageService? aiUsageService = null)
     {
         _dispatcher = dispatcher;
         _feedbackTime = timeProvider ?? TimeProvider.System;
         _updateService = updateService ?? new WindowsUpdateService(_updateHttp);
         _lifetimeToken = _lifetime.Token;
+        InitializeAiUsage(aiUsageService);
         _mediaService = mediaService ?? new WindowsMediaService();
         _systemService = systemService ?? new WindowsSystemService();
         _vault = vault ?? new WindowsSecretVault();
@@ -246,6 +248,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             _focus.Hydration.Reset(TimeSpan.FromMinutes(Preferences.HydrationMinutes));
             if (CanUseExtendedTools) _focus.Hydration.Start();
             _loaded = true;
+            _ = RestoreUpdateInstallationResultAsync();
             _lastPremium = IsPremium;
             _lastToolAccess = CanUseExtendedTools;
             _tick.Start();
@@ -1038,6 +1041,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         Notify(nameof(IsReady));
         _tick.Stop(); _stopwatchTick.Stop(); _saveDelay?.Cancel(); _volumeDelay?.Cancel();
         _lifetime.Cancel();
+        await StopAiUsageAsync();
         InvalidateRequests();
         if (_updateOperationTask is { } updateOperation)
             try { await updateOperation; } catch (Exception error) when (Recoverable(error)) { }
