@@ -417,10 +417,12 @@ namespace Notchling.Setup {
 }
 $script:actualDownloadResponse = (Get-Item Function:Get-MicrosoftDownloadResponse).ScriptBlock
 $script:downloadFixtureBytes = [byte[]]@(1, 2, 3, 4, 5, 6, 7, 8)
-function Reset-DownloadFixture([string]$Mode) {
-    $script:downloadFixtureMode = $Mode
+# This cleanup-owned path must exist before entering try, even if the first
+# fixture fails before Reset runs. Keep fixture cases separate from script Mode.
+$script:downloadFixturePath = Join-Path $OutputDirectory 'transport-download-fixture.bin'
+function Reset-DownloadFixture([string]$FixtureMode) {
+    $script:downloadFixtureMode = $FixtureMode
     $script:downloadFixtureCalls = 0
-    $script:downloadFixturePath = Join-Path $OutputDirectory 'transport-download-fixture.bin'
     if (Test-Path -LiteralPath $script:downloadFixturePath) { Remove-Item -LiteralPath $script:downloadFixturePath -Force }
 }
 try {
@@ -457,9 +459,9 @@ try {
         $reply.Content.Headers.ContentLength = $bytes.Length
         return $reply
     }
-    foreach ($mode in @('Recover', 'RecoverEof')) {
-        Invoke-Fixture "Interrupted Microsoft response retries from a clean file: $mode" {
-            Reset-DownloadFixture $mode
+    foreach ($fixtureCase in @('Recover', 'RecoverEof')) {
+        Invoke-Fixture "Interrupted Microsoft response retries from a clean file: $fixtureCase" {
+            Reset-DownloadFixture $fixtureCase
             Save-MicrosoftDownload ([Uri]'https://download.microsoft.com/runtime.exe') $script:downloadFixturePath 8 5
             $actual = [IO.File]::ReadAllBytes($script:downloadFixturePath)
             Assert-Fixture ($script:downloadFixtureCalls -eq 2 -and ($actual -join ',') -eq ($script:downloadFixtureBytes -join ',')) 'Recovery reused a partial file or wrote incorrect full-response bytes.'
@@ -474,10 +476,10 @@ try {
         Assert-FixtureThrows { Save-MicrosoftDownload ([Uri]'https://download.microsoft.com/runtime.exe') $script:downloadFixturePath 8 5 } 'connection closed'
         Assert-Fixture ($script:downloadFixtureCalls -eq 3 -and -not (Test-Path -LiteralPath $script:downloadFixturePath)) 'Exhausted download exceeded its attempt bound or retained a partial file.'
     }
-    foreach ($mode in @('Forbidden', 'Trust', 'Redirect')) {
-        Invoke-Fixture "Authorization, TLS trust and redirect policy failures are not retried: $mode" {
-            Reset-DownloadFixture $mode
-            $pattern = switch ($mode) { 'Forbidden' { '403' }; 'Trust' { 'TLS trust' }; default { 'approved Microsoft HTTPS' } }
+    foreach ($fixtureCase in @('Forbidden', 'Trust', 'Redirect')) {
+        Invoke-Fixture "Authorization, TLS trust and redirect policy failures are not retried: $fixtureCase" {
+            Reset-DownloadFixture $fixtureCase
+            $pattern = switch ($fixtureCase) { 'Forbidden' { '403' }; 'Trust' { 'TLS trust' }; default { 'approved Microsoft HTTPS' } }
             Assert-FixtureThrows { Save-MicrosoftDownload ([Uri]'https://download.microsoft.com/runtime.exe') $script:downloadFixturePath 8 5 } $pattern
             Assert-Fixture ($script:downloadFixtureCalls -eq 1 -and -not (Test-Path -LiteralPath $script:downloadFixturePath)) 'A terminal policy/trust failure was retried or retained an owned partial file.'
         }
@@ -518,14 +520,14 @@ try {
             Set-Item Function:Invoke-RuntimeInstaller -Value $savedInstaller
         }
     }
-    foreach ($mode in @('Digest', 'Publisher')) {
-        Invoke-Fixture "Complete downloads failing downstream verification never retry or install: $mode" {
+    foreach ($fixtureCase in @('Digest', 'Publisher')) {
+        Invoke-Fixture "Complete downloads failing downstream verification never retry or install: $fixtureCase" {
             $savedDotNet = (Get-Item Function:Test-DotNetRuntime).ScriptBlock
             $savedAppRuntime = (Get-Item Function:Test-WindowsAppRuntime).ScriptBlock
             $savedInstaller = (Get-Item Function:Invoke-RuntimeInstaller).ScriptBlock
             $savedSignature = (Get-Item Function:Assert-MicrosoftSignature).ScriptBlock
             try {
-                Reset-DownloadFixture $mode
+                Reset-DownloadFixture $fixtureCase
                 $script:transportInstallerCalls = 0
                 $script:transportSignatureCalls = 0
                 function Test-DotNetRuntime { return $false }
@@ -538,7 +540,7 @@ try {
                 $result = Invoke-NotchlingPrerequisites
                 Assert-Fixture ($result -eq 1 -and $script:downloadFixtureCalls -eq 2 -and $script:transportInstallerCalls -eq 0) 'Verification failure retried a complete download or reached runtime installer execution.'
                 $errorText = [IO.File]::ReadAllText($fixtureResult)
-                if ($mode -eq 'Digest') {
+                if ($fixtureCase -eq 'Digest') {
                     Assert-Fixture ($script:transportSignatureCalls -eq 0 -and $errorText -match 'integrity verification') 'Mismatched digest reached publisher checking or lost its error.'
                 }
                 else {

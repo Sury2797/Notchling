@@ -38,9 +38,11 @@ Explicit Show/reopen reasserts the owned overlay's topmost placement so an alrea
 
 Content animation runs through the compositor. The native host owns panel-size transitions and reduced-motion behavior. Rendered smoothness remains a Windows qualification requirement. CPU, memory, startup time, input latency and long-running resource use must be measured on real Windows hardware using the release matrix. Framework choice alone is not a performance result.
 
-## v0.4.19 source refinements
+## v0.4.20 source refinements
 
 These changes describe the current candidate; the published v0.3.4 evidence remains separate in [validation](validation-notes.md).
+
+v0.4.20 retains v0.4.19's transport-only prerequisite retries and owned standard handles/`CreateProcessAsUser` restricted-fixture launcher. The v0.4.19 hosted run stopped in its prerequisite unit-test script before native build/Setup/app: a case-insensitive loop variable collided with advanced `$Mode` validation and cleanup masked the first error. This follow-up separates fixture variables and initializes the cleanup path; actual native launcher and app qualification remain pending.
 
 Control icons cache immutable 24-unit path tokens and create a fresh WinUI geometry for each control. This preserves a consistent stroke without sharing a WinUI dependency object between different Paths. Semantic icon kinds separate tool meaning from the rendering implementation. Brand/source icons use a separate component, and unknown registered players can retain their Windows-supplied logo.
 
@@ -58,4 +60,4 @@ The update handoff validates the owned app identity, prepared installer and vers
 
 Packaging accepts matched x64/x86/ARM64 platform and runtime identifiers. Setup checks app-architecture .NET, app-architecture Windows App Runtime Framework/DDLM, and native-host Main/Singleton packages; a cross-architecture install also requires the native framework dependency. Microsoft-signed resource recovery follows that plan and validates package manifests before deployment. Package audits inspect PE headers and bootstrapper/runtime configuration; installed qualification records the actual process architecture.
 
-The v0.4.19 candidate also moves the signed-resource reader's AnyCPU compilation into the build. Setup packages that helper for prerequisite work; it does not add a compiler dependency or helper process to the running app. Translation targets the WinUI visual's property set. The v0.4.8 run passed actual installation, matching-architecture launch and hover cycles on all four hosts, then stopped at Settings bounds before the remaining UI assertions. The follow-up bounds check recognizes only typed tooltip surfaces and their related hosts/children, requires them to fit the monitor work area, and retains strict panel bounds for other content. Exact stages are recorded in [validation](validation-notes.md#candidate-qualification-sequence--10-october-2026-utc).
+The v0.4.20 candidate also moves the signed-resource reader's AnyCPU compilation into the build. Setup packages that helper for prerequisite work; it does not add a compiler dependency or helper process to the running app. Translation targets the WinUI visual's property set. The v0.4.8 run passed actual installation, matching-architecture launch and hover cycles on all four hosts, then stopped at Settings bounds before the remaining UI assertions. The follow-up bounds check recognizes only typed tooltip surfaces and their related hosts/children, requires them to fit the monitor work area, and retains strict panel bounds for other content. Exact stages are recorded in [validation](validation-notes.md#candidate-qualification-sequence--10-october-2026-utc).
