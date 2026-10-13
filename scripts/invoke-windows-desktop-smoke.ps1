@@ -875,7 +875,9 @@ namespace NotchlingDesktopSmoke {
                     Error = $null
                 }
                 try {
-                    $quoted = @($probe.Arguments | ForEach-Object { [NotchlingDesktopSmoke.Native]::Quote([string]$_) }) -join ' '
+                    # cmd /c has distinct quote-stripping rules. Its command is
+                    # a fixed owned marker with no input interpolation.
+                    $quoted = if ($probe.Name -eq 'cmd') { '/d /q /c echo Notchling owned cmd entry' } else { @($probe.Arguments | ForEach-Object { [NotchlingDesktopSmoke.Native]::Quote([string]$_) }) -join ' ' }
                     $probeTicket = [NotchlingDesktopSmoke.Native]::Start($probe.Application, $quoted, (Get-Location).Path, $environmentBlock, $probeStdout, $probeStderr, [bool]$repair, $true)
                     $case.Runner = $probeTicket.Runner; $case.Child = $probeTicket.Child
                     $case.ChildProcessId = $probeTicket.ProcessId; $case.LaunchApi = $probeTicket.LaunchApi; $case.TokenSource = $probeTicket.TokenSource
@@ -892,7 +894,18 @@ namespace NotchlingDesktopSmoke {
                     if (Test-Path -LiteralPath $probeStdout -PathType Leaf) {
                         $case.StdoutBytes = (Get-Item -LiteralPath $probeStdout).Length
                         if ($case.StdoutBytes -gt 65536) { throw 'The owned marker output exceeds its diagnostic bound.' }
-                        $case.FreshStdoutMarker = [IO.File]::ReadAllText($probeStdout).Contains([string]$probe.Marker)
+                        # The parent deliberately retains its real native output
+                        # handle until cleanup. The reader must share that writer.
+                        $markerStream = [IO.File]::Open($probeStdout, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]7)
+                        $markerReader = $null
+                        try {
+                            if ($markerStream.Length -gt 65536) { throw 'The owned marker output exceeds its diagnostic bound.' }
+                            $markerReader = [IO.StreamReader]::new($markerStream, [Text.Encoding]::UTF8, $true)
+                            $case.FreshStdoutMarker = $markerReader.ReadToEnd().Contains([string]$probe.Marker)
+                        } finally {
+                            if ($markerReader) { $markerReader.Dispose() }
+                            $markerStream.Dispose()
+                        }
                     }
                     if (Test-Path -LiteralPath $probeStderr -PathType Leaf) { $case.StderrBytes = (Get-Item -LiteralPath $probeStderr).Length }
                     $case.MarkerSucceeded = $case.ActualExitCode -eq 0 -and $case.FreshStdoutMarker
