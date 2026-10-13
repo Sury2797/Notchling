@@ -356,13 +356,13 @@ public sealed partial class MainWindow : Window
     private void Open(bool hover = false)
     {
         _openDelay.Stop();
-        _host.Show();
+        _host.Show(userRequested: !hover);
         _vm.Overlay.SetInteractionSuppressed(false);
         _explicitOpening = !hover;
         _hoverInteraction.Begin(_explicitOpening);
         try { _vm.Overlay.Expand(_vm.CanAccessModule(_vm.SelectedModule) ? _vm.SelectedModule : ModuleId.Settings); }
         finally { _explicitOpening = false; }
-        _host.Show();
+        _host.Show(userRequested: !hover);
     }
     private void OpenSettings()
     {

@@ -22,6 +22,8 @@ $report = [ordered]@{
     AppPath = $AppPath
     AppArchitecture = $AppArchitecture
     ActualProcessArchitecture = $null
+    AppIntegrityRid = $null
+    AppElevated = $null
     HostArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
     UIAutomationArchitecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant()
     ArchitectureScope = $null
@@ -254,6 +256,31 @@ using System.Runtime.InteropServices;
 using System.Text;
 namespace NotchlingSmoke {
     public static class Native {
+        [DllImport("advapi32.dll", SetLastError=true)] private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+        [DllImport("advapi32.dll", SetLastError=true)] private static extern bool GetTokenInformation(IntPtr token, int informationClass, IntPtr information, int length, out int required);
+        [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+        [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
+        [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+        public static int[] ProcessSecurity(IntPtr process) {
+            IntPtr token;
+            if (!OpenProcessToken(process, 8, out token)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            IntPtr buffer = IntPtr.Zero;
+            try {
+                int required;
+                buffer = Marshal.AllocHGlobal(4);
+                if (!GetTokenInformation(token, 20, buffer, 4, out required)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                int elevated = Marshal.ReadInt32(buffer);
+                Marshal.FreeHGlobal(buffer); buffer = IntPtr.Zero;
+                GetTokenInformation(token, 25, IntPtr.Zero, 0, out required);
+                if (required <= 0 || required > 4096) throw new InvalidOperationException("Unexpected token integrity record size.");
+                buffer = Marshal.AllocHGlobal(required);
+                if (!GetTokenInformation(token, 25, buffer, required, out required)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                IntPtr sid = Marshal.ReadIntPtr(buffer);
+                byte count = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
+                if (count == 0) throw new InvalidOperationException("Token integrity SID has no authority.");
+                return new[] { Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(count - 1))), elevated };
+            } finally { if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer); CloseHandle(token); }
+        }
         [DllImport("kernel32.dll", SetLastError = true)] private static extern bool IsWow64Process2(IntPtr process, out ushort processMachine, out ushort nativeMachine);
         public static string MachineName(ushort machine) {
             switch (machine) { case 0x014c: return "x86"; case 0x8664: return "x64"; case 0xaa64: return "arm64"; default: throw new InvalidOperationException("Unsupported process machine: " + machine); }
@@ -339,6 +366,12 @@ namespace NotchlingSmoke {
     }
     $launchClock.Stop()
     $report.ActualProcessArchitecture = [NotchlingSmoke.Native]::ProcessArchitecture($child.Handle)
+    $security = [NotchlingSmoke.Native]::ProcessSecurity($child.Handle)
+    $report.AppIntegrityRid = $security[0]
+    $report.AppElevated = $security[1] -ne 0
+    if ($report.AppElevated -or $report.AppIntegrityRid -ne 8192) {
+        throw "WinUI input qualification requires a normal medium-integrity app; observed integrity RID $($report.AppIntegrityRid), elevated $($report.AppElevated). Use the normal-user desktop smoke wrapper."
+    }
     if ($report.ActualProcessArchitecture -ne $AppArchitecture) { throw "Launched app process does not match requested $AppArchitecture architecture." }
     $report.FirstVisibleWindowMilliseconds = [Math]::Round($launchClock.Elapsed.TotalMilliseconds, 1)
     $report.WindowTitle = $title

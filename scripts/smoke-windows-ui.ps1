@@ -832,6 +832,7 @@ namespace NotchlingUiSmoke {
         [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
         [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
         [DllImport("user32.dll", EntryPoint="GetClassNameW", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder name, int length);
+        [DllImport("user32.dll", EntryPoint="GetWindowTextW", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int length);
         [DllImport("user32.dll", EntryPoint="GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
         [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", SetLastError=true)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wParam, IntPtr lParam, uint flags, uint timeout, out UIntPtr result);
         public sealed class PointTarget {
@@ -851,11 +852,18 @@ namespace NotchlingUiSmoke {
             bool answered = window != IntPtr.Zero && SendMessageTimeout(window, 0x0084, UIntPtr.Zero,
                 new IntPtr(packedPoint), 3, 100, out hitResult) != IntPtr.Zero; // WM_NCHITTEST; BLOCK | ABORTIFHUNG
             int hit = answered ? unchecked((int)hitResult.ToUInt64()) : Int32.MinValue;
+            string processName;
+            try { using (var observed = System.Diagnostics.Process.GetProcessById((int)process)) processName = observed.ProcessName; }
+            catch (Exception) { processName = "unavailable"; }
+            var title = new StringBuilder(192); GetWindowText(window, title, title.Capacity);
+            Rect hitBounds; bool hasBounds = GetWindowRect(window, out hitBounds);
             // WindowFromPoint can expose a system composition surface which
             // explicitly returns HTTRANSPARENT. Only that documented native
             // result may bypass foreign HWND ownership; styles alone cannot.
             return new PointTarget { Owned = process == expectedProcess && related, PassThrough = answered && hit == -1,
                 Description = "hwnd=" + window.ToInt64() + ", root=" + ancestor.ToInt64() + ", process=" + process + ", class=" + name +
+                    ", processName=" + processName + ", title=" + title + ", bounds=" + (hasBounds ?
+                        (hitBounds.Left + "," + hitBounds.Top + ".." + hitBounds.Right + "," + hitBounds.Bottom) : "unavailable") +
                     ", style=0x" + unchecked((uint)style).ToString("X8") + ", exStyle=0x" + unchecked((uint)extendedStyle).ToString("X8") +
                     ", ncHit=" + (answered ? hit.ToString() : "unanswered") + ", owned=" + related };
         }

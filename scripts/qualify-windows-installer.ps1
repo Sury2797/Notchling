@@ -102,7 +102,7 @@ foreach ($line in ($prerequisiteLines | Where-Object { $_ -match $recognized } |
 $app = Get-ChildItem (Join-Path $install 'app') -Filter Notchling.Windows.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
 if (-not $app) { throw 'The installer did not create the application.' }
 try {
-  & (Join-Path $PSScriptRoot 'smoke-windows.ps1') -AppPath $app -AppArchitecture $AppArchitecture -ReportPath (Join-Path $ReportDirectory 'windows-smoke.json')
+  & (Join-Path $PSScriptRoot 'invoke-windows-desktop-smoke.ps1') -AppPath $app -AppArchitecture $AppArchitecture -ReportPath (Join-Path $ReportDirectory 'windows-smoke.json')
 } finally {
   $uninstall = Join-Path $install 'unins000.exe'
   if (Test-Path $uninstall) {

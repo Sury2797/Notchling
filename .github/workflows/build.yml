@@ -152,9 +152,7 @@ jobs:
         shell: pwsh
         run: |
           $setup = Get-ChildItem artifacts/installer/*-evaluation-setup.exe | Select-Object -First 1 -ExpandProperty FullName
-          $windowsPowerShell = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell/v1.0/powershell.exe'
-          & $windowsPowerShell -NoLogo -NoProfile -NonInteractive -Mta -ExecutionPolicy Bypass -File ./scripts/smoke-windows-update-handoff.ps1 -SetupPath $setup -AppArchitecture ${{ matrix.arch }} -Platform ${{ matrix.platform }} -ReportDirectory artifacts
-          if ($LASTEXITCODE -ne 0) { throw 'Actual updater upgrade/relaunch qualification failed.' }
+          ./scripts/invoke-windows-desktop-smoke.ps1 -Mode UpdateHandoff -SetupPath $setup -AppArchitecture ${{ matrix.arch }} -Platform ${{ matrix.platform }} -ReportDirectory artifacts
       - uses: actions/upload-artifact@v6
         with:
           name: notchling-windows-${{ matrix.artifact_suffix }}-installer
@@ -176,9 +174,11 @@ jobs:
           path: |
             artifacts/package-size.json
             artifacts/windows-smoke.json
+            artifacts/desktop-smoke-context.json
             artifacts/windows-ui-smoke.json
             artifacts/windows-shelf-drop.json
             artifacts/windows-update-handoff.json
+            artifacts/desktop-update-handoff-context.json
             artifacts/windows-update-result.json
             artifacts/windows-update-setup.log
             artifacts/installer-smoke.log

@@ -316,6 +316,7 @@ public sealed class OverlayHost : IDisposable
     public void Show(bool userRequested = true)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        var wasNativeVisible = _nativeVisible;
         _shown = true;
         if (userRequested)
         {
@@ -326,6 +327,17 @@ public sealed class OverlayHost : IDisposable
         }
         if (!_hidden) _fullscreenCheck.Start();
         UpdateVisibility();
+        // An explicit Open/Settings request should raise the owned surface even
+        // when it is already visible. Another topmost window may have appeared
+        // since its last layout, while Activate is a no-op for our foreground
+        // window. Background visibility polling and hover never enter this path.
+        if (userRequested && wasNativeVisible && _nativeVisible && IsVisible &&
+            !NativeMethods.SetWindowPos(_handle, NativeMethods.HwndTopmost, 0, 0, 0, 0,
+                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow))
+        {
+            StartupDiagnostics.Write("OverlayHost.ExplicitShow", new Win32Exception(Marshal.GetLastWin32Error(),
+                "Could not raise the owned Notchling window after an explicit open request."));
+        }
     }
 
     private void UpdateVisibility()
