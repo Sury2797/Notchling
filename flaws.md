@@ -567,3 +567,6 @@ The existing separation of portable core and native services, atomic storage rep
 | 4 — Prepare commercial delivery | F01–F02, F12–F13; finalize service costs and customer policies | Signed stable delivery, verified subscription lifecycle, permitted services, data-preserving downgrade |
 
 The owner subsequently authorized repairs. The source work above is implemented; the remaining release work is production configuration, publisher-policy completion, and recorded Windows 10/11 native qualification. Signing and live sales remain disabled until those prerequisites are met.
+
+
+Current resumed candidate: **v0.4.16**, source `c82506b92b574f4e448237dbe4ccd07b26fb2a84`, [run 38400400207](https://github.com/Sury2797/Notchling/actions/runs/38400400207). Source and driver compilation passed locally. Windows qualification is in progress, with strict normal-user, real transfer and actual upgrade assertions. Download promotion stays blocked until full qualification and independent verification of all three public EXEs.
