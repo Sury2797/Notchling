@@ -64,6 +64,32 @@ function Assert-Budget {
     if ($process.HasExited) { throw "Notchling exited during the real OLE drop check." }
 }
 
+function Read-ElementBounds($Element) {
+    # A provider may briefly return NotSupported while a popup/scroll peer is
+    # being rebuilt. Never treat an untyped value as an empty rectangle: retry
+    # it, then fail with the actual provider identity if it is still visible.
+    $detail = "No rectangle supplied"
+    for ($attempt = 0; $attempt -lt 4; $attempt++) {
+        $current = $Element.Current
+        $value = $Element.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::BoundingRectangleProperty, $true)
+        if ($value -is [System.Windows.Rect]) {
+            if ($value.IsEmpty) { return $value }
+            $finite = $true
+            foreach ($coordinate in @($value.Left, $value.Top, $value.Right, $value.Bottom, $value.Width, $value.Height)) {
+                if ([double]::IsNaN($coordinate) -or [double]::IsInfinity($coordinate)) { $finite = $false; break }
+            }
+            if ($finite -and $value.Width -ge 0 -and $value.Height -ge 0) { return $value }
+            $detail = "Non-finite or invalid System.Windows.Rect"
+        } else {
+            $detail = if ($null -eq $value) { "null" } else { $value.GetType().FullName }
+        }
+        if ($attempt -lt 3) { Start-Sleep -Milliseconds 75 }
+    }
+    $current = $Element.Current
+    if ($current.IsOffscreen) { return [System.Windows.Rect]::Empty }
+    throw "A visible UI Automation peer did not supply readable finite bounds after four samples: name='$($current.Name)', id='$($current.AutomationId)', type=$($current.ControlType.ProgrammaticName), class=$($current.ClassName), rectangle=$detail."
+}
+
 function Find-Control([string]$Name, [string]$Id, $Pattern = $null) {
     Assert-Budget
     $property = if ($Id) { [System.Windows.Automation.AutomationElement]::AutomationIdProperty } else { [System.Windows.Automation.AutomationElement]::NameProperty }
@@ -72,7 +98,7 @@ function Find-Control([string]$Name, [string]$Id, $Pattern = $null) {
     foreach ($candidate in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) {
         try {
             $current = $candidate.Current
-            if ($current.IsOffscreen -or $current.BoundingRectangle.IsEmpty -or -not $current.IsEnabled) { continue }
+            if ($current.IsOffscreen -or (Read-ElementBounds $candidate).IsEmpty -or -not $current.IsEnabled) { continue }
             if ($null -ne $Pattern) {
                 $provider = $null
                 if (-not $candidate.TryGetCurrentPattern($Pattern, [ref]$provider)) { continue }
@@ -124,7 +150,7 @@ function Reach-Compact {
             # island rather than an intermediate collapsing HWND rectangle.
             Start-Sleep -Milliseconds 100
             $bounds = [NotchlingShelfOle.Native]::WindowBounds([IntPtr]::new($WindowHandle))
-            if (($bounds.Bottom - $bounds.Top) -le 42 * $scale) { return $compact.Current.BoundingRectangle }
+            if (($bounds.Bottom - $bounds.Top) -le 42 * $scale) { return (Read-ElementBounds $compact) }
         }
         Start-Sleep -Milliseconds 70
     } while ($wait.Elapsed.TotalSeconds -lt 6)
@@ -161,7 +187,7 @@ function Assert-VisiblePath([string]$Path) {
     foreach ($element in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
         try {
             $current = $element.Current
-            if (-not $current.IsOffscreen -and -not $current.BoundingRectangle.IsEmpty -and
+            if (-not $current.IsOffscreen -and -not (Read-ElementBounds $element).IsEmpty -and
                 $current.AutomationId.StartsWith("ShelfItemPath-", [StringComparison]::Ordinal) -and
                 $current.Name.IndexOf($Path, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return }
         } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
@@ -174,7 +200,7 @@ try {
     if ($PSVersionTable.PSEdition -ne "Desktop") { throw "Run this helper with Windows PowerShell 5.1." }
     $process = Get-Process -Id $AppProcessId -ErrorAction Stop
     if ([IO.Path]::GetFileName($process.Path) -ne "Notchling.Windows.exe") { throw "The supplied process is not the expected app." }
-    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing, System.Windows.Forms
+    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase, System.Drawing, System.Windows.Forms
     Add-Type -ReferencedAssemblies System.dll, System.Core.dll, System.Drawing.dll, System.Windows.Forms.dll -TypeDefinition @'
 using System;
 using System.Collections.Generic;

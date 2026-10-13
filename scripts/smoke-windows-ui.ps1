@@ -83,6 +83,42 @@ function Assert-Budget {
     if ($process.HasExited) { throw "The owned app exited during UI interaction." }
 }
 
+function Read-ElementBounds($Element) {
+    # A provider may briefly return NotSupported while a popup/scroll peer is
+    # being rebuilt. Never treat an untyped value as an empty rectangle: retry
+    # it, then fail with the actual provider identity if it is still visible.
+    $detail = "No rectangle supplied"
+    for ($attempt = 0; $attempt -lt 4; $attempt++) {
+        $current = $Element.Current
+        $value = $Element.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::BoundingRectangleProperty, $true)
+        if ($value -is [System.Windows.Rect]) {
+            if ($value.IsEmpty) { return $value }
+            $finite = $true
+            foreach ($coordinate in @($value.Left, $value.Top, $value.Right, $value.Bottom, $value.Width, $value.Height)) {
+                if ([double]::IsNaN($coordinate) -or [double]::IsInfinity($coordinate)) { $finite = $false; break }
+            }
+            if ($finite -and $value.Width -ge 0 -and $value.Height -ge 0) { return $value }
+            $detail = "Non-finite or invalid System.Windows.Rect"
+        } else {
+            $detail = if ($null -eq $value) { "null" } else { $value.GetType().FullName }
+        }
+        if ($attempt -lt 3) { Start-Sleep -Milliseconds 75 }
+    }
+    $current = $Element.Current
+    if ($current.IsOffscreen) { return [System.Windows.Rect]::Empty }
+    throw "A visible UI Automation peer did not supply readable finite bounds after four samples: name='$($current.Name)', id='$($current.AutomationId)', type=$($current.ControlType.ProgrammaticName), class=$($current.ClassName), rectangle=$detail."
+}
+
+function Test-OwnedDescendant($Element, $Owner) {
+    if (-not $Element -or -not $Owner -or $Element.Current.ProcessId -ne $AppProcessId) { return $false }
+    $ancestor = $Element
+    for ($level = 0; $ancestor -and $level -lt 16; $level++) {
+        if ($ancestor.Equals($Owner)) { return $true }
+        $ancestor = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($ancestor)
+    }
+    return $false
+}
+
 function Find-Control([string]$Name, $ControlType, [bool]$RequireEnabled = $true, $Pattern = $null) {
     Assert-Budget
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $Name)
@@ -94,7 +130,7 @@ function Find-Control([string]$Name, $ControlType, [bool]$RequireEnabled = $true
     foreach ($candidate in $candidates) {
         try {
             $current = $candidate.Current
-            if ($current.IsOffscreen -or $current.BoundingRectangle.IsEmpty) { continue }
+            if ($current.IsOffscreen -or (Read-ElementBounds $candidate).IsEmpty) { continue }
             if ($RequireEnabled -and -not $current.IsEnabled) { continue }
             # Settings intentionally exposes both descriptive text and its input
             # with the same name. Only the input can satisfy the required action.
@@ -134,7 +170,7 @@ function Find-OwnedHelpElement([string]$Id) {
     $condition = [System.Windows.Automation.AndCondition]::new($idCondition, $processCondition)
     foreach ($surface in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $processCondition)) {
         foreach ($element in $surface.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) {
-            if (-not $element.Current.IsOffscreen -and -not $element.Current.BoundingRectangle.IsEmpty) { return $element }
+            if (-not $element.Current.IsOffscreen -and -not (Read-ElementBounds $element).IsEmpty) { return $element }
         }
     }
     return $null
@@ -216,7 +252,7 @@ function Get-UiStateSnapshot([string]$Reason) {
         foreach ($element in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
             try {
                 $current = $element.Current
-                if ($current.IsOffscreen -or $current.BoundingRectangle.IsEmpty -or [string]::IsNullOrWhiteSpace($current.Name)) { continue }
+                if ($current.IsOffscreen -or (Read-ElementBounds $element).IsEmpty -or [string]::IsNullOrWhiteSpace($current.Name)) { continue }
                 $name = $current.Name
                 if ($name.Length -gt 100) { $name = $name.Substring(0, 100) }
                 $snapshot.VisibleControls += "$name [$($current.ControlType.ProgrammaticName); enabled=$($current.IsEnabled)]"
@@ -242,7 +278,7 @@ function Assert-NoAutomaticSampleData {
     foreach ($element in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) {
         try {
             $current = $element.Current
-            if (-not $current.IsOffscreen -and -not $current.BoundingRectangle.IsEmpty -and
+            if (-not $current.IsOffscreen -and -not (Read-ElementBounds $element).IsEmpty -and
                 $current.Name -match '^(DEMO(?:\b|\s)|Golden Hour Drive$|Sample track$|Preview \u00b7 sample data$)') {
                 throw "Sample data appeared without an explicit preview choice: $($current.Name)"
             }
@@ -339,7 +375,7 @@ function Find-AutomationId([string]$Id, $Pattern = $null) {
     foreach ($candidate in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) {
         try {
             $current = $candidate.Current
-            if ($current.IsOffscreen -or -not $current.IsEnabled -or $current.BoundingRectangle.IsEmpty) { continue }
+            if ($current.IsOffscreen -or -not $current.IsEnabled -or (Read-ElementBounds $candidate).IsEmpty) { continue }
             if ($null -ne $Pattern) {
                 $provider = $null
                 if (-not $candidate.TryGetCurrentPattern($Pattern, [ref]$provider)) { continue }
@@ -402,7 +438,7 @@ function Assert-CredentialActions([string]$Name) {
     $save = Find-Control ("Save " + $Name) ([System.Windows.Automation.ControlType]::Button)
     $remove = Find-Control ("Remove " + $Name) ([System.Windows.Automation.ControlType]::Button)
     if (-not $input -or -not $save -or -not $remove) { throw "A credential input and its action pair could not fit together: $Name." }
-    $entry = $input.Current.BoundingRectangle; $saveBounds = $save.Current.BoundingRectangle; $removeBounds = $remove.Current.BoundingRectangle
+    $entry = Read-ElementBounds $input; $saveBounds = Read-ElementBounds $save; $removeBounds = Read-ElementBounds $remove
     if ($saveBounds.Height -gt 48 * $displayScale -or $removeBounds.Height -gt 48 * $displayScale) {
         throw "Credential actions are oversized instead of compact form controls: $Name."
     }
@@ -521,6 +557,45 @@ function Scroll-ToSettingId([string]$Id) {
     throw "An accessible connection-status row could not be reached: $Id."
 }
 
+function Reach-SettingsEditorPoint([string]$Name) {
+    $report.Operation = "Reach physically hit-testable Settings editor '$Name'"
+    $scroll = Get-SettingsScroll
+    $positions = @($scroll.Current.VerticalScrollPercent) + @(0..10 | ForEach-Object { $_ * 10 })
+    $detail = "No exposed editor rectangle"
+    foreach ($percent in $positions) {
+        Assert-Budget
+        if ($percent -ge 0 -and $scroll.Current.VerticallyScrollable) {
+            $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, $percent)
+            Start-Sleep -Milliseconds 100
+        }
+        $editor = Find-Control $Name ([System.Windows.Automation.ControlType]::Edit) $true ([System.Windows.Automation.ValuePattern]::Pattern)
+        if (-not $editor) { continue }
+        $viewport = Wait-Control "Notchling settings content" $null $true ([System.Windows.Automation.ScrollPattern]::Pattern)
+        $rectangle = Read-ElementBounds $editor
+        $clip = Read-ElementBounds $viewport
+        $window = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
+        $left = [Math]::Max($rectangle.Left, [Math]::Max($clip.Left, $window.Left))
+        $right = [Math]::Min($rectangle.Right, [Math]::Min($clip.Right, $window.Right))
+        $top = [Math]::Max($rectangle.Top, [Math]::Max($clip.Top, $window.Top))
+        $bottom = [Math]::Min($rectangle.Bottom, [Math]::Min($clip.Bottom, $window.Bottom))
+        $detail = "scroll=$percent; editor=$rectangle; viewport=$clip; exposed=$left,$top..$right,$bottom"
+        if ($right - $left -lt 4 -or $bottom - $top -lt 4) { continue }
+        # GetClickablePoint is optional for WinUI text peers. Use actual finite
+        # screen geometry, then prove a user click lands on this exact editor
+        # (or its own inner text peer), rather than clipped or covered content.
+        foreach ($fraction in @(.5, .25, .75)) {
+            $x = [int][Math]::Floor($left + ($right - $left) * $fraction)
+            $y = [int][Math]::Floor($top + ($bottom - $top) / 2)
+            $hit = [System.Windows.Automation.AutomationElement]::FromPoint([System.Windows.Point]::new($x, $y))
+            if (Test-OwnedDescendant $hit $editor) {
+                return [pscustomobject]@{ Element = $editor; X = $x; Y = $y }
+            }
+            if ($hit) { $detail += "; hit='$($hit.Current.Name)'/$($hit.Current.ControlType.ProgrammaticName), process=$($hit.Current.ProcessId)" }
+        }
+    }
+    throw "The visible Settings editor has no reachable owned click position after viewport scanning: $Name; $detail."
+}
+
 function Assert-HorizontalBounds {
     Assert-Budget
     $bounds = [NotchlingUiSmoke.Native]::WindowBounds([IntPtr]::new($WindowHandle))
@@ -533,8 +608,9 @@ function Assert-HorizontalBounds {
     foreach ($element in $elements) {
         try {
             $current = $element.Current
-            if ($current.IsOffscreen -or $current.BoundingRectangle.IsEmpty) { continue }
-            $rectangle = $current.BoundingRectangle
+            if ($current.IsOffscreen) { continue }
+            $rectangle = Read-ElementBounds $element
+            if ($rectangle.IsEmpty) { continue }
             # Native tooltips are separate popup surfaces. They may extend
             # beyond the panel, but must stay within the monitor work area.
             # Recognize their actual UIA role; never skip arbitrary popups
@@ -594,12 +670,14 @@ function Assert-DockBounds {
         foreach ($candidate in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) {
             try {
                 $current = $candidate.Current
-                if (-not $current.IsOffscreen -and $current.IsEnabled -and -not $current.BoundingRectangle.IsEmpty -and
-                    $current.BoundingRectangle.Top -ge $bounds.Bottom - $dockHeight) { $dockControl = $candidate; break }
+                if (-not $current.IsOffscreen -and $current.IsEnabled) {
+                    $candidateBounds = Read-ElementBounds $candidate
+                    if (-not $candidateBounds.IsEmpty -and $candidateBounds.Top -ge $bounds.Bottom - $dockHeight) { $dockControl = $candidate; break }
+                }
             } catch [System.Windows.Automation.ElementNotAvailableException] { continue }
         }
         if (-not $dockControl) { throw "An enabled public-testing dock control is absent from the visible bottom dock: $name." }
-        $rectangle = $dockControl.Current.BoundingRectangle
+        $rectangle = Read-ElementBounds $dockControl
         if ($rectangle.Left -lt $bounds.Left - 2 -or $rectangle.Right -gt $bounds.Right + 2 -or
             $rectangle.Top -lt $bounds.Top - 2 -or $rectangle.Bottom -gt $bounds.Bottom + 2) {
             throw "An accessible public-testing dock control is clipped outside the native window: $name."
@@ -647,7 +725,7 @@ try {
     if ($PSVersionTable.PSEdition -ne "Desktop") { throw "Run this helper with Windows PowerShell 5.1." }
     $process = Get-Process -Id $AppProcessId -ErrorAction Stop
     if ([IO.Path]::GetFileName($process.Path) -ne "Notchling.Windows.exe") { throw "The supplied process is not the expected app." }
-    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -810,7 +888,7 @@ namespace NotchlingUiSmoke {
     $report.Stage = "Repeated actual-pointer hover opens and leaves without sticking"
     for ($cycle = 0; $cycle -lt 2; $cycle++) {
         $compact = Wait-Control "Open Notchling" ([System.Windows.Automation.ControlType]::Button) $true ([System.Windows.Automation.InvokePattern]::Pattern)
-        $compactBounds = $compact.Current.BoundingRectangle
+        $compactBounds = Read-ElementBounds $compact
         Move-Cursor ([int]($compactBounds.Left + $compactBounds.Width / 2)) ([int]($compactBounds.Top + $compactBounds.Height / 2))
         Get-SettingsScroll | Out-Null
         Visit-Panel
@@ -880,11 +958,9 @@ namespace NotchlingUiSmoke {
     # The toggle can scroll the editor out of view. Reacquire its current visible
     # rectangle, click it like a user and wait for focus before injecting typing.
     # UIA SetFocus alone does not prove asynchronous focus delivery on ARM64.
-    $endpoint = Scroll-ToSetting "HTTPS analytics endpoint" ([System.Windows.Automation.ControlType]::Edit) ([System.Windows.Automation.ValuePattern]::Pattern)
-    # UIA rectangles can extend into clipped scroll content. Its clickable point
-    # is inside the actually exposed part of the input, unlike rectangle centre.
-    $editorPoint = $endpoint.GetClickablePoint()
-    Move-Cursor ([int]$editorPoint.X) ([int]$editorPoint.Y)
+    $editorPoint = Reach-SettingsEditorPoint "HTTPS analytics endpoint"
+    $endpoint = $editorPoint.Element
+    Move-Cursor $editorPoint.X $editorPoint.Y
     [NotchlingUiSmoke.Native]::SetForegroundWindow([IntPtr]::new($WindowHandle)) | Out-Null
     [NotchlingUiSmoke.Native]::ClickLeftButton()
     $endpoint.SetFocus()
@@ -899,13 +975,7 @@ namespace NotchlingUiSmoke {
             $focusDetail = "focused='$($focused.Current.Name)', id='$($focused.Current.AutomationId)', process=$($focused.Current.ProcessId), foregroundProcess=$([NotchlingUiSmoke.Native]::ForegroundProcessId())"
             # Some WinUI providers expose the inner text editor as the focused
             # peer. Require it to belong to this exact input and app process.
-            if ($focused.Current.ProcessId -eq $AppProcessId) {
-                $ancestor = $focused
-                for ($level = 0; $endpoint -and $ancestor -and $level -lt 16; $level++) {
-                    if ($ancestor.Equals($endpoint)) { $editorOwnsFocus = $true; break }
-                    $ancestor = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($ancestor)
-                }
-            }
+            if (Test-OwnedDescendant $focused $endpoint) { $editorOwnsFocus = $true }
         }
         if ($editorOwnsFocus -and [NotchlingUiSmoke.Native]::ForegroundProcessId() -eq $AppProcessId) { break }
         if ($focusWait.Elapsed.TotalSeconds -ge 3) { throw "The disposable desktop did not focus the visible owned endpoint editor before real typing: $focusDetail." }
@@ -973,7 +1043,7 @@ namespace NotchlingUiSmoke {
         $updateButton = Scroll-ToSetting "Check for updates" ([System.Windows.Automation.ControlType]::Button) ([System.Windows.Automation.InvokePattern]::Pattern)
         Start-Sleep -Milliseconds 300
         $support = Wait-Control "Updates and troubleshooting" $null $true ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
-        $supportTop = $support.Current.BoundingRectangle.Top
+        $supportTop = (Read-ElementBounds $support).Top
         $downloadsBefore = @(Get-UpdateDownloadSnapshot)
         if (Find-Control "Notchling error" $null $false) { throw "The evaluation-update fixture already has a visible application error." }
         $daily = Scroll-ToSetting "Check for updates daily" $null ([System.Windows.Automation.TogglePattern]::Pattern)
@@ -981,7 +1051,7 @@ namespace NotchlingUiSmoke {
             throw "Daily network update checks were enabled without user opt-in."
         }
         Scroll-ToSetting "Check for updates" ([System.Windows.Automation.ControlType]::Button) ([System.Windows.Automation.InvokePattern]::Pattern) | Out-Null
-        $supportTop = (Wait-Control "Updates and troubleshooting" $null $true ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)).Current.BoundingRectangle.Top
+        $supportTop = (Read-ElementBounds (Wait-Control "Updates and troubleshooting" $null $true ([System.Windows.Automation.ExpandCollapsePattern]::Pattern))).Top
         Invoke-Button "Check for updates"
         # Discovery uses bounded public metadata requests. Anonymous GitHub
         # quotas/offline runners can produce retry guidance; exact discovery
@@ -1011,7 +1081,7 @@ namespace NotchlingUiSmoke {
         $support = Wait-Control "Updates and troubleshooting" $null $true ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
         # Adding guidance can change content height and therefore scroll percent.
         # The preceding section header must retain its viewport location.
-        if ([Math]::Abs($support.Current.BoundingRectangle.Top - $supportTop) -gt 2 * $displayScale) {
+        if ([Math]::Abs((Read-ElementBounds $support).Top - $supportTop) -gt 2 * $displayScale) {
             throw "Checking for evaluation updates reset the Settings viewport."
         }
         $report.UpdateActionPreservesSettingsScroll = $true
