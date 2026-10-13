@@ -7,10 +7,10 @@ Notchling builds separate x64, x86 and ARM64 apps. The installer uses the app ar
 | Device | App to choose | Setup helper | Qualification scope |
 | --- | --- | --- | --- |
 | Windows 10 22H2 x64 | x64 | Native x64 Windows PowerShell | Installed x64 cloud checks; consumer Windows 10 retesting remains open |
-| Windows 10 22H2 32-bit x86 | x86 | Native x86 Windows PowerShell | x86 app runs in cloud on x64; a real 32-bit Windows 10 device remains open |
+| Windows 10 22H2 32-bit x86 | x86 | Native x86 Windows PowerShell | v0.4.20 native x86 build/Setup passed on x64; full app qualification and a real 32-bit Windows 10 device remain open |
 | Windows 10 22H2 ARM64 | ARM64 | Existing x86 Windows PowerShell/.NET Framework helper | Compatibility path implemented; real Windows 10 ARM hardware remains unqualified |
-| Windows 11 x64 | x64 | Native x64 Windows PowerShell | Installed x64 cloud checks |
-| Windows 11 ARM64 | ARM64 | Native ARM64 Windows PowerShell | Native ARM64 cloud checks |
+| Windows 11 x64 | x64 | Native x64 Windows PowerShell | Published v0.3.4 installed x64 cloud checks; the current candidate's full app qualification is pending |
+| Windows 11 ARM64 | ARM64 | Native ARM64 Windows PowerShell | v0.4.20 native ARM64 build/Setup passed; full app qualification remains pending |
 
 Windows 11 has no 32-bit OS edition. The x86 app can run through supported Windows emulation; prefer the app matching the native device. ARM32 apps and operating systems are outside this product's build targets. Notchling requires Windows 10 build 19045 or Windows 11; this does not claim support for every earlier Windows 10 release.
 

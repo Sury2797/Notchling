@@ -16,6 +16,19 @@ if ([Environment]::OSVersion.Platform -ne 'Win32NT' -or $env:GITHUB_ACTIONS -ne 
 $nativeModules = Join-Path $PSHOME 'Modules'
 Import-Module -Name (Join-Path $nativeModules 'Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
 Import-Module -Name (Join-Path $nativeModules 'PKI\PKI.psd1') -ErrorAction Stop
+function Start-DirectProcess([string]$FilePath, [string]$Arguments = '', [string]$WorkingDirectory = '', [bool]$NoWindow = $false) {
+    # Direct CreateProcess keeps this caller's token and inherited desktop.
+    # Shell execution may involve Explorer; it is not part of an update handoff.
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = [IO.Path]::GetFullPath($FilePath)
+    $info.Arguments = $Arguments
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $NoWindow
+    $info.WorkingDirectory = $(if ($WorkingDirectory) { $WorkingDirectory } else { [IO.Path]::GetDirectoryName($info.FileName) })
+    $process = [Diagnostics.Process]::Start($info)
+    if (-not $process) { throw 'Windows did not create the owned update process.' }
+    return $process
+}
 function Get-FileSha256([string]$Path) {
     $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     $hasher = [Security.Cryptography.SHA256]::Create()
@@ -27,7 +40,7 @@ $report = [ordered]@{ Succeeded = $false; Stage = 'Initialize'; Architecture = $
     Scope = 'Actual versioned Inno upgrade, graceful owned-app shutdown, hash/publisher verification, workspace retention and relaunch. Baseline is the same source built as 0.0.0; previous-release migrations and the unpublished candidate public Update button are not claimed.';
     TemporarySignatureCopyOnly = $false; TrustedPublisherVerified = $false; GracefulShutdown = $false;
     ActualInnoUpgrade = $false; ActualRelaunch = $false; WorkspaceRetained = $false; OriginalInstallerUnchanged = $false; Error = $null }
-$certificate = $null; $child = $null; $relaunched = $null; $worker = $null; $failure = $null
+$certificate = $null; $child = $null; $relaunched = $null; $worker = $null; $failure = $null; $installed = $null
 $setup = (Resolve-Path -LiteralPath $SetupPath).Path
 $ReportDirectory = [IO.Path]::GetFullPath($ReportDirectory)
 New-Item -ItemType Directory -Path $ReportDirectory -Force | Out-Null
@@ -133,12 +146,14 @@ try {
     Invoke-Checked $iscc @('/DEvaluationBuild', "/DAppArchitecture=$AppArchitecture", '/DAppVersion=0.0.0', "/DPublishDirectory=$publish", "/DReleaseDirectory=$baselineRelease",
         "/DNativeInteropPath=$PWD/artifacts/setup-interop/Notchling.Setup.Interop.dll", "/DInstallerDocumentsDirectory=$PWD/artifacts/installer-documents", 'packaging/windows/Notch.iss')
     $baseline = Join-Path $baselineRelease "Notchling-0.0.0-windows-$AppArchitecture-evaluation-setup.exe"
-    $installed = Start-Process -FilePath $baseline -ArgumentList @('/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$install`"") -PassThru -Wait
+    $baselineArguments = '/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="' + $install + '"'
+    $installed = Start-DirectProcess $baseline $baselineArguments
+    if (-not $installed.WaitForExit(180000)) { throw 'The owned baseline Setup exceeded its 180-second qualification budget.' }
     if ($installed.ExitCode -ne 0) { throw "The older fixture installation failed (code $($installed.ExitCode))." }
     $oldApp = Join-Path $install 'app\0.0.0\Notchling.Windows.exe'
     if ([Diagnostics.FileVersionInfo]::GetVersionInfo($oldApp).FileVersion -ne '0.0.0.0') { throw 'The actual baseline application did not have its older file version.' }
     $report.Stage = 'Normalize and snapshot the real notebook through graceful shutdown'
-    $child = Start-Process -FilePath $oldApp -WorkingDirectory ([IO.Path]::GetDirectoryName($oldApp)) -PassThru
+    $child = Start-DirectProcess $oldApp
     Wait-AppReady $child | Out-Null; Quit-OwnedApp $child; $child.Dispose(); $child = $null
     $workspace = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Notch\workspace.json'
     if (-not (Test-Path -LiteralPath $workspace -PathType Leaf)) { throw 'The actual app did not save its notebook before the upgrade.' }
@@ -157,7 +172,7 @@ try {
     $hasher = [Security.Cryptography.SHA256]::Create()
     try { $pin = [BitConverter]::ToString($hasher.ComputeHash($certificate.GetPublicKey())).Replace('-', '') } finally { $hasher.Dispose() }
     $report.Stage = 'Prepare the actual detached update helper while the old app is running'
-    $child = Start-Process -FilePath $oldApp -WorkingDirectory ([IO.Path]::GetDirectoryName($oldApp)) -PassThru
+    $child = Start-DirectProcess $oldApp
     Wait-AppReady $child | Out-Null
     $helper = Join-Path $fixture 'update-handoff.ps1'; Copy-Item -LiteralPath (Join-Path $publish 'Update\update-handoff.ps1') -Destination $helper
     $nonce = [Guid]::NewGuid().ToString('N'); $ready = Join-Path $fixture ('ready-' + $nonce)
@@ -169,7 +184,8 @@ try {
         Trust = 'SignedPublisher'; Provenance = $null; PublisherKeySha256 = $pin; ReadyPath = $ready; Nonce = $nonce }
     [IO.File]::WriteAllText($requestPath, ($request | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
     $powershell = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\powershell.exe'
-    $worker = Start-Process -FilePath $powershell -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', "`"$helper`"", '-RequestPath', "`"$requestPath`"") -PassThru -WindowStyle Hidden
+    $helperArguments = '-NoLogo -NoProfile -NonInteractive -Mta -ExecutionPolicy Bypass -File "' + $helper + '" -RequestPath "' + $requestPath + '"'
+    $worker = Start-DirectProcess $powershell $helperArguments $fixture $true
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
     while (-not (Test-Path -LiteralPath $ready)) {
         if ($worker.HasExited) { throw "The actual handoff helper failed readiness (code $($worker.ExitCode))." }
@@ -206,7 +222,7 @@ try {
 }
 catch { $failure = $_; $report.Error = $_.Exception.Message }
 finally {
-    foreach ($process in @($worker, $child, $relaunched)) {
+    foreach ($process in @($worker, $child, $relaunched, $installed)) {
         if ($process) { try { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit(5000) | Out-Null } } catch { } finally { $process.Dispose() } }
     }
     if ($certificate) {
@@ -216,8 +232,14 @@ finally {
     }
     $uninstaller = Join-Path $install 'unins000.exe'
     if (Test-Path -LiteralPath $uninstaller) {
-        try { $removed = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -PassThru -Wait; if ($removed.ExitCode -ne 0) { throw "Updater fixture uninstall failed: $($removed.ExitCode)." } }
+        $removed = $null
+        try {
+            $removed = Start-DirectProcess $uninstaller '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART'
+            if (-not $removed.WaitForExit(120000)) { throw 'The owned updater fixture uninstall exceeded its 120-second cleanup budget.' }
+            if ($removed.ExitCode -ne 0) { throw "Updater fixture uninstall failed: $($removed.ExitCode)." }
+        }
         catch { $report.CleanupError = $_.Exception.Message; $report.Succeeded = $false }
+        finally { if ($removed) { try { if (-not $removed.HasExited) { $removed.Kill(); $removed.WaitForExit(5000) | Out-Null } } catch { } finally { $removed.Dispose() } } }
     }
     if ($originalDpi -ne [IntPtr]::Zero) { [NotchlingUpdateSmoke.Native]::SetThreadDpiAwarenessContext($originalDpi) | Out-Null }
     $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ReportDirectory 'windows-update-handoff.json') -Encoding UTF8

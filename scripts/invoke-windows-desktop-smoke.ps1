@@ -29,7 +29,7 @@ if (Test-Path -LiteralPath $reportFile) { Remove-Item -LiteralPath $reportFile }
 $context = [ordered]@{
     Succeeded = $false
     Mode = $Mode
-    Scope = 'Same-account/session observed medium-integrity CI tree, using an existing limited token or a separately labelled own restricted fixture. No assertion bypass, application/host privilege changes or external process changes. Consumer-token behavior is not certified.'
+    Scope = 'Same-account/session observed medium-integrity CI tree, using an existing limited token or a separately labelled own restricted fixture. No assertion bypass, application/host privilege changes or external process changes. Consumer-token behavior and Explorer/tray integration on a shellless private desktop are not certified.'
     Runner = $null
     Launched = $null
     TokenSource = $null
@@ -38,6 +38,9 @@ $context = [ordered]@{
     ChildExitCode = $null
     LaunchApi = $null
     ResumePreviousSuspendCount = $null
+    DiagnosticStage = 'Initialize owned launch'
+    ChildDesktopAfterResume = $null
+    DesktopRecovery = $null
     StdoutPath = $stdoutFile
     StderrPath = $stderrFile
     FreshSmokeReport = $false
@@ -89,19 +92,31 @@ namespace NotchlingDesktopSmoke {
         public bool HasRestrictions;
         public string Integrity { get { return IntegrityRid == 8192 ? "Medium" : IntegrityRid >= 16384 ? "System" : IntegrityRid >= 12288 ? "High" : "Other"; } }
     }
+    public sealed class DesktopRecovery {
+        internal IntPtr Owned, OriginalInput;
+        internal bool CancelPreparation, PreparationFinished;
+        public string Station, OriginalInputName, PrivateName;
+        public bool StationOperationalAccess, PrivateOperationalAccess, InputSwitched, InputRestored;
+        public uint PrivateIntegrityRid;
+        public string DefaultDesktopAccess, RestoreError;
+    }
     public sealed class Launch : IDisposable {
         internal IntPtr Process, Thread, Job;
         internal IntPtr StandardInput, StandardOutput, StandardError;
-        public uint ProcessId;
+        public uint ProcessId, PrimaryThreadId;
+        public string ChildDesktopAfterResume;
         public uint PreviousSuspendCount = UInt32.MaxValue;
         internal bool Begun;
         public SecurityState Runner, Child;
         public string TokenSource, Desktop, LaunchApi;
+        public DesktopRecovery Recovery;
         public void Resume() {
+            if (Recovery != null) Native.ActivateOwnedDesktop(Recovery);
             PreviousSuspendCount = Native.ResumeThread(Thread);
             if (PreviousSuspendCount == UInt32.MaxValue) throw new Win32Exception(Marshal.GetLastWin32Error(), "Resuming the owned medium-integrity smoke failed.");
             if (PreviousSuspendCount != 1) throw new InvalidOperationException("The owned primary thread returned unexpected previous suspension count " + PreviousSuspendCount + "; expected exactly 1. No additional resume or privilege change is attempted.");
             Begun = true;
+            ChildDesktopAfterResume = Native.ObserveOwnedChildDesktop(PrimaryThreadId);
         }
         public string ExecutionSnapshot() {
             try {
@@ -138,15 +153,20 @@ namespace NotchlingDesktopSmoke {
         public void Dispose() {
             if (!Begun && Process != IntPtr.Zero) Native.TerminateProcess(Process, 1);
             if (Job != IntPtr.Zero) { Native.CloseHandle(Job); Job = IntPtr.Zero; }
+            if (Process != IntPtr.Zero && Native.WaitForSingleObject(Process, 5000) == 258 && Recovery != null)
+                Recovery.RestoreError = "The owned child did not finish termination within the five-second desktop cleanup bound.";
             if (Thread != IntPtr.Zero) { Native.CloseHandle(Thread); Thread = IntPtr.Zero; }
             if (Process != IntPtr.Zero) { Native.CloseHandle(Process); Process = IntPtr.Zero; }
             if (StandardInput != IntPtr.Zero) { Native.CloseHandle(StandardInput); StandardInput = IntPtr.Zero; }
             if (StandardOutput != IntPtr.Zero) { Native.CloseHandle(StandardOutput); StandardOutput = IntPtr.Zero; }
             if (StandardError != IntPtr.Zero) { Native.CloseHandle(StandardError); StandardError = IntPtr.Zero; }
+            if (Recovery != null) Native.DisposeOwnedDesktop(Recovery);
         }
     }
     public static class Native {
         private const uint QueryDuplicate = 0x0008 | 0x0002;
+        public static string LastLaunchStage = "Initialize owned native launch";
+        public static DesktopRecovery LastDesktopRecovery;
         [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] private struct StartupInfo {
             public uint Size; public string Reserved, Desktop, Title;
             public uint X, Y, XSize, YSize, XChars, YChars, Fill, Flags;
@@ -180,8 +200,21 @@ namespace NotchlingDesktopSmoke {
         [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
         [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
         [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr memory);
-        [DllImport("user32.dll")] private static extern IntPtr GetProcessWindowStation();
-        [DllImport("user32.dll")] private static extern IntPtr GetThreadDesktop(uint thread);
+        [DllImport("advapi32.dll", EntryPoint="ConvertStringSecurityDescriptorToSecurityDescriptorW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool ConvertSecurityDescriptor(string text, uint revision, out IntPtr descriptor, out uint size);
+        [DllImport("advapi32.dll", SetLastError=true)] private static extern bool ImpersonateLoggedOnUser(IntPtr token);
+        [DllImport("advapi32.dll", SetLastError=true)] private static extern bool RevertToSelf();
+        [DllImport("advapi32.dll")] private static extern uint GetSecurityInfo(IntPtr handle, int objectType, uint information, out IntPtr owner, out IntPtr group, out IntPtr dacl, out IntPtr sacl, out IntPtr descriptor);
+        [DllImport("advapi32.dll", SetLastError=true)] private static extern bool GetAce(IntPtr acl, uint index, out IntPtr ace);
+        [DllImport("user32.dll", EntryPoint="OpenWindowStationW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern IntPtr OpenWindowStation(string name, bool inherit, uint access);
+        [DllImport("user32.dll", SetLastError=true)] private static extern bool CloseWindowStation(IntPtr station);
+        [DllImport("user32.dll", EntryPoint="CreateDesktopW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern IntPtr CreateDesktop(string name, IntPtr device, IntPtr mode, uint flags, uint access, ref SecurityAttributes attributes);
+        [DllImport("user32.dll", EntryPoint="OpenDesktopW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern IntPtr OpenDesktop(string name, uint flags, bool inherit, uint access);
+        [DllImport("user32.dll", SetLastError=true)] private static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
+        [DllImport("user32.dll", SetLastError=true)] private static extern bool SetThreadDesktop(IntPtr desktop);
+        [DllImport("user32.dll", SetLastError=true)] private static extern bool SwitchDesktop(IntPtr desktop);
+        [DllImport("user32.dll", SetLastError=true)] private static extern bool CloseDesktop(IntPtr desktop);
+        [DllImport("user32.dll", SetLastError=true)] private static extern IntPtr GetProcessWindowStation();
+        [DllImport("user32.dll", SetLastError=true)] private static extern IntPtr GetThreadDesktop(uint thread);
         [DllImport("user32.dll", EntryPoint="GetUserObjectInformationW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, uint size, out uint required);
         [DllImport("advapi32.dll", EntryPoint="CreateProcessWithTokenW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool CreateProcessWithToken(IntPtr token, uint logonFlags, string application, StringBuilder command, uint flags, IntPtr environment, string directory, ref StartupInfo startup, out ProcessInformation process);
         [DllImport("kernel32.dll", EntryPoint="CreateProcessW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool CreateProcess(string application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inherit, uint flags, IntPtr environment, string directory, ref StartupInfo startup, out ProcessInformation process);
@@ -334,6 +367,174 @@ namespace NotchlingDesktopSmoke {
             if (handle == IntPtr.Zero || !GetUserObjectInformation(handle, 2, value, (uint)value.Capacity * 2, out size)) throw new Win32Exception(Marshal.GetLastWin32Error(), "The caller desktop identity could not be observed.");
             return value.ToString();
         }
+        private static uint ObserveDesktopIntegrity(IntPtr desktop) {
+            IntPtr owner, group, dacl, sacl, descriptor;
+            uint code = GetSecurityInfo(desktop, 7, 0x10, out owner, out group, out dacl, out sacl, out descriptor);
+            if (code != 0) throw new Win32Exception(unchecked((int)code), "Reading the owned desktop mandatory label failed.");
+            try {
+                if (sacl == IntPtr.Zero) throw new InvalidOperationException("The owned desktop did not expose its explicit mandatory label.");
+                ushort count = unchecked((ushort)Marshal.ReadInt16(sacl, 4));
+                if (count == 0 || count > 16) throw new InvalidOperationException("The owned desktop mandatory ACE count exceeds its expected bound.");
+                for (uint index = 0; index < count; index++) {
+                    IntPtr ace;
+                    if (!GetAce(sacl, index, out ace)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                    if (Marshal.ReadByte(ace) != 0x11) continue;
+                    uint mask = unchecked((uint)Marshal.ReadInt32(ace, 4));
+                    IntPtr sid = IntPtr.Add(ace, 8);
+                    byte authorities = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
+                    if (authorities == 0 || (mask & 1) == 0) throw new InvalidOperationException("The owned desktop lacks its mandatory no-write-up policy.");
+                    return unchecked((uint)Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)authorities - 1)));
+                }
+                throw new InvalidOperationException("The owned desktop has no observed mandatory label ACE.");
+            } finally { if (descriptor != IntPtr.Zero) LocalFree(descriptor); }
+        }
+        private static DesktopRecovery CreateOwnedDesktop(IntPtr primary, SecurityState runner, string stationName, string defaultName) {
+            // A restricted child can fail USER32 initialization on Default even
+            // after process creation succeeds. Never modify that desktop/station.
+            // Only the own restricted Actions fixture receives a fresh private
+            // desktop; all actual UI/OLE/typing checks remain in its active tree.
+            var recovery = new DesktopRecovery { Station = stationName, PrivateName = "Notchling-CI-" + Guid.NewGuid().ToString("N") };
+            LastDesktopRecovery = recovery;
+            if (!String.Equals(stationName, "WinSta0", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The own UI fixture requires the already interactive WinSta0 station; no station or account configuration is changed.");
+            recovery.OriginalInput = OpenInputDesktop(0, false, 0x181);
+            if (recovery.OriginalInput == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "Opening the exact prior input desktop for eventual restoration failed.");
+            try { recovery.OriginalInputName = ObjectName(recovery.OriginalInput); }
+            catch { DisposeOwnedDesktop(recovery); throw; }
+            IntPtr workerToken;
+            if (!DuplicateTokenEx(primary, 0x02000000, IntPtr.Zero, 2, 1, out workerToken)) {
+                int tokenError = Marshal.GetLastWin32Error();
+                DisposeOwnedDesktop(recovery);
+                throw new Win32Exception(tokenError, "Duplicating the own fixture token for its isolated desktop access probe failed.");
+            }
+            Exception workerError = null;
+            var worker = new System.Threading.Thread(delegate() {
+                IntPtr descriptor = IntPtr.Zero, originalThreadDesktop = GetThreadDesktop(GetCurrentThreadId());
+                bool impersonating = false;
+                try {
+                    LastLaunchStage = "Prove selected token operational station access without changing existing security";
+                    if (!ImpersonateLoggedOnUser(workerToken)) throw new Win32Exception(Marshal.GetLastWin32Error(), "The own fixture station access probe could not impersonate its selected token.");
+                    impersonating = true;
+                    // Operational rights only: no DELETE/WRITE_DAC/WRITE_OWNER.
+                    IntPtr station = OpenWindowStation(stationName, false, 0x33F);
+                    if (station == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "The selected own fixture token cannot access the existing interactive station. An owned desktop cannot repair station denial; its security is left unchanged.");
+                    if (station == GetProcessWindowStation()) throw new InvalidOperationException("The station probe returned the borrowed process handle; it is neither closed nor accepted as an independent access proof.");
+                    try { recovery.StationOperationalAccess = true; }
+                    finally { if (!CloseWindowStation(station)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Closing the independently opened station access-probe handle failed."); }
+                    IntPtr prior = OpenDesktop(defaultName, 0, false, 0x1FF);
+                    if (prior == IntPtr.Zero) recovery.DefaultDesktopAccess = "Operational access denied/unavailable; Win32=" + Marshal.GetLastWin32Error();
+                    else {
+                        recovery.DefaultDesktopAccess = "Operational access observed; private-desktop qualification still isolates the restricted fixture";
+                        if (prior == GetThreadDesktop(GetCurrentThreadId())) recovery.DefaultDesktopAccess = "Probe returned borrowed thread desktop; not accepted as an independent access proof or closed";
+                        else if (!CloseDesktop(prior)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Closing the independent prior desktop probe failed.");
+                    }
+                    if (!RevertToSelf()) throw new Win32Exception(Marshal.GetLastWin32Error(), "Restoring the owned desktop worker identity failed.");
+                    impersonating = false;
+                    LastLaunchStage = "Create fresh own-user/SYSTEM private medium desktop";
+                    string security = "D:P(A;;GA;;;" + runner.Sid + ")(A;;GA;;;SY)S:(ML;;NW;;;ME)";
+                    uint descriptorSize;
+                    if (!ConvertSecurityDescriptor(security, 1, out descriptor, out descriptorSize)) throw new Win32Exception(Marshal.GetLastWin32Error(), "The explicit owned private desktop descriptor could not be prepared.");
+                    var attributes = new SecurityAttributes { Size = (uint)Marshal.SizeOf(typeof(SecurityAttributes)), Descriptor = descriptor, Inherit = 0 };
+                    recovery.Owned = CreateDesktop(recovery.PrivateName, IntPtr.Zero, IntPtr.Zero, 0, 0x000F01FF, ref attributes);
+                    if (recovery.Owned == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "Creating the fresh owned private desktop failed.");
+                    recovery.PrivateIntegrityRid = ObserveDesktopIntegrity(recovery.Owned);
+                    if (recovery.PrivateIntegrityRid != 8192) throw new InvalidOperationException("The actual owned desktop mandatory label is not medium.");
+                    LastLaunchStage = "Prove selected token access to observed medium private desktop";
+                    if (!ImpersonateLoggedOnUser(workerToken)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                    impersonating = true;
+                    IntPtr observed = OpenDesktop(recovery.PrivateName, 0, false, 0x1FF);
+                    if (observed == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "The selected own fixture token cannot access the fresh medium desktop.");
+                    if (observed == recovery.Owned || observed == GetThreadDesktop(GetCurrentThreadId()))
+                        throw new InvalidOperationException("The private desktop access probe returned an already owned/borrowed handle; independent selected-token access is not proven and that existing handle is not closed.");
+                    try {
+                        if (!String.Equals(ObjectName(observed), recovery.PrivateName, StringComparison.Ordinal)) throw new InvalidOperationException("The observed owned desktop identity does not match its fresh name.");
+                        recovery.PrivateOperationalAccess = true;
+                    } finally { if (!CloseDesktop(observed)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Closing the independent private desktop probe failed."); }
+                } catch (Exception error) { workerError = error; }
+                finally {
+                    if (impersonating && !RevertToSelf() && workerError == null) workerError = new Win32Exception(Marshal.GetLastWin32Error(), "Restoring desktop worker impersonation failed.");
+                    // CreateDesktop is documented to assign the caller thread;
+                    // use a fresh thread and explicitly detach before it exits.
+                    if (originalThreadDesktop != IntPtr.Zero && !SetThreadDesktop(originalThreadDesktop) && workerError == null)
+                        workerError = new Win32Exception(Marshal.GetLastWin32Error(), "Restoring the fresh worker thread desktop failed.");
+                    if (descriptor != IntPtr.Zero) LocalFree(descriptor);
+                    CloseHandle(workerToken);
+                    lock (recovery) {
+                        recovery.PreparationFinished = true;
+                        if (recovery.CancelPreparation) DisposeOwnedDesktop(recovery);
+                    }
+                }
+            });
+            worker.IsBackground = true;
+            worker.SetApartmentState(System.Threading.ApartmentState.MTA);
+            try { worker.Start(); }
+            catch { CloseHandle(workerToken); DisposeOwnedDesktop(recovery); throw; }
+            if (!worker.Join(30000)) {
+                lock (recovery) {
+                    recovery.CancelPreparation = true;
+                    if (recovery.PreparationFinished) DisposeOwnedDesktop(recovery);
+                }
+                throw new TimeoutException("The owned private desktop access/create worker exceeded its 30-second bound.");
+            }
+            if (workerError != null) { DisposeOwnedDesktop(recovery); throw new InvalidOperationException("Owned private desktop preparation failed at " + LastLaunchStage + ": " + workerError.Message, workerError); }
+            return recovery;
+        }
+        internal static void ActivateOwnedDesktop(DesktopRecovery recovery) {
+            LastLaunchStage = "Activate verified own medium desktop before releasing child suspension";
+            if (!recovery.StationOperationalAccess || !recovery.PrivateOperationalAccess || recovery.PrivateIntegrityRid != 8192)
+                throw new InvalidOperationException("The owned desktop cannot receive real input before its access and integrity checks pass.");
+            if (!SwitchDesktop(recovery.Owned)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Activating the owned private input desktop failed.");
+            recovery.InputSwitched = true;
+            IntPtr active = OpenInputDesktop(0, false, 1);
+            if (active == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "Observing the actual active private input desktop failed.");
+            try { if (!String.Equals(ObjectName(active), recovery.PrivateName, StringComparison.Ordinal)) throw new InvalidOperationException("The observed input desktop is not the owned private desktop."); }
+            finally { CloseDesktop(active); }
+            LastLaunchStage = "Release exactly one suspension on own verified desktop child";
+        }
+        internal static string ObserveOwnedChildDesktop(uint threadId) {
+            try {
+                IntPtr desktop = GetThreadDesktop(threadId);
+                return desktop == IntPtr.Zero ? "Not observed after resume; Win32=" + Marshal.GetLastWin32Error() : ObjectName(desktop);
+            } catch (Exception error) { return "Not observed after resume: " + error.Message; }
+        }
+        private static bool CloseOwnedDesktopHandle(IntPtr desktop) {
+            for (int attempt = 0; attempt < 3; attempt++) {
+                if (CloseDesktop(desktop)) return true;
+                if (Marshal.GetLastWin32Error() != 170 || attempt == 2) return false;
+                System.Threading.Thread.Sleep(25);
+            }
+            return false;
+        }
+        private static void DesktopCleanupError(DesktopRecovery recovery, string message) {
+            recovery.RestoreError = String.IsNullOrEmpty(recovery.RestoreError) ? message : recovery.RestoreError + " | " + message;
+        }
+        internal static void DisposeOwnedDesktop(DesktopRecovery recovery) {
+            // Called after closing only the owned job tree. Restore the exact
+            // saved input handle, never assume that its name was Default.
+            if (recovery.InputSwitched && !recovery.InputRestored) {
+                if (recovery.OriginalInput == IntPtr.Zero || !SwitchDesktop(recovery.OriginalInput))
+                    recovery.RestoreError = "Restoring the exact saved input desktop failed; Win32=" + Marshal.GetLastWin32Error();
+                else {
+                    IntPtr active = OpenInputDesktop(0, false, 1);
+                    if (active == IntPtr.Zero) recovery.RestoreError = "Observing restored input desktop failed; Win32=" + Marshal.GetLastWin32Error();
+                    else {
+                        try {
+                            recovery.InputRestored = String.Equals(ObjectName(active), recovery.OriginalInputName, StringComparison.Ordinal);
+                            if (!recovery.InputRestored) recovery.RestoreError = "The observed restored input desktop differs from the exact saved desktop.";
+                        } catch (Exception error) { recovery.RestoreError = error.Message; }
+                        finally { CloseDesktop(active); }
+                    }
+                }
+            } else if (!recovery.InputSwitched) recovery.InputRestored = true;
+            if (recovery.Owned != IntPtr.Zero) {
+                if (!CloseOwnedDesktopHandle(recovery.Owned)) DesktopCleanupError(recovery, "Closing the owned private desktop failed; Win32=" + Marshal.GetLastWin32Error());
+                else recovery.Owned = IntPtr.Zero;
+            }
+            if (recovery.OriginalInput != IntPtr.Zero) {
+                if (!CloseOwnedDesktopHandle(recovery.OriginalInput)) DesktopCleanupError(recovery, "Closing the separately opened original input desktop handle failed; Win32=" + Marshal.GetLastWin32Error());
+                else recovery.OriginalInput = IntPtr.Zero;
+            }
+        }
         public static string Quote(string value) {
             if (value == null || value.IndexOf('\0') >= 0) throw new ArgumentException("An owned launch argument contains an invalid character.");
             var result = new StringBuilder("\""); int slashes = 0;
@@ -357,7 +558,9 @@ namespace NotchlingDesktopSmoke {
             IntPtr runnerToken = IntPtr.Zero, selected = IntPtr.Zero, primary = IntPtr.Zero, block = IntPtr.Zero, job = IntPtr.Zero;
             IntPtr input = IntPtr.Zero, output = IntPtr.Zero, errorOutput = IntPtr.Zero, attributeList = IntPtr.Zero, handles = IntPtr.Zero;
             bool attributesInitialized = false;
+            DesktopRecovery recovery = null;
             ProcessInformation process = new ProcessInformation(); bool created = false;
+            LastDesktopRecovery = null;
             try {
                 if (!OpenProcessToken(GetCurrentProcess(), QueryDuplicate, out runnerToken)) throw new Win32Exception(Marshal.GetLastWin32Error());
                 SecurityState runner = State(runnerToken); string source = "Current normal-user token";
@@ -376,6 +579,13 @@ namespace NotchlingDesktopSmoke {
                 block = Marshal.StringToHGlobalUni(environment);
                 const uint flags = 0x00000400 | 0x08000000 | 0x00000004; // Unicode environment, no console, suspended for verification.
                 bool ownRestricted = source.StartsWith("Own restricted CI fixture token", StringComparison.Ordinal);
+                if (ownRestricted) {
+                    string stationName = ObjectName(GetProcessWindowStation());
+                    recovery = CreateOwnedDesktop(primary, runner, stationName, ObjectName(GetThreadDesktop(GetCurrentThreadId())));
+                    desktop = stationName + "\\" + recovery.PrivateName;
+                    startup.Desktop = desktop;
+                }
+                LastLaunchStage = "Create suspended own smoke child with three valid native standard handles";
                 string api;
                 if (primary == IntPtr.Zero || ownRestricted) {
                     IntPtr attributeBytes = IntPtr.Zero;
@@ -411,12 +621,13 @@ namespace NotchlingDesktopSmoke {
                 if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(JobExtendedLimits))) || !AssignProcessToJobObject(job, process.Process))
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "The suspended owned smoke tree could not be bounded by its job.");
                 var launch = new Launch { Process = process.Process, Thread = process.Thread, Job = job, ProcessId = process.ProcessId,
-                    StandardInput = input, StandardOutput = output, StandardError = errorOutput, Runner = runner, Child = child,
-                    TokenSource = source, Desktop = desktop, LaunchApi = api };
-                created = false; job = IntPtr.Zero; input = output = errorOutput = IntPtr.Zero; return launch; // ownership transfers to Launch
+                    StandardInput = input, StandardOutput = output, StandardError = errorOutput, Runner = runner, Child = child, PrimaryThreadId = process.ThreadId,
+                    TokenSource = source, Desktop = desktop, LaunchApi = api, Recovery = recovery };
+                created = false; job = IntPtr.Zero; input = output = errorOutput = IntPtr.Zero; recovery = null; return launch; // ownership transfers to Launch
             } finally {
                 if (created) { TerminateProcess(process.Process, 1); CloseHandle(process.Thread); CloseHandle(process.Process); }
                 if (job != IntPtr.Zero) CloseHandle(job);
+                if (recovery != null) DisposeOwnedDesktop(recovery);
                 if (attributesInitialized) DeleteProcThreadAttributeList(attributeList);
                 if (attributeList != IntPtr.Zero) Marshal.FreeHGlobal(attributeList); if (handles != IntPtr.Zero) Marshal.FreeHGlobal(handles);
                 if (input != IntPtr.Zero) CloseHandle(input); if (output != IntPtr.Zero) CloseHandle(output); if (errorOutput != IntPtr.Zero) CloseHandle(errorOutput);
@@ -458,6 +669,8 @@ namespace NotchlingDesktopSmoke {
     $context.Desktop = $ticket.Desktop
     $context.ChildProcessId = $ticket.ProcessId
     $context.LaunchApi = $ticket.LaunchApi
+    $context.DesktopRecovery = $ticket.Recovery
+    $context.DiagnosticStage = [NotchlingDesktopSmoke.Native]::LastLaunchStage
     # Publish the observed suspended child before running any PowerShell/runtime
     # stage. A later timeout must not erase the real privilege evidence.
     $context | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $contextFile -Encoding utf8
@@ -466,9 +679,12 @@ namespace NotchlingDesktopSmoke {
     Write-Output "::notice title=Observed CI desktop child token::$observed"
     $ticket.Resume()
     $context.ResumePreviousSuspendCount = $ticket.PreviousSuspendCount
+    $context.ChildDesktopAfterResume = $ticket.ChildDesktopAfterResume
+    $context.DiagnosticStage = [NotchlingDesktopSmoke.Native]::LastLaunchStage
     $context | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $contextFile -Encoding utf8
     Write-Output "::notice title=Observed owned smoke thread resume::Mode=$Mode; childPid=$($ticket.ProcessId); previousSuspendCount=$($ticket.PreviousSuspendCount); exactly one owned suspension was released; stdout/stderr are fresh owned files."
     $watchdog = if ($Mode -eq 'App') { 360000 } else { 540000 }
+    if ($ticket.Recovery) { Write-Output "::notice title=Owned private desktop qualification scope::Own-user/SYSTEM private medium desktop; station and selected-token access proved; actual input desktop switched and observed. This shellless CI desktop does not certify consumer Explorer/tray integration." }
     $context.ChildExitCode = $ticket.Wait($watchdog)
     if (-not (Test-Path -LiteralPath $reportFile -PathType Leaf)) { throw "The owned normal-user smoke exited $($context.ChildExitCode) without its required report." }
     $file = Get-Item -LiteralPath $reportFile
@@ -500,13 +716,26 @@ namespace NotchlingDesktopSmoke {
 } catch {
     $failure = $_
     $context.Error = $_.Exception.Message
+    $nativeType = 'NotchlingDesktopSmoke.Native' -as [type]
+    if ($nativeType) {
+        $context.DiagnosticStage = $nativeType::LastLaunchStage
+        $context.DesktopRecovery = $nativeType::LastDesktopRecovery
+    }
     if ($ticket) {
         $context.ResumePreviousSuspendCount = $ticket.PreviousSuspendCount
         $context.Error += " Observed childPid=$($ticket.ProcessId); child integrity=$($ticket.Child.IntegrityRid), elevated=$($ticket.Child.Elevated), adminDenyOnly=$($ticket.Child.AdministratorDenyOnly), session=$($ticket.Child.SessionId); launch=$($ticket.LaunchApi); previousSuspendCount=$($ticket.PreviousSuspendCount); token=$($ticket.TokenSource). Owned progress: $(Read-OwnedDesktopProgress)"
         $failure = [Management.Automation.ErrorRecord]::new([InvalidOperationException]::new($context.Error, $_.Exception), 'OwnedDesktopSmokeFailed', [Management.Automation.ErrorCategory]::OperationStopped, $context.ChildProcessId)
     }
 } finally {
-    if ($ticket) { $ticket.Dispose() }
+    if ($ticket) {
+        $ticket.Dispose()
+        $context.DesktopRecovery = $ticket.Recovery
+        if ($ticket.Recovery -and (-not $ticket.Recovery.InputRestored -or $ticket.Recovery.RestoreError)) {
+            $context.Succeeded = $false
+            $context.Error = ([string]$context.Error + ' ' + [string]$ticket.Recovery.RestoreError).Trim()
+            if (-not $failure) { $failure = [Management.Automation.ErrorRecord]::new([InvalidOperationException]::new($context.Error), 'OwnedDesktopRestoreFailed', [Management.Automation.ErrorCategory]::OperationStopped, $context.ChildProcessId) }
+        }
+    }
     $context | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $contextFile -Encoding utf8
 }
 if ($failure) { throw $failure }

@@ -6,6 +6,19 @@ Set-StrictMode -Version Latest
 # Load the OS verifier from its native installation, never an arbitrary module.
 $securityModule = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1'
 Import-Module -Name $securityModule -ErrorAction Stop
+function Start-DirectProcess([string]$FilePath, [string]$Arguments = '', [string]$WorkingDirectory = '', [bool]$NoWindow = $false) {
+    # Direct CreateProcess keeps this caller's token and inherited desktop.
+    # Shell execution may involve Explorer; it is not part of an update handoff.
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = [IO.Path]::GetFullPath($FilePath)
+    $info.Arguments = $Arguments
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $NoWindow
+    $info.WorkingDirectory = $(if ($WorkingDirectory) { $WorkingDirectory } else { [IO.Path]::GetDirectoryName($info.FileName) })
+    $process = [Diagnostics.Process]::Start($info)
+    if (-not $process) { throw 'Windows did not create the owned update process.' }
+    return $process
+}
 function Get-FileSha256([string]$Path) {
     $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     $hasher = [Security.Cryptography.SHA256]::Create()
@@ -17,7 +30,7 @@ Add-Type -AssemblyName System.Net.Http
 $repository = 'https://github.com/Sury2797/Notchling'
 $api = 'https://api.github.com/repos/Sury2797/Notchling'
 $resultDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Notchling\Updates'
-$request = $null; $parentExited = $false; $setupExitCode = $null
+$request = $null; $parentExited = $false; $setupExitCode = $null; $setup = $null; $setupStillRunning = $false
 function Write-UpdateResult([string]$State, [string]$Message, [Nullable[int]]$ExitCode = $null) {
     New-Item -ItemType Directory -Path $resultDirectory -Force | Out-Null
     $value = @{ schemaVersion = 1; state = $State; message = $Message; checkedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); installerExitCode = $ExitCode }
@@ -126,26 +139,34 @@ try {
     # Silent Setup keeps the user out of a second wizard; it preserves existing
     # per-user data and never kills applications or reboots Windows automatically.
     $arguments = '/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /RESTARTEXITCODE=3010 /DIR="' + $installDirectory + '" /LOG="' + $setupLog + '"'
-    $setup = Start-Process -FilePath $request.InstallerPath -ArgumentList $arguments -PassThru -Wait
+    $setup = Start-DirectProcess $request.InstallerPath $arguments
+    if (-not $setup.WaitForExit(600000)) {
+        $setupStillRunning = $true
+        throw 'Setup is still running after ten minutes. Let it finish, then open Notchling from Start. The updater has not terminated Setup or changed your workspace.'
+    }
     $setupExitCode = $setup.ExitCode
     if ($setup.ExitCode -notin @(0, 3010)) { throw "Setup did not complete (code $($setup.ExitCode)). See the local update log." }
     if (-not (Test-Path -LiteralPath $expected -PathType Leaf)) { throw 'Setup finished without the expected new application file.' }
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($expected)
     if (($version.FileMajorPart.ToString() + '.' + $version.FileMinorPart + '.' + $version.FileBuildPart) -cne $request.Version) { throw 'The installed application version did not match the prepared update.' }
-    Start-Process -FilePath $expected -WorkingDirectory ([IO.Path]::GetDirectoryName($expected)) | Out-Null
+    $opened = Start-DirectProcess $expected
+    try {
+        if ($opened.WaitForExit(2000) -and $opened.ExitCode -ne 0) { throw "The updated application exited during launch (code $($opened.ExitCode))." }
+    } finally { $opened.Dispose() }
     Write-UpdateResult 'Completed' $(if ($setup.ExitCode -eq 3010) { 'Notchling updated and reopened. Windows requests a restart to finish shared component changes.' } else { 'Notchling updated and reopened. Your workspace is preserved.' }) $setup.ExitCode
 }
 catch {
-    Write-UpdateResult 'Failed' $_.Exception.Message $setupExitCode
-    if ($parentExited -and $request -and (Test-Path -LiteralPath $request.CurrentExecutable -PathType Leaf)) {
-        Start-Process -FilePath $request.CurrentExecutable -WorkingDirectory ([IO.Path]::GetDirectoryName($request.CurrentExecutable)) -ErrorAction SilentlyContinue | Out-Null
+    Write-UpdateResult $(if ($setupStillRunning) { 'Installing' } else { 'Failed' }) $_.Exception.Message $setupExitCode
+    if ($parentExited -and -not $setupStillRunning -and $request -and (Test-Path -LiteralPath $request.CurrentExecutable -PathType Leaf)) {
+        try { $restored = Start-DirectProcess $request.CurrentExecutable; $restored.Dispose() } catch { }
     }
     exit 1
 }
 finally {
     # A startup failure keeps the download for retry; completed/cancelled workers
     # delete only their own unique temp directory, never the user's workspace.
-    if ($request -and ($parentExited -or (Test-Path -LiteralPath $request.ReadyPath))) {
+    if ($setup) { $setup.Dispose() }
+    if (-not $setupStillRunning -and $request -and ($parentExited -or (Test-Path -LiteralPath $request.ReadyPath))) {
         Remove-Item -LiteralPath $request.InstallerPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $request.ReadyPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $fullRequest -Force -ErrorAction SilentlyContinue

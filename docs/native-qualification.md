@@ -15,7 +15,11 @@
 | Text scaling / theme / high contrast | Pending |
 | Examiner / date | Pending |
 
-Run every row on Windows 10 22H2 and separately on each Windows 11 release and architecture selected for support. The v0.4.20 targets are native x64, x86 and ARM64 apps; a passing x86 app on an x64 cloud host does not fill a 32-bit Windows 10 result. Windows 11 has no x86 edition. Record native ARM64 results separately from emulation and keep unsupported configurations out of the download promise.
+Run every row on Windows 10 22H2 and separately on each Windows 11 release and architecture selected for support. The v0.4.21 targets are native x64, x86 and ARM64 apps; a passing x86 app on an x64 cloud host does not fill a 32-bit Windows 10 result. Windows 11 has no x86 edition. Record native ARM64 results separately from emulation and keep unsupported configurations out of the download promise.
+
+The v0.4.21 restricted CI fixture implements an owned private desktop; native execution is pending. Its record must include selected-token window-station/desktop access, the owned-user/SYSTEM permissions and medium no-write-up label readback, observed input-desktop switching before child resume, and restoration of the exact prior input desktop after owned-job cleanup. Record actual medium child/app tokens and retain real input, UI and OLE transfer assertions. This shell-less fixture supplies no Explorer/tray or consumer standard-user evidence; those rows require a separate normal desktop.
+
+The v0.4.21 upgrade source uses direct `ProcessStartInfo.UseShellExecute = false` launches. Native qualification must verify argument/environment forwarding, bounded Setup waits that retain an active installer and payload in `Installing` without reopening the old app, and the updated app's two-second nonzero-exit check with recovery. Local launch checks passed; the actual native upgrade remains pending.
 
 | Area | Steps | Expected result | Result / evidence |
 | --- | --- | --- | --- |
