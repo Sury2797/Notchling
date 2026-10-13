@@ -25,7 +25,7 @@ if (Test-Path -LiteralPath $reportFile) { Remove-Item -LiteralPath $reportFile }
 $context = [ordered]@{
     Succeeded = $false
     Mode = $Mode
-    Scope = 'Same-account/session normal-user desktop launch of the complete real Windows smoke tree. No assertion bypass, application privilege changes or external process changes.'
+    Scope = 'Same-account/session observed medium-integrity CI tree, using an existing limited token or a separately labelled own restricted fixture. No assertion bypass, application/host privilege changes or external process changes. Consumer-token behavior is not certified.'
     Runner = $null
     Launched = $null
     TokenSource = $null
@@ -52,6 +52,8 @@ namespace NotchlingDesktopSmoke {
         public bool Elevated;
         public int ElevationType;
         public int SessionId;
+        public bool AdministratorDenyOnly;
+        public bool HasRestrictions;
         public string Integrity { get { return IntegrityRid == 8192 ? "Medium" : IntegrityRid >= 16384 ? "System" : IntegrityRid >= 12288 ? "High" : "Other"; } }
     }
     public sealed class Launch : IDisposable {
@@ -88,12 +90,20 @@ namespace NotchlingDesktopSmoke {
             public IntPtr ReservedData, Input, Output, Error;
         }
         [StructLayout(LayoutKind.Sequential)] private struct ProcessInformation { public IntPtr Process, Thread; public uint ProcessId, ThreadId; }
+        [StructLayout(LayoutKind.Sequential)] private struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
         [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentProcess();
         [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
         [DllImport("kernel32.dll", SetLastError=true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint process);
         [DllImport("advapi32.dll", SetLastError=true)] private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
         [DllImport("advapi32.dll", SetLastError=true)] private static extern bool GetTokenInformation(IntPtr token, int informationClass, IntPtr information, int size, out int returned);
         [DllImport("advapi32.dll", SetLastError=true)] private static extern bool DuplicateTokenEx(IntPtr token, uint access, IntPtr attributes, int level, int type, out IntPtr duplicate);
+        [DllImport("advapi32.dll", SetLastError=true)] private static extern bool CreateRestrictedToken(IntPtr token, uint flags, uint disabledCount,
+            [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex=2)] SidAndAttributes[] disabledSids,
+            uint deletedPrivilegeCount, IntPtr deletedPrivileges, uint restrictedSidCount, IntPtr restrictedSids, out IntPtr restrictedToken);
+        [DllImport("advapi32.dll", EntryPoint="ConvertStringSidToSidW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool ConvertStringSidToSid(string text, out IntPtr sid);
+        [DllImport("advapi32.dll", SetLastError=true)] private static extern bool SetTokenInformation(IntPtr token, int informationClass, IntPtr information, int size);
+        [DllImport("advapi32.dll")] private static extern bool EqualSid(IntPtr left, IntPtr right);
+        [DllImport("advapi32.dll")] private static extern uint GetLengthSid(IntPtr sid);
         [DllImport("advapi32.dll", EntryPoint="ConvertSidToStringSidW", SetLastError=true)] private static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr text);
         [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
         [DllImport("advapi32.dll")] private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
@@ -120,7 +130,8 @@ namespace NotchlingDesktopSmoke {
             try { return Marshal.ReadInt32(buffer); } finally { Marshal.FreeHGlobal(buffer); }
         }
         private static SecurityState State(IntPtr token) {
-            var value = new SecurityState { Elevated = Integer(token, 20) != 0, ElevationType = Integer(token, 18), SessionId = Integer(token, 12) };
+            var value = new SecurityState { Elevated = Integer(token, 20) != 0, ElevationType = Integer(token, 18), SessionId = Integer(token, 12),
+                AdministratorDenyOnly = AdminDenyOnly(token), HasRestrictions = Integer(token, 21) != 0 };
             IntPtr user = Information(token, 1), integrity = IntPtr.Zero, sidText = IntPtr.Zero;
             try {
                 if (!ConvertSidToStringSid(Marshal.ReadIntPtr(user), out sidText)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -132,6 +143,52 @@ namespace NotchlingDesktopSmoke {
                 value.IntegrityRid = unchecked((uint)Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)count - 1)));
                 return value;
             } finally { if (sidText != IntPtr.Zero) LocalFree(sidText); if (integrity != IntPtr.Zero) Marshal.FreeHGlobal(integrity); Marshal.FreeHGlobal(user); }
+        }
+        private static bool AdminDenyOnly(IntPtr token) {
+            IntPtr administrator = IntPtr.Zero, groups = IntPtr.Zero;
+            try {
+                if (!ConvertStringSidToSid("S-1-5-32-544", out administrator)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                groups = Information(token, 2);
+                int count = Marshal.ReadInt32(groups), size = Marshal.SizeOf(typeof(SidAndAttributes));
+                if (count < 0 || count > 4096) throw new InvalidOperationException("The observed token group count exceeds its bound.");
+                for (int index = 0; index < count; index++) {
+                    var group = (SidAndAttributes)Marshal.PtrToStructure(IntPtr.Add(groups, IntPtr.Size + index * size), typeof(SidAndAttributes));
+                    if (EqualSid(group.Sid, administrator)) return (group.Attributes & 0x10) != 0 && (group.Attributes & 0x4) == 0;
+                }
+                return false;
+            } finally { if (groups != IntPtr.Zero) Marshal.FreeHGlobal(groups); if (administrator != IntPtr.Zero) LocalFree(administrator); }
+        }
+        private static IntPtr RestrictedFixtureToken(IntPtr runnerToken, SecurityState runner) {
+            IntPtr administrator = IntPtr.Zero, restricted = IntPtr.Zero, primary = IntPtr.Zero, mediumSid = IntPtr.Zero, label = IntPtr.Zero;
+            try {
+                if (!ConvertStringSidToSid("S-1-5-32-544", out administrator)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                // Restrict only this owned CI tree. DISABLE_MAX_PRIVILEGE removes
+                // all privileges except ChangeNotify; LUA_TOKEN creates a limited
+                // user-account token. No SANDBOX_INERT or policy-changing flags.
+                if (!CreateRestrictedToken(runnerToken, 1 | 4, 1, new SidAndAttributes[] { new SidAndAttributes { Sid = administrator } },
+                    0, IntPtr.Zero, 0, IntPtr.Zero, out restricted)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Deriving the own-runner restricted CI fixture token failed.");
+                // The source handle can have query/duplicate rights only. Give
+                // this newly derived primary token explicit adjust-default rights
+                // before lowering its mandatory label, without changing the runner.
+                if (!DuplicateTokenEx(restricted, 0x0008 | 0x0002 | 0x0001 | 0x0080, IntPtr.Zero, 2, 1, out primary))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Duplicating the restricted fixture primary token failed.");
+                if (!ConvertStringSidToSid("S-1-16-8192", out mediumSid)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                int structureSize = Marshal.SizeOf(typeof(SidAndAttributes)), sidSize = checked((int)GetLengthSid(mediumSid));
+                if (sidSize <= 0 || sidSize > 68) throw new InvalidOperationException("The requested medium integrity SID exceeds its bound.");
+                label = Marshal.AllocHGlobal(structureSize + sidSize);
+                var sidBytes = new byte[sidSize]; Marshal.Copy(mediumSid, sidBytes, 0, sidSize);
+                IntPtr copiedSid = IntPtr.Add(label, structureSize); Marshal.Copy(sidBytes, 0, copiedSid, sidSize);
+                Marshal.StructureToPtr(new SidAndAttributes { Sid = copiedSid, Attributes = 0x20 }, label, false); // SE_GROUP_INTEGRITY
+                if (!SetTokenInformation(primary, 25, label, structureSize + sidSize)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Lowering the own restricted fixture integrity label failed.");
+                SecurityState observed = State(primary);
+                if (!Suitable(observed, runner) || !observed.AdministratorDenyOnly)
+                    throw new InvalidOperationException("The derived CI fixture did not satisfy observed privilege guards: " + DescribeCandidate("Restricted fixture", observed, runner) + ", Administrators deny-only=" + observed.AdministratorDenyOnly + ", hasRestrictions=" + observed.HasRestrictions + ". No elevation flag is assumed or changed.");
+                IntPtr result = primary; primary = IntPtr.Zero; return result;
+            } finally {
+                if (label != IntPtr.Zero) Marshal.FreeHGlobal(label); if (mediumSid != IntPtr.Zero) LocalFree(mediumSid);
+                if (primary != IntPtr.Zero) CloseHandle(primary); if (restricted != IntPtr.Zero) CloseHandle(restricted);
+                if (administrator != IntPtr.Zero) LocalFree(administrator);
+            }
         }
         private static bool Suitable(SecurityState candidate, SecurityState runner) {
             return candidate.IntegrityRid == 8192 && !candidate.Elevated && candidate.SessionId == runner.SessionId && String.Equals(candidate.Sid, runner.Sid, StringComparison.Ordinal);
@@ -182,7 +239,13 @@ namespace NotchlingDesktopSmoke {
                 }
             } finally { foreach (var explorer in explorers) explorer.Dispose(); }
             if (explorers.Length == 0) observations.Add("No interactive Explorer process exists");
-            throw new InvalidOperationException("The elevated runner has no same-account/session medium-integrity linked or interactive Explorer token. Runner rid=" + runner.IntegrityRid + ", elevated=" + runner.Elevated + ", session=" + runner.SessionId + ". Observed candidates: " + String.Join(" | ", observations.ToArray()) + ". Normal-user WinUI qualification is unavailable on this desktop; no elevated fallback is allowed.");
+            try {
+                IntPtr fixture = RestrictedFixtureToken(runnerToken, runner);
+                source = "Own restricted CI fixture token (DISABLE_MAX_PRIVILEGE | LUA_TOKEN); observed medium/non-elevated, same account/session, Administrators deny-only; consumer token not certified";
+                return fixture;
+            } catch (Exception error) {
+                throw new InvalidOperationException("No eligible existing normal-user token and no valid own restricted CI fixture token. Runner rid=" + runner.IntegrityRid + ", elevated=" + runner.Elevated + ", session=" + runner.SessionId + ". Observed existing candidates: " + String.Join(" | ", observations.ToArray()) + ". Restriction result: " + error.Message, error);
+            }
         }
         private static string ObjectName(IntPtr handle) {
             var value = new StringBuilder(256); uint size;
@@ -209,7 +272,9 @@ namespace NotchlingDesktopSmoke {
                 if (!Suitable(runner, runner)) {
                     selected = LimitedToken(runnerToken, runner, out source);
                     if (!DuplicateTokenEx(selected, 0x02000000, IntPtr.Zero, 2, 1, out primary)) throw new Win32Exception(Marshal.GetLastWin32Error(), "The verified limited token could not be duplicated for the owned test child.");
-                    if (!Suitable(State(primary), runner)) throw new InvalidOperationException("Duplicating the selected token changed the required account/session/integrity.");
+                    SecurityState duplicated = State(primary);
+                    if (!Suitable(duplicated, runner) || source.StartsWith("Own restricted CI fixture token", StringComparison.Ordinal) && !duplicated.AdministratorDenyOnly)
+                        throw new InvalidOperationException("Duplicating the selected token changed the required account/session/integrity/admin-deny-only guards.");
                 }
                 string desktop = ObjectName(GetProcessWindowStation()) + "\\" + ObjectName(GetThreadDesktop(GetCurrentThreadId()));
                 var startup = new StartupInfo { Size = (uint)Marshal.SizeOf(typeof(StartupInfo)), Desktop = desktop };
@@ -224,7 +289,8 @@ namespace NotchlingDesktopSmoke {
                 if (!OpenProcessToken(process.Process, 0x0008, out childToken)) throw new Win32Exception(Marshal.GetLastWin32Error(), "The suspended child token could not be observed.");
                 SecurityState child;
                 try { child = State(childToken); } finally { CloseHandle(childToken); }
-                if (!Suitable(child, runner)) throw new InvalidOperationException("The actual suspended child is not the required same-account/session normal-user process.");
+                if (!Suitable(child, runner) || source.StartsWith("Own restricted CI fixture token", StringComparison.Ordinal) && !child.AdministratorDenyOnly)
+                    throw new InvalidOperationException("The actual suspended child is not the required same-account/session medium, non-elevated process with the selected administrator restriction.");
                 var launch = new Launch { Process = process.Process, Thread = process.Thread, ProcessId = process.ProcessId, Runner = runner, Child = child, TokenSource = source, Desktop = desktop };
                 created = false; return launch; // ownership transfers to Launch
             } finally {
