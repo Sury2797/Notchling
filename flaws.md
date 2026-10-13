@@ -597,3 +597,6 @@ The owner subsequently authorized repairs. The source work above is implemented;
 
 
 Current resumed candidate: **v0.4.16**, source `c82506b92b574f4e448237dbe4ccd07b26fb2a84`, [run 38400400207](https://github.com/Sury2797/Notchling/actions/runs/38400400207). Source and driver compilation passed locally. Windows qualification is in progress, with strict normal-user, real transfer and actual upgrade assertions. Download promotion stays blocked until full qualification and independent verification of all three public EXEs.
+
+
+Current resumed candidate: **v0.4.19**, source `17c99775db22646ef871061906660bfa4fa1d8ad`, [run 38442624484](https://github.com/Sury2797/Notchling/actions/runs/38442624484). Download recovery and launcher preflight passed local verification. Native Windows qualification is in progress; new installers and download badges remain withheld pending complete qualification and public EXE verification.
