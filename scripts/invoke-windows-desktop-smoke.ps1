@@ -21,6 +21,9 @@ if ($Mode -eq 'UpdateHandoff' -and ([string]::IsNullOrWhiteSpace($SetupPath) -or
 $reportFile = if ($Mode -eq 'App') { [IO.Path]::GetFullPath($ReportPath) } else { Join-Path ([IO.Path]::GetFullPath($ReportDirectory)) 'windows-update-handoff.json' }
 $contextName = if ($Mode -eq 'App') { 'desktop-smoke-context.json' } else { 'desktop-update-handoff-context.json' }
 $contextFile = Join-Path ([IO.Path]::GetDirectoryName($reportFile)) $contextName
+$streamPrefix = if ($Mode -eq 'App') { 'desktop-smoke' } else { 'desktop-update-handoff' }
+$stdoutFile = Join-Path ([IO.Path]::GetDirectoryName($reportFile)) ($streamPrefix + '.stdout.log')
+$stderrFile = Join-Path ([IO.Path]::GetDirectoryName($reportFile)) ($streamPrefix + '.stderr.log')
 [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($reportFile)) | Out-Null
 if (Test-Path -LiteralPath $reportFile) { Remove-Item -LiteralPath $reportFile }
 $context = [ordered]@{
@@ -33,6 +36,10 @@ $context = [ordered]@{
     Desktop = $null
     ChildProcessId = $null
     ChildExitCode = $null
+    LaunchApi = $null
+    ResumePreviousSuspendCount = $null
+    StdoutPath = $stdoutFile
+    StderrPath = $stderrFile
     FreshSmokeReport = $false
     Error = $null
 }
@@ -43,6 +50,8 @@ function Read-OwnedDesktopProgress {
         (Join-Path ([IO.Path]::GetDirectoryName($reportFile)) 'windows-smoke-progress.log'),
         (Join-Path ([IO.Path]::GetDirectoryName($reportFile)) 'windows-smoke.json'),
         (Join-Path ([IO.Path]::GetDirectoryName($reportFile)) 'windows-update-handoff.json'),
+        $stdoutFile,
+        $stderrFile,
         (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Notchling/Diagnostics/startup.log')
     )
     $observations = @()
@@ -66,6 +75,7 @@ using System;
 using System.ComponentModel;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 namespace NotchlingDesktopSmoke {
@@ -81,20 +91,45 @@ namespace NotchlingDesktopSmoke {
     }
     public sealed class Launch : IDisposable {
         internal IntPtr Process, Thread, Job;
+        internal IntPtr StandardInput, StandardOutput, StandardError;
         public uint ProcessId;
+        public uint PreviousSuspendCount = UInt32.MaxValue;
         internal bool Begun;
         public SecurityState Runner, Child;
-        public string TokenSource, Desktop;
-        public void Resume() { if (Native.ResumeThread(Thread) == UInt32.MaxValue) throw new Win32Exception(Marshal.GetLastWin32Error(), "Resuming the owned medium-integrity smoke failed."); Begun = true; }
+        public string TokenSource, Desktop, LaunchApi;
+        public void Resume() {
+            PreviousSuspendCount = Native.ResumeThread(Thread);
+            if (PreviousSuspendCount == UInt32.MaxValue) throw new Win32Exception(Marshal.GetLastWin32Error(), "Resuming the owned medium-integrity smoke failed.");
+            if (PreviousSuspendCount != 1) throw new InvalidOperationException("The owned primary thread returned unexpected previous suspension count " + PreviousSuspendCount + "; expected exactly 1. No additional resume or privilege change is attempted.");
+            Begun = true;
+        }
+        public string ExecutionSnapshot() {
+            try {
+                using (var process = System.Diagnostics.Process.GetProcessById(checked((int)ProcessId))) {
+                    string image;
+                    try { image = Path.GetFileName(process.MainModule.FileName); } catch (Exception error) { image = "unavailable(" + error.GetType().Name + ")"; }
+                    var states = new List<string>();
+                    foreach (ProcessThread thread in process.Threads) {
+                        try { states.Add(thread.Id + ":" + thread.ThreadState + (thread.ThreadState == ThreadState.Wait ? "/" + thread.WaitReason : "")); }
+                        catch (Exception error) { states.Add("unavailable(" + error.GetType().Name + ")"); }
+                        finally { thread.Dispose(); }
+                        if (states.Count >= 4) break;
+                    }
+                    return "pid=" + ProcessId + ", image=" + image + ", cpuMs=" + process.TotalProcessorTime.TotalMilliseconds +
+                        ", threads=" + process.Threads.Count + ", sampledThreadStates=" + String.Join(" | ", states.ToArray());
+                }
+            } catch (Exception error) { return "Owned process snapshot unavailable: " + error.GetType().Name + ": " + error.Message; }
+        }
         public int Wait(uint milliseconds) {
             uint state = Native.WaitForSingleObject(Process, milliseconds);
             if (state == 258) {
+                string execution = ExecutionSnapshot();
                 // Only this newly created test child is owned by the wrapper.
                 // Its normal smoke script owns cleanup of its app/helpers.
                 // Closing this unnamed job ends only the created child and its
                 // descendants, including any helper stalled before reporting.
                 if (Job != IntPtr.Zero) { Native.CloseHandle(Job); Job = IntPtr.Zero; }
-                throw new TimeoutException("The owned normal-user smoke exceeded its " + (milliseconds / 1000) + "-second watchdog.");
+                throw new TimeoutException("The owned normal-user smoke exceeded its " + (milliseconds / 1000) + "-second watchdog. " + execution);
             }
             if (state != 0) throw new Win32Exception(Marshal.GetLastWin32Error(), "Waiting for the owned smoke process failed.");
             uint code; if (!Native.GetExitCodeProcess(Process, out code)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -105,6 +140,9 @@ namespace NotchlingDesktopSmoke {
             if (Job != IntPtr.Zero) { Native.CloseHandle(Job); Job = IntPtr.Zero; }
             if (Thread != IntPtr.Zero) { Native.CloseHandle(Thread); Thread = IntPtr.Zero; }
             if (Process != IntPtr.Zero) { Native.CloseHandle(Process); Process = IntPtr.Zero; }
+            if (StandardInput != IntPtr.Zero) { Native.CloseHandle(StandardInput); StandardInput = IntPtr.Zero; }
+            if (StandardOutput != IntPtr.Zero) { Native.CloseHandle(StandardOutput); StandardOutput = IntPtr.Zero; }
+            if (StandardError != IntPtr.Zero) { Native.CloseHandle(StandardError); StandardError = IntPtr.Zero; }
         }
     }
     public static class Native {
@@ -117,6 +155,8 @@ namespace NotchlingDesktopSmoke {
         }
         [StructLayout(LayoutKind.Sequential)] private struct ProcessInformation { public IntPtr Process, Thread; public uint ProcessId, ThreadId; }
         [StructLayout(LayoutKind.Sequential)] private struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
+        [StructLayout(LayoutKind.Sequential)] private struct SecurityAttributes { public uint Size; public IntPtr Descriptor; public int Inherit; }
+        [StructLayout(LayoutKind.Sequential)] private struct StartupInfoExtended { public StartupInfo Startup; public IntPtr Attributes; }
         [StructLayout(LayoutKind.Sequential)] private struct JobBasicLimits {
             public long ProcessTime, JobTime; public uint Flags; public UIntPtr MinimumWorkingSet, MaximumWorkingSet;
             public uint ActiveProcesses; public UIntPtr Affinity; public uint Priority, Scheduling;
@@ -145,6 +185,13 @@ namespace NotchlingDesktopSmoke {
         [DllImport("user32.dll", EntryPoint="GetUserObjectInformationW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, uint size, out uint required);
         [DllImport("advapi32.dll", EntryPoint="CreateProcessWithTokenW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool CreateProcessWithToken(IntPtr token, uint logonFlags, string application, StringBuilder command, uint flags, IntPtr environment, string directory, ref StartupInfo startup, out ProcessInformation process);
         [DllImport("kernel32.dll", EntryPoint="CreateProcessW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool CreateProcess(string application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inherit, uint flags, IntPtr environment, string directory, ref StartupInfo startup, out ProcessInformation process);
+        [DllImport("kernel32.dll", EntryPoint="CreateProcessW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool CreateProcessExtended(string application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inherit, uint flags, IntPtr environment, string directory, ref StartupInfoExtended startup, out ProcessInformation process);
+        [DllImport("advapi32.dll", EntryPoint="CreateProcessAsUserW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool CreateProcessAsUser(IntPtr token, string application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes, bool inherit, uint flags, IntPtr environment, string directory, ref StartupInfoExtended startup, out ProcessInformation process);
+        [DllImport("kernel32.dll", EntryPoint="CreateFileW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern IntPtr CreateFile(string path, uint access, uint share, ref SecurityAttributes attributes, uint disposition, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError=true)] private static extern uint GetFileType(IntPtr handle);
+        [DllImport("kernel32.dll", SetLastError=true)] private static extern bool InitializeProcThreadAttributeList(IntPtr list, int count, uint flags, ref IntPtr length);
+        [DllImport("kernel32.dll", SetLastError=true)] private static extern bool UpdateProcThreadAttribute(IntPtr list, uint flags, UIntPtr attribute, IntPtr value, IntPtr size, IntPtr previous, IntPtr returned);
+        [DllImport("kernel32.dll")] private static extern void DeleteProcThreadAttributeList(IntPtr list);
         [DllImport("kernel32.dll", SetLastError=true)] internal static extern uint ResumeThread(IntPtr thread);
         [DllImport("kernel32.dll", SetLastError=true)] internal static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
         [DllImport("kernel32.dll", SetLastError=true)] internal static extern bool GetExitCodeProcess(IntPtr process, out uint code);
@@ -298,8 +345,18 @@ namespace NotchlingDesktopSmoke {
             }
             return result.Append('\\', slashes * 2).Append('"').ToString();
         }
-        public static Launch Start(string application, string arguments, string directory, string environment) {
+        private static IntPtr StandardFile(string path, bool input) {
+            var attributes = new SecurityAttributes { Size = (uint)Marshal.SizeOf(typeof(SecurityAttributes)), Inherit = 1 };
+            IntPtr file = CreateFile(path, input ? 0x80000000u : 0x40000000u, 7, ref attributes, input ? 3u : 2u, 0x80, IntPtr.Zero);
+            if (file == new IntPtr(-1)) throw new Win32Exception(Marshal.GetLastWin32Error(), "An owned standard I/O handle could not be opened.");
+            uint type = GetFileType(file);
+            if (type != (input ? 2u : 1u)) { CloseHandle(file); throw new InvalidOperationException("The owned standard I/O handle has unexpected observed type " + type + "."); }
+            return file;
+        }
+        public static Launch Start(string application, string arguments, string directory, string environment, string stdoutPath, string stderrPath) {
             IntPtr runnerToken = IntPtr.Zero, selected = IntPtr.Zero, primary = IntPtr.Zero, block = IntPtr.Zero, job = IntPtr.Zero;
+            IntPtr input = IntPtr.Zero, output = IntPtr.Zero, errorOutput = IntPtr.Zero, attributeList = IntPtr.Zero, handles = IntPtr.Zero;
+            bool attributesInitialized = false;
             ProcessInformation process = new ProcessInformation(); bool created = false;
             try {
                 if (!OpenProcessToken(GetCurrentProcess(), QueryDuplicate, out runnerToken)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -312,13 +369,35 @@ namespace NotchlingDesktopSmoke {
                         throw new InvalidOperationException("Duplicating the selected token changed the required account/session/integrity/admin-deny-only guards.");
                 }
                 string desktop = ObjectName(GetProcessWindowStation()) + "\\" + ObjectName(GetThreadDesktop(GetCurrentThreadId()));
-                var startup = new StartupInfo { Size = (uint)Marshal.SizeOf(typeof(StartupInfo)), Desktop = desktop };
+                input = StandardFile("NUL", true); output = StandardFile(stdoutPath, false); errorOutput = StandardFile(stderrPath, false);
+                var startup = new StartupInfo { Size = (uint)Marshal.SizeOf(typeof(StartupInfo)), Desktop = desktop,
+                    Flags = 0x00000100, Input = input, Output = output, Error = errorOutput }; // STARTF_USESTDHANDLES
                 var command = new StringBuilder(Quote(application) + " " + arguments);
                 block = Marshal.StringToHGlobalUni(environment);
                 const uint flags = 0x00000400 | 0x08000000 | 0x00000004; // Unicode environment, no console, suspended for verification.
-                created = primary == IntPtr.Zero
-                    ? CreateProcess(application, command, IntPtr.Zero, IntPtr.Zero, false, flags, block, directory, ref startup, out process)
-                    : CreateProcessWithToken(primary, 1, application, command, flags, block, directory, ref startup, out process);
+                bool ownRestricted = source.StartsWith("Own restricted CI fixture token", StringComparison.Ordinal);
+                string api;
+                if (primary == IntPtr.Zero || ownRestricted) {
+                    IntPtr attributeBytes = IntPtr.Zero;
+                    InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref attributeBytes);
+                    if (attributeBytes.ToInt64() <= 0 || attributeBytes.ToInt64() > 65536) throw new Win32Exception(Marshal.GetLastWin32Error(), "The owned handle-list size is unavailable or exceeds its bound.");
+                    attributeList = Marshal.AllocHGlobal(attributeBytes);
+                    if (!InitializeProcThreadAttributeList(attributeList, 1, 0, ref attributeBytes)) throw new Win32Exception(Marshal.GetLastWin32Error(), "The owned handle-list could not be initialized.");
+                    attributesInitialized = true;
+                    handles = Marshal.AllocHGlobal(IntPtr.Size * 3);
+                    Marshal.WriteIntPtr(handles, 0, input); Marshal.WriteIntPtr(handles, IntPtr.Size, output); Marshal.WriteIntPtr(handles, IntPtr.Size * 2, errorOutput);
+                    if (!UpdateProcThreadAttribute(attributeList, 0, new UIntPtr(0x00020002), handles, new IntPtr(IntPtr.Size * 3), IntPtr.Zero, IntPtr.Zero))
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "The child could not restrict inherited handles to its three owned standard streams.");
+                    startup.Size = (uint)Marshal.SizeOf(typeof(StartupInfoExtended));
+                    var extended = new StartupInfoExtended { Startup = startup, Attributes = attributeList };
+                    api = ownRestricted ? "CreateProcessAsUserW; own restricted token, explicit three-handle inheritance" : "CreateProcessW; current normal token, explicit three-handle inheritance";
+                    created = ownRestricted
+                        ? CreateProcessAsUser(primary, application, command, IntPtr.Zero, IntPtr.Zero, true, flags | 0x00080000, block, directory, ref extended, out process)
+                        : CreateProcessExtended(application, command, IntPtr.Zero, IntPtr.Zero, true, flags | 0x00080000, block, directory, ref extended, out process);
+                } else {
+                    api = "CreateProcessWithTokenW; verified linked/Explorer token and owned standard streams";
+                    created = CreateProcessWithToken(primary, 1, application, command, flags, block, directory, ref startup, out process);
+                }
                 if (!created) throw new Win32Exception(Marshal.GetLastWin32Error(), "Creating the owned normal-user Windows smoke failed.");
                 IntPtr childToken;
                 if (!OpenProcessToken(process.Process, 0x0008, out childToken)) throw new Win32Exception(Marshal.GetLastWin32Error(), "The suspended child token could not be observed.");
@@ -331,11 +410,16 @@ namespace NotchlingDesktopSmoke {
                 var limits = new JobExtendedLimits { Basic = new JobBasicLimits { Flags = 0x00002000 } }; // KILL_ON_JOB_CLOSE only
                 if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(JobExtendedLimits))) || !AssignProcessToJobObject(job, process.Process))
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "The suspended owned smoke tree could not be bounded by its job.");
-                var launch = new Launch { Process = process.Process, Thread = process.Thread, Job = job, ProcessId = process.ProcessId, Runner = runner, Child = child, TokenSource = source, Desktop = desktop };
-                created = false; job = IntPtr.Zero; return launch; // ownership transfers to Launch
+                var launch = new Launch { Process = process.Process, Thread = process.Thread, Job = job, ProcessId = process.ProcessId,
+                    StandardInput = input, StandardOutput = output, StandardError = errorOutput, Runner = runner, Child = child,
+                    TokenSource = source, Desktop = desktop, LaunchApi = api };
+                created = false; job = IntPtr.Zero; input = output = errorOutput = IntPtr.Zero; return launch; // ownership transfers to Launch
             } finally {
                 if (created) { TerminateProcess(process.Process, 1); CloseHandle(process.Thread); CloseHandle(process.Process); }
                 if (job != IntPtr.Zero) CloseHandle(job);
+                if (attributesInitialized) DeleteProcThreadAttributeList(attributeList);
+                if (attributeList != IntPtr.Zero) Marshal.FreeHGlobal(attributeList); if (handles != IntPtr.Zero) Marshal.FreeHGlobal(handles);
+                if (input != IntPtr.Zero) CloseHandle(input); if (output != IntPtr.Zero) CloseHandle(output); if (errorOutput != IntPtr.Zero) CloseHandle(errorOutput);
                 if (block != IntPtr.Zero) Marshal.FreeHGlobal(block);
                 if (primary != IntPtr.Zero) CloseHandle(primary); if (selected != IntPtr.Zero) CloseHandle(selected); if (runnerToken != IntPtr.Zero) CloseHandle(runnerToken);
             }
@@ -368,18 +452,22 @@ namespace NotchlingDesktopSmoke {
     [Array]::Sort($entries, [StringComparer]::OrdinalIgnoreCase)
     $environmentBlock = [string]::Join([char]0, [string[]]$entries) + [char]0 + [char]0
     $started = [DateTime]::UtcNow
-    $ticket = [NotchlingDesktopSmoke.Native]::Start($shell, $quotedArguments, (Get-Location).Path, $environmentBlock)
+    $ticket = [NotchlingDesktopSmoke.Native]::Start($shell, $quotedArguments, (Get-Location).Path, $environmentBlock, $stdoutFile, $stderrFile)
     $context.Launched = $ticket.Child
     $context.TokenSource = $ticket.TokenSource
     $context.Desktop = $ticket.Desktop
     $context.ChildProcessId = $ticket.ProcessId
+    $context.LaunchApi = $ticket.LaunchApi
     # Publish the observed suspended child before running any PowerShell/runtime
     # stage. A later timeout must not erase the real privilege evidence.
     $context | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $contextFile -Encoding utf8
-    $observed = "Mode=$Mode; runner=$($context.Runner.IntegrityRid)/elevated=$($context.Runner.Elevated); child=$($context.Launched.IntegrityRid)/elevated=$($context.Launched.Elevated); adminDenyOnly=$($context.Launched.AdministratorDenyOnly); hasRestrictions=$($context.Launched.HasRestrictions); session=$($context.Launched.SessionId); desktop=$($context.Desktop); childPid=$($context.ChildProcessId); source=$($context.TokenSource). App execution is not yet observed."
+    $observed = "Mode=$Mode; runner=$($context.Runner.IntegrityRid)/elevated=$($context.Runner.Elevated); child=$($context.Launched.IntegrityRid)/elevated=$($context.Launched.Elevated); adminDenyOnly=$($context.Launched.AdministratorDenyOnly); hasRestrictions=$($context.Launched.HasRestrictions); session=$($context.Launched.SessionId); desktop=$($context.Desktop); childPid=$($context.ChildProcessId); launch=$($ticket.LaunchApi); source=$($context.TokenSource). App execution is not yet observed."
     $observed = $observed.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
     Write-Output "::notice title=Observed CI desktop child token::$observed"
     $ticket.Resume()
+    $context.ResumePreviousSuspendCount = $ticket.PreviousSuspendCount
+    $context | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $contextFile -Encoding utf8
+    Write-Output "::notice title=Observed owned smoke thread resume::Mode=$Mode; childPid=$($ticket.ProcessId); previousSuspendCount=$($ticket.PreviousSuspendCount); exactly one owned suspension was released; stdout/stderr are fresh owned files."
     $watchdog = if ($Mode -eq 'App') { 360000 } else { 540000 }
     $context.ChildExitCode = $ticket.Wait($watchdog)
     if (-not (Test-Path -LiteralPath $reportFile -PathType Leaf)) { throw "The owned normal-user smoke exited $($context.ChildExitCode) without its required report." }
@@ -413,7 +501,8 @@ namespace NotchlingDesktopSmoke {
     $failure = $_
     $context.Error = $_.Exception.Message
     if ($ticket) {
-        $context.Error += " Observed childPid=$($ticket.ProcessId); child integrity=$($ticket.Child.IntegrityRid), elevated=$($ticket.Child.Elevated), adminDenyOnly=$($ticket.Child.AdministratorDenyOnly), session=$($ticket.Child.SessionId); token=$($ticket.TokenSource). Owned progress: $(Read-OwnedDesktopProgress)"
+        $context.ResumePreviousSuspendCount = $ticket.PreviousSuspendCount
+        $context.Error += " Observed childPid=$($ticket.ProcessId); child integrity=$($ticket.Child.IntegrityRid), elevated=$($ticket.Child.Elevated), adminDenyOnly=$($ticket.Child.AdministratorDenyOnly), session=$($ticket.Child.SessionId); launch=$($ticket.LaunchApi); previousSuspendCount=$($ticket.PreviousSuspendCount); token=$($ticket.TokenSource). Owned progress: $(Read-OwnedDesktopProgress)"
         $failure = [Management.Automation.ErrorRecord]::new([InvalidOperationException]::new($context.Error, $_.Exception), 'OwnedDesktopSmokeFailed', [Management.Automation.ErrorCategory]::OperationStopped, $context.ChildProcessId)
     }
 } finally {

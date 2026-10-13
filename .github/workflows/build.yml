@@ -176,10 +176,14 @@ jobs:
             artifacts/windows-smoke.json
             artifacts/windows-smoke-progress.log
             artifacts/desktop-smoke-context.json
+            artifacts/desktop-smoke.stdout.log
+            artifacts/desktop-smoke.stderr.log
             artifacts/windows-ui-smoke.json
             artifacts/windows-shelf-drop.json
             artifacts/windows-update-handoff.json
             artifacts/desktop-update-handoff-context.json
+            artifacts/desktop-update-handoff.stdout.log
+            artifacts/desktop-update-handoff.stderr.log
             artifacts/windows-update-result.json
             artifacts/windows-update-setup.log
             artifacts/installer-smoke.log

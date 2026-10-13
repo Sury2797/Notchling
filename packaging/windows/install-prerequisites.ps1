@@ -240,7 +240,25 @@ function Assert-MicrosoftDownloadUri([Uri]$Uri) {
     }
 }
 
+function Get-MicrosoftDownloadResponse([Net.Http.HttpClient]$Client, [Uri]$Uri, [Threading.CancellationToken]$Token) {
+    return $Client.GetAsync($Uri, [Net.Http.HttpCompletionOption]::ResponseHeadersRead, $Token).GetAwaiter().GetResult()
+}
+
+function Test-RetryableMicrosoftTransport([Exception]$Error) {
+    $transport = $false
+    for ($current = $Error; $current; $current = $current.InnerException) {
+        if ($current -is [Security.Authentication.AuthenticationException] -or
+            $current -is [Security.SecurityException] -or $current -is [OperationCanceledException]) { return $false }
+        if ($current -is [IO.IOException] -or $current -is [Net.Http.HttpRequestException] -or
+            $current -is [Net.Sockets.SocketException]) { $transport = $true }
+    }
+    return $transport
+}
+
 function Save-MicrosoftDownload([Uri]$Uri, [string]$Destination, [long]$MaximumBytes, [int]$TimeoutSeconds) {
+    Assert-MicrosoftDownloadUri $Uri
+    if ($MaximumBytes -le 0 -or $TimeoutSeconds -le 0) { throw 'Prerequisite download bounds must be positive.' }
+    $initialUri = $Uri
     $handler = [Net.Http.HttpClientHandler]::new()
     $handler.AllowAutoRedirect = $false
     # Use Windows' configured proxy, including integrated authentication, for
@@ -249,42 +267,69 @@ function Save-MicrosoftDownload([Uri]$Uri, [string]$Destination, [long]$MaximumB
     $client = [Net.Http.HttpClient]::new($handler)
     $client.Timeout = [Threading.Timeout]::InfiniteTimeSpan
     $deadline = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSeconds))
-    $reply = $null; $inputStream = $null; $outputStream = $null
     try {
-        for ($redirect = 0; $redirect -le 5; $redirect++) {
-            Assert-MicrosoftDownloadUri $Uri
-            $reply = $client.GetAsync($Uri, [Net.Http.HttpCompletionOption]::ResponseHeadersRead, $deadline.Token).GetAwaiter().GetResult()
-            $status = [int]$reply.StatusCode
-            if ($status -ge 300 -and $status -lt 400) {
-                if (-not $reply.Headers.Location -or $redirect -eq 5) { throw 'A prerequisite download returned too many redirects.' }
-                $Uri = [Uri]::new($Uri, $reply.Headers.Location)
-                $reply.Dispose(); $reply = $null
-                continue
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $Uri = $initialUri
+            $reply = $null; $inputStream = $null; $outputStream = $null
+            $ownsDestination = $false; $completed = $false; $transportFailure = $false
+            try {
+                for ($redirect = 0; $redirect -le 5; $redirect++) {
+                    Assert-MicrosoftDownloadUri $Uri
+                    try { $reply = Get-MicrosoftDownloadResponse $client $Uri $deadline.Token }
+                    catch { $transportFailure = Test-RetryableMicrosoftTransport $_.Exception; throw }
+                    $status = [int]$reply.StatusCode
+                    if ($status -ge 300 -and $status -lt 400) {
+                        if (-not $reply.Headers.Location -or $redirect -eq 5) { throw 'A prerequisite download returned too many redirects.' }
+                        $Uri = [Uri]::new($Uri, $reply.Headers.Location)
+                        $reply.Dispose(); $reply = $null
+                        continue
+                    }
+                    # HTTP errors (including 401/403), TLS trust, byte limits and
+                    # local filesystem errors must not be treated as transport retries.
+                    $reply.EnsureSuccessStatusCode() | Out-Null
+                    if ($reply.Content.Headers.ContentLength -and $reply.Content.Headers.ContentLength -gt $MaximumBytes) {
+                        throw 'A prerequisite download exceeded its size limit.'
+                    }
+                    try { $inputStream = $reply.Content.ReadAsStreamAsync().GetAwaiter().GetResult() }
+                    catch { $transportFailure = Test-RetryableMicrosoftTransport $_.Exception; throw }
+                    $outputStream = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+                    $ownsDestination = $true
+                    $buffer = [byte[]]::new(65536)
+                    $total = 0L
+                    while ($true) {
+                        try { $count = $inputStream.ReadAsync($buffer, 0, $buffer.Length, $deadline.Token).GetAwaiter().GetResult() }
+                        catch { $transportFailure = Test-RetryableMicrosoftTransport $_.Exception; throw }
+                        if ($count -le 0) { break }
+                        $total += $count
+                        if ($total -gt $MaximumBytes) { throw 'A prerequisite download exceeded its size limit.' }
+                        $outputStream.Write($buffer, 0, $count)
+                    }
+                    if ($total -eq 0 -or ($reply.Content.Headers.ContentLength -and $total -ne $reply.Content.Headers.ContentLength)) {
+                        $transportFailure = $true
+                        throw [IO.EndOfStreamException]::new('A prerequisite download was incomplete.')
+                    }
+                    $outputStream.Flush($true)
+                    $completed = $true
+                    Write-SetupLog "Downloaded $total bytes from $($Uri.IdnHost)."
+                    return
+                }
             }
-            $reply.EnsureSuccessStatusCode() | Out-Null
-            if ($reply.Content.Headers.ContentLength -and $reply.Content.Headers.ContentLength -gt $MaximumBytes) {
-                throw 'A prerequisite download exceeded its size limit.'
+            catch {
+                if (-not $transportFailure -or $deadline.IsCancellationRequested -or $attempt -eq 3) { throw }
+                Write-SetupLog "Temporary Microsoft download transport failure; retrying attempt $($attempt + 1) of 3 within the original deadline."
             }
-            $inputStream = $reply.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-            $outputStream = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-            $buffer = [byte[]]::new(65536)
-            $total = 0L
-            while (($count = $inputStream.ReadAsync($buffer, 0, $buffer.Length, $deadline.Token).GetAwaiter().GetResult()) -gt 0) {
-                $total += $count
-                if ($total -gt $MaximumBytes) { throw 'A prerequisite download exceeded its size limit.' }
-                $outputStream.Write($buffer, 0, $count)
+            finally {
+                if ($outputStream) { $outputStream.Dispose() }
+                if ($inputStream) { $inputStream.Dispose() }
+                if ($reply) { $reply.Dispose() }
+                # A failed response is never reused or executed. Delete only the
+                # file created by this attempt; existing destinations are untouched.
+                if ($ownsDestination -and -not $completed) { [IO.File]::Delete($Destination) }
             }
-            if ($total -eq 0 -or ($reply.Content.Headers.ContentLength -and $total -ne $reply.Content.Headers.ContentLength)) {
-                throw 'A prerequisite download was incomplete.'
-            }
-            Write-SetupLog "Downloaded $total bytes from $($Uri.IdnHost)."
-            return
+            if ($deadline.Token.WaitHandle.WaitOne(500 * $attempt)) { $deadline.Token.ThrowIfCancellationRequested() }
         }
     }
     finally {
-        if ($outputStream) { $outputStream.Dispose() }
-        if ($inputStream) { $inputStream.Dispose() }
-        if ($reply) { $reply.Dispose() }
         $client.Dispose(); $handler.Dispose(); $deadline.Dispose()
     }
 }

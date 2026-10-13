@@ -371,6 +371,194 @@ Invoke-Fixture 'ARM64 installer cannot run on an x64 PC' {
     Assert-FixtureThrows { Assert-SupportedSetupHost 'arm64' 'x64' 26100 $true } 'does not match'
 }
 
+# Substitute only the HTTP response. Keep production streaming, deadline,
+# redirect checks, owned file cleanup and byte verification executable.
+Add-Type -AssemblyName System.Net.Http
+if (-not ('Notchling.Setup.DownloadFixtureStream' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Security.Authentication;
+using System.Threading;
+using System.Threading.Tasks;
+namespace Notchling.Setup {
+    public sealed class DownloadFixtureStream : Stream {
+        private readonly byte[] bytes;
+        private readonly int failure;
+        private int position;
+        public DownloadFixtureStream(byte[] bytes, int failure) { this.bytes = bytes; this.failure = failure; }
+        public override bool CanRead { get { return true; } }
+        public override bool CanSeek { get { return false; } }
+        public override bool CanWrite { get { return false; } }
+        public override long Length { get { return bytes.Length; } }
+        public override long Position { get { return position; } set { throw new NotSupportedException(); } }
+        public override int Read(byte[] buffer, int offset, int count) {
+            if (failure != 0 && position >= 2) {
+                if (failure == 3) return 0;
+                if (failure == 2) throw new IOException("Fixture TLS trust failure.", new AuthenticationException("Fixture untrusted certificate."));
+                throw new IOException("Fixture connection closed after partial transport.");
+            }
+            int limit = failure == 0 ? bytes.Length : 2;
+            int copied = Math.Min(count, limit - position);
+            if (copied > 0) { Array.Copy(bytes, position, buffer, offset, copied); position += copied; }
+            return copied;
+        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token) {
+            try { token.ThrowIfCancellationRequested(); return Task.FromResult(Read(buffer, offset, count)); }
+            catch (Exception error) { var result = new TaskCompletionSource<int>(); result.SetException(error); return result.Task; }
+        }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+        public override void SetLength(long value) { throw new NotSupportedException(); }
+        public override void Write(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
+    }
+}
+'@
+}
+$script:actualDownloadResponse = (Get-Item Function:Get-MicrosoftDownloadResponse).ScriptBlock
+$script:downloadFixtureBytes = [byte[]]@(1, 2, 3, 4, 5, 6, 7, 8)
+function Reset-DownloadFixture([string]$Mode) {
+    $script:downloadFixtureMode = $Mode
+    $script:downloadFixtureCalls = 0
+    $script:downloadFixturePath = Join-Path $OutputDirectory 'transport-download-fixture.bin'
+    if (Test-Path -LiteralPath $script:downloadFixturePath) { Remove-Item -LiteralPath $script:downloadFixturePath -Force }
+}
+try {
+    function Get-MicrosoftDownloadResponse {
+        param([Net.Http.HttpClient]$Client, [Uri]$Uri, [Threading.CancellationToken]$Token)
+        $Token.ThrowIfCancellationRequested()
+        $script:downloadFixtureCalls++
+        $reply = [Net.Http.HttpResponseMessage]::new([Net.HttpStatusCode]::OK)
+        if ($script:downloadFixtureMode -eq 'Forbidden') { $reply.StatusCode = [Net.HttpStatusCode]::Forbidden }
+        if ($script:downloadFixtureMode -eq 'Redirect') {
+            $reply.StatusCode = [Net.HttpStatusCode]::Redirect
+            $reply.Headers.Location = [Uri]'https://example.invalid/untrusted.exe'
+        }
+        $fault = switch ($script:downloadFixtureMode) {
+            'Recover' { if ($script:downloadFixtureCalls -eq 1) { 1 } else { 0 } }
+            'RecoverEof' { if ($script:downloadFixtureCalls -eq 1) { 3 } else { 0 } }
+            'Exhaust' { 1 }
+            'Trust' { 2 }
+            default { 0 }
+        }
+        $bytes = $script:downloadFixtureBytes
+        if ($script:downloadFixtureMode -in @('Digest', 'Publisher') -and $script:downloadFixtureCalls -eq 1) {
+            $metadata = New-RuntimeMetadata
+            if ($script:downloadFixtureMode -eq 'Publisher') {
+                $sha = [Security.Cryptography.SHA512]::Create()
+                try { $hash = [BitConverter]::ToString($sha.ComputeHash($script:downloadFixtureBytes)).Replace('-', '') }
+                finally { $sha.Dispose() }
+                ($metadata.releases[0].runtime.files | Where-Object { $_.rid -eq "win-$AppArchitecture" }).hash = $hash
+            }
+            $bytes = [Text.Encoding]::UTF8.GetBytes(($metadata | ConvertTo-Json -Depth 8))
+        }
+        $stream = [Notchling.Setup.DownloadFixtureStream]::new($bytes, $fault)
+        $reply.Content = [Net.Http.StreamContent]::new($stream)
+        $reply.Content.Headers.ContentLength = $bytes.Length
+        return $reply
+    }
+    foreach ($mode in @('Recover', 'RecoverEof')) {
+        Invoke-Fixture "Interrupted Microsoft response retries from a clean file: $mode" {
+            Reset-DownloadFixture $mode
+            Save-MicrosoftDownload ([Uri]'https://download.microsoft.com/runtime.exe') $script:downloadFixturePath 8 5
+            $actual = [IO.File]::ReadAllBytes($script:downloadFixturePath)
+            Assert-Fixture ($script:downloadFixtureCalls -eq 2 -and ($actual -join ',') -eq ($script:downloadFixtureBytes -join ',')) 'Recovery reused a partial file or wrote incorrect full-response bytes.'
+            $sha = [Security.Cryptography.SHA512]::Create()
+            try { $expected = [BitConverter]::ToString($sha.ComputeHash($script:downloadFixtureBytes)).Replace('-', '') }
+            finally { $sha.Dispose() }
+            Assert-Fixture ((Get-FileHash -LiteralPath $script:downloadFixturePath -Algorithm SHA512).Hash -eq $expected) 'Recovered full download failed actual SHA-512 comparison.'
+        }
+    }
+    Invoke-Fixture 'Exhausted Microsoft transport retries remove the owned partial file' {
+        Reset-DownloadFixture 'Exhaust'
+        Assert-FixtureThrows { Save-MicrosoftDownload ([Uri]'https://download.microsoft.com/runtime.exe') $script:downloadFixturePath 8 5 } 'connection closed'
+        Assert-Fixture ($script:downloadFixtureCalls -eq 3 -and -not (Test-Path -LiteralPath $script:downloadFixturePath)) 'Exhausted download exceeded its attempt bound or retained a partial file.'
+    }
+    foreach ($mode in @('Forbidden', 'Trust', 'Redirect')) {
+        Invoke-Fixture "Authorization, TLS trust and redirect policy failures are not retried: $mode" {
+            Reset-DownloadFixture $mode
+            $pattern = switch ($mode) { 'Forbidden' { '403' }; 'Trust' { 'TLS trust' }; default { 'approved Microsoft HTTPS' } }
+            Assert-FixtureThrows { Save-MicrosoftDownload ([Uri]'https://download.microsoft.com/runtime.exe') $script:downloadFixturePath 8 5 } $pattern
+            Assert-Fixture ($script:downloadFixtureCalls -eq 1 -and -not (Test-Path -LiteralPath $script:downloadFixturePath)) 'A terminal policy/trust failure was retried or retained an owned partial file.'
+        }
+    }
+    Invoke-Fixture 'Download byte limit remains terminal without transport retries' {
+        Reset-DownloadFixture 'Good'
+        Assert-FixtureThrows { Save-MicrosoftDownload ([Uri]'https://download.microsoft.com/runtime.exe') $script:downloadFixturePath 7 5 } 'size limit'
+        Assert-Fixture ($script:downloadFixtureCalls -eq 1 -and -not (Test-Path -LiteralPath $script:downloadFixturePath)) 'Byte-limit rejection retried or created a file.'
+    }
+    Invoke-Fixture 'A retry cannot replace an existing destination file' {
+        Reset-DownloadFixture 'Good'
+        [IO.File]::WriteAllBytes($script:downloadFixturePath, [byte[]]@(99))
+        Assert-FixtureThrows { Save-MicrosoftDownload ([Uri]'https://download.microsoft.com/runtime.exe') $script:downloadFixturePath 8 5 } 'already exists|exists'
+        Assert-Fixture ($script:downloadFixtureCalls -eq 1 -and [IO.File]::ReadAllBytes($script:downloadFixturePath)[0] -eq 99) 'A local file error was retried or deleted another file.'
+    }
+    Invoke-Fixture 'Transport retries share one overall download deadline' {
+        Reset-DownloadFixture 'Exhaust'
+        $started = [Diagnostics.Stopwatch]::StartNew()
+        Assert-FixtureThrows { Save-MicrosoftDownload ([Uri]'https://download.microsoft.com/runtime.exe') $script:downloadFixturePath 8 1 } 'cancel'
+        Assert-Fixture ($script:downloadFixtureCalls -le 2 -and $started.Elapsed.TotalSeconds -lt 3 -and -not (Test-Path -LiteralPath $script:downloadFixturePath)) 'Retry restarted the deadline or retained a partial file.'
+    }
+    Invoke-Fixture 'Exhausted prerequisite transport never starts a runtime installer' {
+        $savedDotNet = (Get-Item Function:Test-DotNetRuntime).ScriptBlock
+        $savedAppRuntime = (Get-Item Function:Test-WindowsAppRuntime).ScriptBlock
+        $savedInstaller = (Get-Item Function:Invoke-RuntimeInstaller).ScriptBlock
+        try {
+            Reset-DownloadFixture 'Exhaust'
+            $script:transportInstallerCalls = 0
+            function Test-DotNetRuntime { return $false }
+            function Test-WindowsAppRuntime { return $true }
+            function Invoke-RuntimeInstaller { $script:transportInstallerCalls++ }
+            $result = Invoke-NotchlingPrerequisites
+            Assert-Fixture ($result -eq 1 -and $script:downloadFixtureCalls -eq 3 -and $script:transportInstallerCalls -eq 0) 'An exhausted download reached installer execution or was reported successful.'
+        }
+        finally {
+            Set-Item Function:Test-DotNetRuntime -Value $savedDotNet
+            Set-Item Function:Test-WindowsAppRuntime -Value $savedAppRuntime
+            Set-Item Function:Invoke-RuntimeInstaller -Value $savedInstaller
+        }
+    }
+    foreach ($mode in @('Digest', 'Publisher')) {
+        Invoke-Fixture "Complete downloads failing downstream verification never retry or install: $mode" {
+            $savedDotNet = (Get-Item Function:Test-DotNetRuntime).ScriptBlock
+            $savedAppRuntime = (Get-Item Function:Test-WindowsAppRuntime).ScriptBlock
+            $savedInstaller = (Get-Item Function:Invoke-RuntimeInstaller).ScriptBlock
+            $savedSignature = (Get-Item Function:Assert-MicrosoftSignature).ScriptBlock
+            try {
+                Reset-DownloadFixture $mode
+                $script:transportInstallerCalls = 0
+                $script:transportSignatureCalls = 0
+                function Test-DotNetRuntime { return $false }
+                function Test-WindowsAppRuntime { return $true }
+                function Invoke-RuntimeInstaller { $script:transportInstallerCalls++ }
+                function Assert-MicrosoftSignature {
+                    $script:transportSignatureCalls++
+                    throw 'Fixture Microsoft publisher verification failed.'
+                }
+                $result = Invoke-NotchlingPrerequisites
+                Assert-Fixture ($result -eq 1 -and $script:downloadFixtureCalls -eq 2 -and $script:transportInstallerCalls -eq 0) 'Verification failure retried a complete download or reached runtime installer execution.'
+                $errorText = [IO.File]::ReadAllText($fixtureResult)
+                if ($mode -eq 'Digest') {
+                    Assert-Fixture ($script:transportSignatureCalls -eq 0 -and $errorText -match 'integrity verification') 'Mismatched digest reached publisher checking or lost its error.'
+                }
+                else {
+                    Assert-Fixture ($script:transportSignatureCalls -eq 1 -and $errorText -match 'publisher verification') 'A verified digest bypassed publisher rejection or repeated checking.'
+                }
+            }
+            finally {
+                Set-Item Function:Test-DotNetRuntime -Value $savedDotNet
+                Set-Item Function:Test-WindowsAppRuntime -Value $savedAppRuntime
+                Set-Item Function:Invoke-RuntimeInstaller -Value $savedInstaller
+                Set-Item Function:Assert-MicrosoftSignature -Value $savedSignature
+            }
+        }
+    }
+}
+finally {
+    Set-Item Function:Get-MicrosoftDownloadResponse -Value $script:actualDownloadResponse
+    if (Test-Path -LiteralPath $script:downloadFixturePath) { Remove-Item -LiteralPath $script:downloadFixturePath -Force }
+}
+
 function New-ExecutableFixture([string]$Path, [string]$TargetArchitecture) {
     $bytes = [byte[]]::new(128)
     $machine = @{ x64 = 0x8664; x86 = 0x014C; arm64 = 0xAA64 }[$TargetArchitecture]
