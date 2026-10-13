@@ -41,6 +41,7 @@ $context = [ordered]@{
     DiagnosticStage = 'Initialize owned launch'
     ChildDesktopAfterResume = $null
     DesktopRecovery = $null
+    OwnedFixtureSecurity = $null
     StdoutPath = $stdoutFile
     StderrPath = $stderrFile
     FreshSmokeReport = $false
@@ -442,9 +443,10 @@ namespace NotchlingDesktopSmoke {
                 return value;
             } finally { if (defaults != IntPtr.Zero) Marshal.FreeHGlobal(defaults); Marshal.FreeHGlobal(owner); }
         }
-        private static IntPtr RepairDerivedFixtureDefaultDacl(IntPtr primary, string ownSid) {
-            // Diagnostics comparison only. This descriptor/token exists solely
-            // for this newly created own fixture; no existing ACL is modified.
+        private static IntPtr PrepareDerivedFixtureSecurity(IntPtr primary, string ownSid) {
+            // The elevated-origin default DACL can omit the own user once
+            // Administrators becomes deny-only. Repair only the newly derived
+            // own CI fixture token/new objects; no existing ACL is modified.
             IntPtr descriptor = IntPtr.Zero, defaults = IntPtr.Zero;
             try {
                 uint size;
@@ -510,6 +512,14 @@ namespace NotchlingDesktopSmoke {
             }
             if (!identityRestored) throw new InvalidOperationException("Owned read-only access-probe identity restoration failed; further launches are refused.");
             return value;
+        }
+        private static void RequireOwnedKernelSecurity(KernelSecurityDiagnostics value) {
+            if (!value.Readable || value.Dacl == null || !value.Dacl.Present || value.Dacl.AceCount != 2 ||
+                value.Dacl.OwnUserAllowMask == 0 || value.Dacl.SystemAllowMask == 0 || value.Dacl.AdministratorAllowMask != 0 ||
+                value.MandatoryLabelRid != 8192 || !value.AccessCheckApiSucceeded || !value.AccessCheckAllowed ||
+                (value.AccessCheckGrantedMask & 0x001FFFFF) != 0x001FFFFF || !value.NativeOpenAllowed || !String.IsNullOrEmpty(value.Error))
+                throw new InvalidOperationException(value.Kind + " did not pass the actual own-user/SYSTEM medium security and selected-token access read-back. NativeOpen=" +
+                    value.NativeOpenAllowed + ", Win32=" + value.NativeOpenError + ", integrity=" + value.MandatoryLabelRid + ", detail=" + value.Error);
         }
         private static uint ObserveDesktopIntegrity(IntPtr desktop) {
             IntPtr owner, group, dacl, sacl, descriptor;
@@ -734,15 +744,22 @@ namespace NotchlingDesktopSmoke {
                 block = Marshal.StringToHGlobalUni(environment);
                 const uint flags = 0x00000400 | 0x08000000 | 0x00000004; // Unicode environment, no console, suspended for verification.
                 bool ownRestricted = source.StartsWith("Own restricted CI fixture token", StringComparison.Ordinal);
-                if (forceOwnedFixture) { tokenBefore = DescribeToken(primary, runner.Sid); LastTokenBeforeDiagnostics = tokenBefore; }
-                if (repairOwnedFixtureSecurity) {
-                    if (!forceOwnedFixture || !ownRestricted) throw new InvalidOperationException("Security comparison is allowed only on a newly derived own diagnostic fixture token.");
-                    LastLaunchStage = "Prepare own diagnostic fixture default DACL and explicit medium process/thread descriptor";
-                    comparisonDescriptor = RepairDerivedFixtureDefaultDacl(primary, runner.Sid);
+                // Normal App/UpdateHandoff repairs only this newly derived own
+                // restricted fixture. Forced diagnostic defaults remain original
+                // so the observed regression is still reproduced exactly.
+                bool effectiveRepair = repairOwnedFixtureSecurity || (ownRestricted && !forceOwnedFixture);
+                if (forceOwnedFixture || effectiveRepair) { tokenBefore = DescribeToken(primary, runner.Sid); LastTokenBeforeDiagnostics = tokenBefore; }
+                if (effectiveRepair) {
+                    if (!ownRestricted || primary == IntPtr.Zero) throw new InvalidOperationException("Fixture security normalization is allowed only on a newly derived own restricted token.");
+                    LastLaunchStage = "Prepare own restricted fixture default DACL and explicit medium process/thread descriptor";
+                    comparisonDescriptor = PrepareDerivedFixtureSecurity(primary, runner.Sid);
                     tokenAfter = DescribeToken(primary, runner.Sid);
                     LastTokenAfterDiagnostics = tokenAfter;
                     if (!tokenAfter.DefaultDacl.Present || tokenAfter.DefaultDacl.AceCount != 2 || tokenAfter.DefaultDacl.OwnUserAllowMask == 0 || tokenAfter.DefaultDacl.SystemAllowMask == 0 || tokenAfter.DefaultDacl.AdministratorAllowMask != 0)
                         throw new InvalidOperationException("The actual derived fixture default DACL does not match its explicit own-user/SYSTEM comparison.");
+                    SecurityState normalized = State(primary);
+                    if (!Suitable(normalized, runner) || !normalized.AdministratorDenyOnly)
+                        throw new InvalidOperationException("The own fixture default-DACL normalization changed its required medium/non-elevated/account/session/admin-deny-only guards.");
                     var attributes = new SecurityAttributes { Size = (uint)Marshal.SizeOf(typeof(SecurityAttributes)), Descriptor = comparisonDescriptor, Inherit = 0 };
                     comparisonAttributes = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SecurityAttributes)));
                     Marshal.StructureToPtr(attributes, comparisonAttributes, false);
@@ -783,11 +800,15 @@ namespace NotchlingDesktopSmoke {
                 try { child = State(childToken); } finally { CloseHandle(childToken); }
                 if (!Suitable(child, runner) || source.StartsWith("Own restricted CI fixture token", StringComparison.Ordinal) && !child.AdministratorDenyOnly)
                     throw new InvalidOperationException("The actual suspended child is not the required same-account/session medium, non-elevated process with the selected administrator restriction.");
-                if (forceOwnedFixture) {
+                if (forceOwnedFixture || effectiveRepair) {
                     LastLaunchStage = "Read actual suspended process/thread security and selected-token native access";
                     processSecurity = DescribeKernelObject(process.Process, false, process.ProcessId, primary, runner.Sid);
                     threadSecurity = DescribeKernelObject(process.Thread, true, process.ThreadId, primary, runner.Sid);
                     LastProcessDiagnostics = processSecurity; LastThreadDiagnostics = threadSecurity;
+                    if (effectiveRepair) {
+                        RequireOwnedKernelSecurity(processSecurity);
+                        RequireOwnedKernelSecurity(threadSecurity);
+                    }
                 }
                 job = CreateJobObject(IntPtr.Zero, null);
                 if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "The owned smoke tree job could not be created.");
@@ -796,7 +817,7 @@ namespace NotchlingDesktopSmoke {
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "The suspended owned smoke tree could not be bounded by its job.");
                 var launch = new Launch { Process = process.Process, Thread = process.Thread, Job = job, ProcessId = process.ProcessId,
                     StandardInput = input, StandardOutput = output, StandardError = errorOutput, Runner = runner, Child = child, PrimaryThreadId = process.ThreadId,
-                    TokenSource = source, Desktop = desktop, LaunchApi = api, Recovery = recovery, TokenBeforeSecurityComparison = tokenBefore, TokenAfterSecurityComparison = tokenAfter, ProcessSecurity = processSecurity, ThreadSecurity = threadSecurity, ExplicitOwnedFixtureSecurity = repairOwnedFixtureSecurity };
+                    TokenSource = source, Desktop = desktop, LaunchApi = api, Recovery = recovery, TokenBeforeSecurityComparison = tokenBefore, TokenAfterSecurityComparison = tokenAfter, ProcessSecurity = processSecurity, ThreadSecurity = threadSecurity, ExplicitOwnedFixtureSecurity = effectiveRepair };
                 created = false; job = IntPtr.Zero; input = output = errorOutput = IntPtr.Zero; recovery = null; return launch; // ownership transfers to Launch
             } finally {
                 if (created) { TerminateProcess(process.Process, 1); CloseHandle(process.Thread); CloseHandle(process.Process); }
@@ -975,6 +996,13 @@ namespace NotchlingDesktopSmoke {
     $context.ChildProcessId = $ticket.ProcessId
     $context.LaunchApi = $ticket.LaunchApi
     $context.DesktopRecovery = $ticket.Recovery
+    $context.OwnedFixtureSecurity = [ordered]@{
+        NormalizedNewFixtureOnly = $ticket.ExplicitOwnedFixtureSecurity
+        TokenBefore = $ticket.TokenBeforeSecurityComparison
+        TokenAfter = $ticket.TokenAfterSecurityComparison
+        Process = $ticket.ProcessSecurity
+        Thread = $ticket.ThreadSecurity
+    }
     $context.DiagnosticStage = [NotchlingDesktopSmoke.Native]::LastLaunchStage
     # Publish the observed suspended child before running any PowerShell/runtime
     # stage. A later timeout must not erase the real privilege evidence.
@@ -982,6 +1010,9 @@ namespace NotchlingDesktopSmoke {
     $observed = "Mode=$Mode; runner=$($context.Runner.IntegrityRid)/elevated=$($context.Runner.Elevated); child=$($context.Launched.IntegrityRid)/elevated=$($context.Launched.Elevated); adminDenyOnly=$($context.Launched.AdministratorDenyOnly); hasRestrictions=$($context.Launched.HasRestrictions); session=$($context.Launched.SessionId); desktop=$($context.Desktop); childPid=$($context.ChildProcessId); launch=$($ticket.LaunchApi); source=$($context.TokenSource). App execution is not yet observed."
     $observed = $observed.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
     Write-Output "::notice title=Observed CI desktop child token::$observed"
+    if ($ticket.ExplicitOwnedFixtureSecurity) {
+        Write-Output '::notice title=Verified owned CI fixture security::New restricted fixture default DACL and new process/thread security read back as own-user/SYSTEM; actual medium labels and selected-token native access passed. Parent and existing normal/linked/Explorer tokens and objects are unchanged.'
+    }
     $ticket.Resume()
     $context.ResumePreviousSuspendCount = $ticket.PreviousSuspendCount
     $context.ChildDesktopAfterResume = $ticket.ChildDesktopAfterResume
