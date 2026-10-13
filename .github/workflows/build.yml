@@ -2,6 +2,8 @@ name: Notchling native build and core checks
 
 on:
   push:
+    branches-ignore: [notchling-ci-launch-diagnostics]
+    tags: ['**']
   pull_request:
   workflow_dispatch:
 

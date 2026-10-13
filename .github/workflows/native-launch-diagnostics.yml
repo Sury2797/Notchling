@@ -1,0 +1,43 @@
+name: Native Windows test-host initialization diagnostics
+
+on:
+  push:
+    branches: [notchling-ci-launch-diagnostics]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-launch-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  launch:
+    name: Native initialization (${{ matrix.os }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: windows-2022
+            arch: x64
+          - os: windows-2022
+            arch: x86
+          - os: windows-11-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v6
+      - name: Compare owned native process initialization without building the app
+        shell: pwsh
+        run: ./scripts/invoke-windows-desktop-smoke.ps1 -Mode Diagnostics -AppArchitecture ${{ matrix.arch }} -ReportDirectory artifacts
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: native-launch-${{ matrix.os }}-${{ matrix.arch }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 7
