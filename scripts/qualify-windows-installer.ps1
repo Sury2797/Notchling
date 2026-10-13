@@ -86,6 +86,9 @@ if ($result.ExitCode -ne 0) {
   throw 'Architecture-specific setup failed. See installer-smoke.log.'
 }
 if ($prerequisiteLines.Count -eq 0) { throw 'Successful setup did not produce prerequisite verification evidence.' }
+if (@($prerequisiteLines | Where-Object { $_ -match 'All prerequisites verified for the current user\.' }).Count -eq 0) {
+  throw 'Successful setup did not record verification of every shared prerequisite for the installed user.'
+}
 $downloadedBytes = 0L
 foreach ($line in $prerequisiteLines) {
   if ($line -match '\bDownloaded (\d+) bytes from [a-z0-9.-]+\.') { $downloadedBytes += [long]$Matches[1] }
@@ -102,7 +105,7 @@ foreach ($line in ($prerequisiteLines | Where-Object { $_ -match $recognized } |
 $app = Get-ChildItem (Join-Path $install 'app') -Filter Notchling.Windows.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
 if (-not $app) { throw 'The installer did not create the application.' }
 try {
-  & (Join-Path $PSScriptRoot 'invoke-windows-desktop-smoke.ps1') -AppPath $app -AppArchitecture $AppArchitecture -ReportPath (Join-Path $ReportDirectory 'windows-smoke.json')
+  & (Join-Path $PSScriptRoot 'invoke-windows-desktop-smoke.ps1') -AppPath $app -AppArchitecture $AppArchitecture -ReportPath (Join-Path $ReportDirectory 'windows-smoke.json') -PrerequisitesVerifiedBySetup
 } finally {
   $uninstall = Join-Path $install 'unins000.exe'
   if (Test-Path $uninstall) {

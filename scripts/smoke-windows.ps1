@@ -7,6 +7,7 @@ param(
     [string]$AssetsPath = "src/Notch.Windows/obj/project.assets.json",
     [string]$ReportPath = "artifacts/windows-smoke.json",
     [switch]$InstallRuntimeFromNuGet,
+    [switch]$PrerequisitesVerifiedBySetup,
     [ValidateRange(5, 120)][int]$LaunchTimeoutSeconds = 30,
     [ValidateRange(3, 30)][int]$SampleSeconds = 5
 )
@@ -17,6 +18,9 @@ $child = $null
 $failure = $null
 $report = [ordered]@{
     Succeeded = $false
+    Stage = "Initialize"
+    ActualAppProcessId = $null
+    RuntimePreparationSource = $null
     Scope = "Published application on a disposable Windows CI desktop; not Windows 10 hardware qualification or animation benchmarking."
     OS = [Environment]::OSVersion.VersionString
     AppPath = $AppPath
@@ -50,6 +54,14 @@ $report = [ordered]@{
     Error = $null
 }
 
+function Write-SmokeProgress([string]$Stage) {
+    $report.Stage = $Stage
+    $directory = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ReportPath))
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
+    $path = Join-Path $directory 'windows-smoke-progress.log'
+    [IO.File]::AppendAllText($path, ([DateTime]::UtcNow.ToString('o') + ' ' + $Stage + [Environment]::NewLine))
+}
+
 function Invoke-PublicTestingUiSmoke([int]$AppProcessId, [IntPtr]$AppWindowHandle) {
     $helperScript = Join-Path $PSScriptRoot "smoke-windows-ui.ps1"
     $helperReportPath = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ReportPath))) "windows-ui-smoke.json"
@@ -80,7 +92,10 @@ function Invoke-PublicTestingUiSmoke([int]$AppProcessId, [IntPtr]$AppWindowHandl
             $report.UIInteractions = Get-Content -LiteralPath $helperReportPath -Raw | ConvertFrom-Json
         }
         if ($helper.ExitCode -ne 0 -or -not $report.UIInteractions.Succeeded) {
-            $details = if ($report.UIInteractions.Error) { [string]$report.UIInteractions.Error } else { $standardError.GetAwaiter().GetResult() }
+            $details = if ($report.UIInteractions.Error) { [string]$report.UIInteractions.Error } else {
+                try { $standardError.WaitAsync([TimeSpan]::FromSeconds(5)).GetAwaiter().GetResult() }
+                catch { 'The owned UI helper exited without a report; its error stream did not close within five seconds.' }
+            }
             if ($details.Length -gt 3000) { $details = $details.Substring(0, 3000) }
             throw "Public-testing UI interaction failed (helper exit code $($helper.ExitCode)): $details"
         }
@@ -247,7 +262,20 @@ try {
     if (@(Get-Process -Name "Notchling.Windows", "Notch.Windows" -ErrorAction SilentlyContinue).Count -ne 0) {
         throw "Refusing to run while another app instance exists."
     }
-    Initialize-TestRuntime
+    Write-SmokeProgress 'Validate the owned desktop, workspace and runtime preparation source'
+    if ($PrerequisitesVerifiedBySetup) {
+        if ($InstallRuntimeFromNuGet) { throw 'Installed Setup verification cannot be combined with separate test runtime registration.' }
+        # The actual installer has already verified all registered dependencies
+        # for this same account. Avoid a redundant PowerShell compatibility RPC
+        # in the input fixture; the real app must still bootstrap and run.
+        $report.RuntimePreparationSource = 'Verified installed Setup; actual app launch proves runtime usability'
+        Write-SmokeProgress 'Actual Setup verified prerequisites; proceed to the real application bootstrap'
+    } else {
+        $report.RuntimePreparationSource = 'Pinned test-machine runtime inventory and optional registration'
+        Write-SmokeProgress 'Begin pinned runtime inventory through Windows PowerShell Appx compatibility'
+        Initialize-TestRuntime
+        Write-SmokeProgress 'Pinned runtime inventory completed'
+    }
 
     if (-not ("NotchlingSmoke.Native" -as [type])) {
         Add-Type -TypeDefinition @'
@@ -351,8 +379,11 @@ namespace NotchlingSmoke {
     $startInfo.Environment['DOTNET_ROOT_' + $AppArchitecture.ToUpperInvariant()] = $invalidDotNetRoot
     $startInfo.Environment['DOTNET_ROOT(x86)'] = $invalidDotNetRoot
     $startInfo.Environment['DOTNET_ROOT'] = $invalidDotNetRoot
+    Write-SmokeProgress 'Begin actual application process launch with invalid DOTNET_ROOT sentinel'
     $child = [Diagnostics.Process]::Start($startInfo)
     if (-not $child) { throw "Windows did not create the application process." }
+    $report.ActualAppProcessId = $child.Id
+    Write-SmokeProgress 'Actual application process created; wait for its native window'
     $window = [IntPtr]::Zero
     while ($launchClock.Elapsed.TotalSeconds -lt $LaunchTimeoutSeconds) {
         $child.Refresh()
@@ -372,6 +403,7 @@ namespace NotchlingSmoke {
     if ($report.AppElevated -or $report.AppIntegrityRid -ne 8192) {
         throw "WinUI input qualification requires a normal medium-integrity app; observed integrity RID $($report.AppIntegrityRid), elevated $($report.AppElevated). Use the normal-user desktop smoke wrapper."
     }
+    Write-SmokeProgress 'Actual app window, process architecture and medium-integrity security observed'
     if ($report.ActualProcessArchitecture -ne $AppArchitecture) { throw "Launched app process does not match requested $AppArchitecture architecture." }
     $report.FirstVisibleWindowMilliseconds = [Math]::Round($launchClock.Elapsed.TotalMilliseconds, 1)
     $report.WindowTitle = $title
@@ -405,7 +437,9 @@ namespace NotchlingSmoke {
     $report.AveragePrivateMiB = [Math]::Round(($privateBytes | Measure-Object -Average).Average, 2)
     $report.PeakPrivateMiB = [Math]::Round(($privateBytes | Measure-Object -Maximum).Maximum, 2)
     $report.LastHandleCount = $child.HandleCount
+    Write-SmokeProgress 'Begin actual native UI, typing, all-tools and OLE transfer checks'
     Invoke-PublicTestingUiSmoke $child.Id $window
+    Write-SmokeProgress 'Actual native UI and OLE transfer checks completed'
 
     # Start-menu launches must reopen the existing notch rather than create a
     # second instance or leave a hidden app unreachable. Both processes belong
@@ -432,6 +466,7 @@ namespace NotchlingSmoke {
         $report.ExistingInstanceReopened = $true
     } finally { $reopenChild.Dispose() }
     $report.Succeeded = $true
+    Write-SmokeProgress 'Completed actual application smoke'
 } catch {
     $failure = $_
     $report.Error = $_.Exception.Message

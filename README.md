@@ -37,7 +37,7 @@ The **Pixel Dragon** is Notchling’s app icon. The Windows application uses **C
 
 ## Current status
 
-**v0.3.4 public testing · Windows cloud qualification passed.** The v0.4.17 source unlocks **all 22 catalog panels for everyone**, with no subscription or purchase required. This includes the extended media, focus, notes, clipboard and system controls. External connections still need compatible players, your own provider setup or selected files. Purchasing is paused.
+**v0.3.4 public testing · Windows cloud qualification passed.** The v0.4.18 source unlocks **all 22 catalog panels for everyone**, with no subscription or purchase required. This includes the extended media, focus, notes, clipboard and system controls. External connections still need compatible players, your own provider setup or selected files. Purchasing is paused.
 
 The download buttons install [v0.3.4](https://github.com/Sury2797/Notchling/releases/tag/notchling-evaluation-0.3.4), with all tools unlocked. [The exact release run](https://github.com/Sury2797/Notchling/actions/runs/37944357692) passed **345 regression checks per Windows/Linux host**, native WinUI build and installation, all 21 panels, hover/leave, Settings alignment and drafts, eight connection states, notes/Awake controls, preview, evaluation update guidance, existing-instance reopening and uninstall on two Windows cloud hosts. The published EXE's size, Windows PE header and SHA-256 were independently verified.
 
@@ -54,7 +54,7 @@ The [validation notes](docs/validation-notes.md) record the exact revision, meas
 
 The [release checklist](docs/release-readiness.md) tracks acceptance. Build results establish compilation and packaging; measured responsiveness and native usability need their own evidence.
 
-### In development: v0.4.17 refinement
+### In development: v0.4.18 refinement
 
 The current source adds the following changes. **v0.3.4 remains the qualified download above until the new installers pass their own checks.**
 
@@ -72,9 +72,9 @@ The current source adds the following changes. **v0.3.4 remains the qualified do
 
 A browser's Windows media session often omits its website. Selecting **YouTube** in the Media source menu gives the current track that logo without reading browser history or guessing from its title. The choice clears when the track or native session changes. Album artwork remains in the expanded player.
 
-The preceding v0.4.16 passed **471 regression cases on both hosts**; v0.4.17 requires a fresh native run and update-handoff result. Candidate qualification and the remaining device checks are recorded in [validation](docs/validation-notes.md) and [flaws.md](flaws.md). This source work does not establish native x86/ARM64 release success, consumer Windows 10 compatibility or measured frame pacing.
+The preceding v0.4.17 passed **471 regression cases on both hosts**; v0.4.18 requires a fresh native run and update-handoff result. Candidate qualification and the remaining device checks are recorded in [validation](docs/validation-notes.md) and [flaws.md](flaws.md). This source work does not establish native x86/ARM64 release success, consumer Windows 10 compatibility or measured frame pacing.
 
-Earlier candidates remain unpublished. v0.4.16 passed all four native build/publish and branded Setup/installation checks, then stopped before normal-user app launch because every available hosted runner/Explorer token was elevated. UI and update-handoff checks did not execute. v0.4.17 prepares a measured restricted CI fixture; consumer standard-user and actual Shelf/input evidence remain required. The [validation record](docs/validation-notes.md#resumed-qualification--13-october-2026) preserves exact runs and failures. Downloads change only after the complete matrix and public-asset verification pass.
+Earlier candidates remain unpublished. v0.4.17 passed four build/publish and branded Setup/installation checks, then its owned app-fixture workers timed out. Actual app/UI/drop/upgrade results are not established. v0.4.18 adds bounded stage/token diagnostics and verified Setup-prerequisite reuse while retaining native input and transfer gates. The [validation record](docs/validation-notes.md#resumed-qualification--13-october-2026) preserves exact results. Downloads change only after the complete matrix and public-asset verification pass.
 
 ## The experience
 
@@ -84,11 +84,11 @@ Hover over the notch to open it, choose a tool from the separate dock, and leave
 
 Recent text input, open dialogs, and active control manipulation defer passive navigation and temporary activities. A previously focused editor does not keep an unpinned island open indefinitely. Timers and reminders use a bounded activity queue; notification history keeps recent deliveries within reach.
 
-In the v0.4.17 source, normal footer feedback expires after eight seconds and follows only its originating tool. Unsaved-work guidance stays visible. Update notices go to history and the compact indicator without replacing the panel you are editing.
+In the v0.4.18 source, normal footer feedback expires after eight seconds and follows only its originating tool. Unsaved-work guidance stays visible. Update notices go to history and the compact indicator without replacing the panel you are editing.
 
 ### Guidance where you need it
 
-The v0.4.17 candidate adds a small **?** next to controls that benefit from explanation. Hover shows a short preview; click or keyboard activation opens a local, scrollable explanation. **Esc** closes it. Home and Settings include the same quick guide for opening, pinning, navigation, local tools and optional connections. There is no compulsory onboarding sequence.
+The v0.4.18 candidate adds a small **?** next to controls that benefit from explanation. Hover shows a short preview; click or keyboard activation opens a local, scrollable explanation. **Esc** closes it. Home and Settings include the same quick guide for opening, pinning, navigation, local tools and optional connections. There is no compulsory onboarding sequence.
 
 Shelf also gains explicit capture controls in this candidate. Files and folders remain references unless you select **Save file copies**; bitmap/virtual-file payloads become local captures. Browser images can use **Copy image → Paste image** without downloading their URLs. **Remove** keeps the underlying file. Saved captures have separate 50 MiB per-file and 250 MiB/100-file limits; the [Shelf guide](docs/getting-started.md#keep-files-and-images-on-shelf) explains storage and cleanup. These paths await native qualification.
 
@@ -112,7 +112,7 @@ Panel transitions respect reduced motion and Windows animation preferences. The 
 
 ## What’s inside
 
-The v0.4.17 catalog contains **Home and 21 tools**, plus Settings and an All tools index. Every panel is unlocked in Release and Debug during public testing. The published v0.3.4 installer contains the earlier 21-panel catalog. Provider setup and native capabilities determine which data and controls are available; unlocking a tool does not fabricate a connection.
+The v0.4.18 catalog contains **Home and 21 tools**, plus Settings and an All tools index. Every panel is unlocked in Release and Debug during public testing. The published v0.3.4 installer contains the earlier 21-panel catalog. Provider setup and native capabilities determine which data and controls are available; unlocking a tool does not fabricate a connection.
 
 | Purpose | Tools | Details |
 | --- | --- | --- |
@@ -135,13 +135,13 @@ Local tools work without an application account during public testing. Connected
 | Revenue | Read-only Stripe captured payments after refunds; payment revenue, **not subscription MRR** |
 | Analytics | Authenticated, user-configured HTTPS endpoint with a documented JSON contract |
 | Coding | Selected Claude or Codex JSONL imports; imported usage without automatic scanning or inferred account quotas |
-| AI usage in v0.4.17 | Automatically discovers supported CLI session logs in their local data folders. Actual tokens and recorded Codex rate limits are shown with timestamps; Claude allowance and unsupported providers stay unavailable |
+| AI usage in v0.4.18 | Automatically discovers supported CLI session logs in their local data folders. Actual tokens and recorded Codex rate limits are shown with timestamps; Claude allowance and unsupported providers stay unavailable |
 | Calendar | Local `.ics` import, supported recurrence/time-zone rules, and reminders; account synchronization is future work |
 | Weather | Tool access is unlocked; real forecasts require the owner’s configured licensed proxy and an authenticated service account. That service is not configured yet |
 
 Polar, Dodo, and AdSense reporting are not connected. Built-in analytics OAuth, calendar account sync, and cloud workspace sync are not implemented. See the [provider contracts](src/Notch.Core/Providers/README.md) for schemas, attribution, and setup. Third-party accounts, service charges, and availability are separate from Notchling’s testing access or any future subscription.
 
-The v0.4.17 Media source menu separates provider identity from thumbnails. Known sources use bundled logos; other installed players retain their Windows-supplied icon. Browser choices are explicit, temporary labels, and do not create a new playback connection or change the active Windows media session.
+The v0.4.18 Media source menu separates provider identity from thumbnails. Known sources use bundled logos; other installed players retain their Windows-supplied icon. Browser choices are explicit, temporary labels, and do not create a new playback connection or change the active Windows media session.
 
 ### Real local AI usage
 
@@ -181,7 +181,7 @@ Notchling’s workspace stays on your device. Optional connections make requests
 - **Clipboard:** off by default; when enabled, up to 50 text entries remain in memory and clear on disable or exit.
 - **Imports:** calendar and Coding use files you choose. The separate AI usage tool reads supported CLI data folders only while visible; it keeps usage metadata in memory.
 - **Recovery:** Settings provides export, validated restore, corrupt-file preservation/recovery, and note-deletion undo.
-- **Updates in v0.4.17 source:** review and explicitly accept an update in Settings, then download and restart from the app. Daily checks are off by default; checking never starts installation. Signed builds cannot switch to unsigned evaluation updates.
+- **Updates in v0.4.18 source:** review and explicitly accept an update in Settings, then download and restart from the app. Daily checks are off by default; checking never starts installation. Signed builds cannot switch to unsigned evaluation updates.
 
 The compatible data folder remains **`%LOCALAPPDATA%\Notch`**. The branding update retains that path and existing vault identities, so it does not create an empty workspace or discard saved connections. Export before making a manual backup; quit the app before copying the data folder. Vault credentials are not part of that folder backup.
 
@@ -200,7 +200,7 @@ Workspace limits include a 10 MB serialized file ceiling, bounded text, and up t
 | Windows app-only folder | Advanced evaluation with compatible shared runtimes already installed; keep all files together | `notchling-windows-x64-app-only` in [successful build runs](https://github.com/Sury2797/Notchling/actions/workflows/build.yml) |
 | Windows `.msi` / `.msix` | No package currently produced; use Setup `.exe` | — |
 | Linux `.AppImage` / `.deb` / `.rpm` | Native application planned; no Linux app download yet | [Linux roadmap](docs/product-roadmap.md) |
-| Windows ARM64 / x86 | Native builds configured in v0.4.17 source; public installers await qualification | [Candidate status](#in-development-v0417-refinement) |
+| Windows ARM64 / x86 | Native builds configured in v0.4.18 source; public installers await qualification | [Candidate status](#in-development-v0418-refinement) |
 | macOS `.app` / `.dmg` | No application build configured | — |
 
 The app-only folder is an advanced distribution of the same Windows app, not a self-contained single executable. A Linux core test result does not provide a Linux desktop application.
@@ -215,7 +215,7 @@ Evaluation releases appear in [Releases](https://github.com/Sury2797/Notchling/r
 
 **One installer is the normal download.** Setup installs the app and checks for the shared .NET and Windows App SDK runtimes. If either is missing, Setup downloads its official installer and installs it; an Internet connection is required, and the .NET installer may request administrator approval. Existing compatible runtimes are reused. No SDK, developer tools, or manual DLL copying is required.
 
-The v0.4.17 candidate presents the approved Pixel Dragon on a branded native welcome screen and renders the complete application terms and privacy notice as formatted documents. These are generated from the canonical Markdown during the build; headings, emphasis, Unicode, links and all privacy-table descriptions are retained. Setup explains testing access, shared components and workspace preservation. The installer presentation must pass its own Windows UI check before the candidate becomes the download above.
+The v0.4.18 candidate presents the approved Pixel Dragon on a branded native welcome screen and renders the complete application terms and privacy notice as formatted documents. These are generated from the canonical Markdown during the build; headings, emphasis, Unicode, links and all privacy-table descriptions are retained. Setup explains testing access, shared components and workspace preservation. The installer presentation must pass its own Windows UI check before the candidate becomes the download above.
 
 The verified v0.3.4 setup EXE is **8,923,610 bytes (8.51 MiB)**; its extracted app files total **40,784,258 bytes (38.89 MiB)**. Separate cloud fixtures exercised real missing-runtime installation and signed-resource recovery; the final app Setup reused the verified runtimes. The official Windows App Runtime download remains approximately **106.9 MB**. A machine missing both runtimes needs roughly **147 MB total** for first-install downloads at current versions, including the estimated .NET download. Later installs reuse compatible shared runtimes. See [delivery measurements and limits](docs/release-delivery.md).
 
@@ -231,8 +231,8 @@ The [signed release workflow](https://github.com/Sury2797/Notchling/actions/work
 | --- | --- |
 | Windows 10 22H2 x64, build 19045 | Equal release target; native qualification required |
 | Supported Windows 11 x64 releases | Equal release target; native qualification required |
-| Windows 10 22H2 x86 | v0.4.17 native app/build target; consumer 32-bit OS qualification pending |
-| Windows 10/11 ARM64 | v0.4.17 native app/build target; ARM64 release qualification pending |
+| Windows 10 22H2 x86 | v0.4.18 native app/build target; consumer 32-bit OS qualification pending |
+| Windows 10/11 ARM64 | v0.4.18 native app/build target; ARM64 release qualification pending |
 | Linux | Portable core/checks available; native desktop app planned later |
 | macOS / ARM32 / Windows older than build 19045 | No application release target configured |
 

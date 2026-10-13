@@ -10,7 +10,8 @@ param(
     [string]$AssetsPath = 'src/Notch.Windows/obj/project.assets.json',
     [string]$ReportPath = 'artifacts/windows-smoke.json',
     [string]$ReportDirectory = 'artifacts',
-    [switch]$InstallRuntimeFromNuGet
+    [switch]$InstallRuntimeFromNuGet,
+    [switch]$PrerequisitesVerifiedBySetup
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -37,6 +38,28 @@ $context = [ordered]@{
 }
 $ticket = $null
 $failure = $null
+function Read-OwnedDesktopProgress {
+    $paths = @(
+        (Join-Path ([IO.Path]::GetDirectoryName($reportFile)) 'windows-smoke-progress.log'),
+        (Join-Path ([IO.Path]::GetDirectoryName($reportFile)) 'windows-smoke.json'),
+        (Join-Path ([IO.Path]::GetDirectoryName($reportFile)) 'windows-update-handoff.json'),
+        (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Notchling/Diagnostics/startup.log')
+    )
+    $observations = @()
+    foreach ($path in $paths) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try {
+            $file = Get-Item -LiteralPath $path
+            if ($file.LastWriteTimeUtc -lt $started.AddSeconds(-2)) { continue }
+            if ($file.Length -gt 5MB) { $observations += "$(Split-Path -Leaf $path): exceeds bounded diagnostic size"; continue }
+            $tail = (Get-Content -LiteralPath $path -Tail 10 -ErrorAction Stop) -join ' | '
+            if ($tail.Length -gt 1000) { $tail = $tail.Substring($tail.Length - 1000) }
+            $observations += "$(Split-Path -Leaf $path): $tail"
+        } catch { $observations += "$(Split-Path -Leaf $path): unavailable ($($_.Exception.Message))" }
+    }
+    if ($observations.Count -eq 0) { return 'No owned progress/report/startup breadcrumb was produced.' }
+    return $observations -join '; '
+}
 try {
     Add-Type -TypeDefinition @'
 using System;
@@ -57,7 +80,7 @@ namespace NotchlingDesktopSmoke {
         public string Integrity { get { return IntegrityRid == 8192 ? "Medium" : IntegrityRid >= 16384 ? "System" : IntegrityRid >= 12288 ? "High" : "Other"; } }
     }
     public sealed class Launch : IDisposable {
-        internal IntPtr Process, Thread;
+        internal IntPtr Process, Thread, Job;
         public uint ProcessId;
         internal bool Begun;
         public SecurityState Runner, Child;
@@ -68,7 +91,9 @@ namespace NotchlingDesktopSmoke {
             if (state == 258) {
                 // Only this newly created test child is owned by the wrapper.
                 // Its normal smoke script owns cleanup of its app/helpers.
-                Native.TerminateProcess(Process, 1);
+                // Closing this unnamed job ends only the created child and its
+                // descendants, including any helper stalled before reporting.
+                if (Job != IntPtr.Zero) { Native.CloseHandle(Job); Job = IntPtr.Zero; }
                 throw new TimeoutException("The owned normal-user smoke exceeded its " + (milliseconds / 1000) + "-second watchdog.");
             }
             if (state != 0) throw new Win32Exception(Marshal.GetLastWin32Error(), "Waiting for the owned smoke process failed.");
@@ -77,6 +102,7 @@ namespace NotchlingDesktopSmoke {
         }
         public void Dispose() {
             if (!Begun && Process != IntPtr.Zero) Native.TerminateProcess(Process, 1);
+            if (Job != IntPtr.Zero) { Native.CloseHandle(Job); Job = IntPtr.Zero; }
             if (Thread != IntPtr.Zero) { Native.CloseHandle(Thread); Thread = IntPtr.Zero; }
             if (Process != IntPtr.Zero) { Native.CloseHandle(Process); Process = IntPtr.Zero; }
         }
@@ -91,6 +117,12 @@ namespace NotchlingDesktopSmoke {
         }
         [StructLayout(LayoutKind.Sequential)] private struct ProcessInformation { public IntPtr Process, Thread; public uint ProcessId, ThreadId; }
         [StructLayout(LayoutKind.Sequential)] private struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
+        [StructLayout(LayoutKind.Sequential)] private struct JobBasicLimits {
+            public long ProcessTime, JobTime; public uint Flags; public UIntPtr MinimumWorkingSet, MaximumWorkingSet;
+            public uint ActiveProcesses; public UIntPtr Affinity; public uint Priority, Scheduling;
+        }
+        [StructLayout(LayoutKind.Sequential)] private struct IoCounters { public ulong ReadOperations, WriteOperations, OtherOperations, ReadBytes, WriteBytes, OtherBytes; }
+        [StructLayout(LayoutKind.Sequential)] private struct JobExtendedLimits { public JobBasicLimits Basic; public IoCounters Io; public UIntPtr ProcessMemory, JobMemory, PeakProcessMemory, PeakJobMemory; }
         [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentProcess();
         [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
         [DllImport("kernel32.dll", SetLastError=true)] private static extern IntPtr OpenProcess(uint access, bool inherit, uint process);
@@ -118,6 +150,9 @@ namespace NotchlingDesktopSmoke {
         [DllImport("kernel32.dll", SetLastError=true)] internal static extern bool GetExitCodeProcess(IntPtr process, out uint code);
         [DllImport("kernel32.dll", SetLastError=true)] internal static extern bool TerminateProcess(IntPtr process, uint code);
         [DllImport("kernel32.dll")] internal static extern bool CloseHandle(IntPtr handle);
+        [DllImport("kernel32.dll", EntryPoint="CreateJobObjectW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+        [DllImport("kernel32.dll", SetLastError=true)] private static extern bool SetInformationJobObject(IntPtr job, int kind, ref JobExtendedLimits information, uint length);
+        [DllImport("kernel32.dll", SetLastError=true)] private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
         private static IntPtr Information(IntPtr token, int kind) {
             int size; GetTokenInformation(token, kind, IntPtr.Zero, 0, out size);
             if (size <= 0 || size > 65536) throw new Win32Exception(Marshal.GetLastWin32Error(), "Token information is unavailable or exceeds its bound.");
@@ -264,7 +299,7 @@ namespace NotchlingDesktopSmoke {
             return result.Append('\\', slashes * 2).Append('"').ToString();
         }
         public static Launch Start(string application, string arguments, string directory, string environment) {
-            IntPtr runnerToken = IntPtr.Zero, selected = IntPtr.Zero, primary = IntPtr.Zero, block = IntPtr.Zero;
+            IntPtr runnerToken = IntPtr.Zero, selected = IntPtr.Zero, primary = IntPtr.Zero, block = IntPtr.Zero, job = IntPtr.Zero;
             ProcessInformation process = new ProcessInformation(); bool created = false;
             try {
                 if (!OpenProcessToken(GetCurrentProcess(), QueryDuplicate, out runnerToken)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -291,10 +326,16 @@ namespace NotchlingDesktopSmoke {
                 try { child = State(childToken); } finally { CloseHandle(childToken); }
                 if (!Suitable(child, runner) || source.StartsWith("Own restricted CI fixture token", StringComparison.Ordinal) && !child.AdministratorDenyOnly)
                     throw new InvalidOperationException("The actual suspended child is not the required same-account/session medium, non-elevated process with the selected administrator restriction.");
-                var launch = new Launch { Process = process.Process, Thread = process.Thread, ProcessId = process.ProcessId, Runner = runner, Child = child, TokenSource = source, Desktop = desktop };
-                created = false; return launch; // ownership transfers to Launch
+                job = CreateJobObject(IntPtr.Zero, null);
+                if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "The owned smoke tree job could not be created.");
+                var limits = new JobExtendedLimits { Basic = new JobBasicLimits { Flags = 0x00002000 } }; // KILL_ON_JOB_CLOSE only
+                if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(JobExtendedLimits))) || !AssignProcessToJobObject(job, process.Process))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "The suspended owned smoke tree could not be bounded by its job.");
+                var launch = new Launch { Process = process.Process, Thread = process.Thread, Job = job, ProcessId = process.ProcessId, Runner = runner, Child = child, TokenSource = source, Desktop = desktop };
+                created = false; job = IntPtr.Zero; return launch; // ownership transfers to Launch
             } finally {
                 if (created) { TerminateProcess(process.Process, 1); CloseHandle(process.Thread); CloseHandle(process.Process); }
+                if (job != IntPtr.Zero) CloseHandle(job);
                 if (block != IntPtr.Zero) Marshal.FreeHGlobal(block);
                 if (primary != IntPtr.Zero) CloseHandle(primary); if (selected != IntPtr.Zero) CloseHandle(selected); if (runnerToken != IntPtr.Zero) CloseHandle(runnerToken);
             }
@@ -311,6 +352,7 @@ namespace NotchlingDesktopSmoke {
             '-AppPath', [IO.Path]::GetFullPath($AppPath), '-AppArchitecture', $AppArchitecture,
             '-AssetsPath', [IO.Path]::GetFullPath($AssetsPath), '-ReportPath', $reportFile)
         if ($InstallRuntimeFromNuGet) { $arguments += '-InstallRuntimeFromNuGet' }
+        if ($PrerequisitesVerifiedBySetup) { $arguments += '-PrerequisitesVerifiedBySetup' }
     } else {
         $script = Join-Path $PSScriptRoot 'smoke-windows-update-handoff.ps1'
         $shell = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell/v1.0/powershell.exe'
@@ -331,6 +373,12 @@ namespace NotchlingDesktopSmoke {
     $context.TokenSource = $ticket.TokenSource
     $context.Desktop = $ticket.Desktop
     $context.ChildProcessId = $ticket.ProcessId
+    # Publish the observed suspended child before running any PowerShell/runtime
+    # stage. A later timeout must not erase the real privilege evidence.
+    $context | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $contextFile -Encoding utf8
+    $observed = "Mode=$Mode; runner=$($context.Runner.IntegrityRid)/elevated=$($context.Runner.Elevated); child=$($context.Launched.IntegrityRid)/elevated=$($context.Launched.Elevated); adminDenyOnly=$($context.Launched.AdministratorDenyOnly); hasRestrictions=$($context.Launched.HasRestrictions); session=$($context.Launched.SessionId); desktop=$($context.Desktop); childPid=$($context.ChildProcessId); source=$($context.TokenSource). App execution is not yet observed."
+    $observed = $observed.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+    Write-Output "::notice title=Observed CI desktop child token::$observed"
     $ticket.Resume()
     $watchdog = if ($Mode -eq 'App') { 360000 } else { 540000 }
     $context.ChildExitCode = $ticket.Wait($watchdog)
@@ -364,6 +412,10 @@ namespace NotchlingDesktopSmoke {
 } catch {
     $failure = $_
     $context.Error = $_.Exception.Message
+    if ($ticket) {
+        $context.Error += " Observed childPid=$($ticket.ProcessId); child integrity=$($ticket.Child.IntegrityRid), elevated=$($ticket.Child.Elevated), adminDenyOnly=$($ticket.Child.AdministratorDenyOnly), session=$($ticket.Child.SessionId); token=$($ticket.TokenSource). Owned progress: $(Read-OwnedDesktopProgress)"
+        $failure = [Management.Automation.ErrorRecord]::new([InvalidOperationException]::new($context.Error, $_.Exception), 'OwnedDesktopSmokeFailed', [Management.Automation.ErrorCategory]::OperationStopped, $context.ChildProcessId)
+    }
 } finally {
     if ($ticket) { $ticket.Dispose() }
     $context | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $contextFile -Encoding utf8
