@@ -9,6 +9,7 @@ namespace Notch.Windows;
 public sealed partial class MainWindow
 {
     private bool _shelfDragging;
+    private bool _shelfRevealQueued;
     private int _shelfDiagnosticCount;
     private bool CanSaveShelfDrop => !_quitting && !_closingAttempt && _vm.IsReady && _vm.WorkspaceReadable
         && !_vm.IsDemo && _vm.CanAccessModule(ModuleId.Shelf) && !HasOpenDialog && _utilities?.IsCapturingShelf != true;
@@ -26,12 +27,21 @@ public sealed partial class MainWindow
         _switchDelay.Stop();
         _pendingModule = null;
         args.AcceptedOperation = operation;
+        args.Handled = true;
         args.DragUIOverride.Caption = "Save to Notchling Shelf";
         args.DragUIOverride.IsCaptionVisible = true;
-        // Select once while a native drag crosses the compact target. Keep the
-        // real payload for Drop: DragOver must never read or save its contents.
-        if (_vm.SelectedModule != ModuleId.Shelf || _vm.Overlay.Mode != OverlayMode.Expanded)
-            _vm.SelectModule(ModuleId.Shelf);
+        // Let the original target return its accepted operation before replacing
+        // the compact visual and resizing its native input surface. Payloads are
+        // still read only by Drop, once the user releases the source.
+        if (!_shelfRevealQueued && (_vm.SelectedModule != ModuleId.Shelf || _vm.Overlay.Mode != OverlayMode.Expanded))
+        {
+            _shelfRevealQueued = true;
+            if (!DispatcherQueue.TryEnqueue(() =>
+            {
+                _shelfRevealQueued = false;
+                if (_shelfDragging && CanSaveShelfDrop) _vm.SelectModule(ModuleId.Shelf);
+            })) _shelfRevealQueued = false;
+        }
         TraceShelf("DragOver.Accepted", operation, args.Handled);
     }
 

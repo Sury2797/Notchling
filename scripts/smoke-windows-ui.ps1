@@ -653,7 +653,9 @@ function Reach-SettingsEditorPoint([string]$Name) {
                 $nativeHit = [NotchlingUiSmoke.Native]::TargetAtPoint($x, $y, [IntPtr]::new($WindowHandle), $AppProcessId)
                 $hit = [System.Windows.Automation.AutomationElement]::FromPoint([System.Windows.Point]::new($x, $y))
                 $relatedHit = (Test-OwnedDescendant $hit $editor) -or (Test-OwnedDescendant $editor $hit)
-                if ($nativeHit.Owned -and $relatedHit) {
+                $ownedThroughTransparentSurface = $nativeHit.PassThrough -and $relatedHit -and
+                    [NotchlingUiSmoke.Native]::ForegroundProcessId() -eq $AppProcessId
+                if (($nativeHit.Owned -or $ownedThroughTransparentSurface) -and $relatedHit) {
                     $report.EditorHitTargets += "expectedAppProcess=$AppProcessId; UIA=$($hit.Current.ControlType.ProgrammaticName)/$($hit.Current.ClassName); native=$($nativeHit.Description); point=$x,$y"
                     $report.EditorHitTargets = @($report.EditorHitTargets | Select-Object -Last 4)
                     return [pscustomobject]@{ Element = $editor; X = $x; Y = $y }
@@ -830,8 +832,11 @@ namespace NotchlingUiSmoke {
         [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
         [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
         [DllImport("user32.dll", EntryPoint="GetClassNameW", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder name, int length);
+        [DllImport("user32.dll", EntryPoint="GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
+        [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", SetLastError=true)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wParam, IntPtr lParam, uint flags, uint timeout, out UIntPtr result);
         public sealed class PointTarget {
             public bool Owned;
+            public bool PassThrough;
             public string Description;
         }
         public static PointTarget TargetAtPoint(int x, int y, IntPtr expectedWindow, uint expectedProcess) {
@@ -840,8 +845,19 @@ namespace NotchlingUiSmoke {
             uint process; GetWindowThreadProcessId(window, out process);
             var name = new StringBuilder(128); GetClassName(window, name, name.Capacity);
             bool related = window != IntPtr.Zero && (window == expectedWindow || ancestor == expectedWindow || IsChild(expectedWindow, window));
-            return new PointTarget { Owned = process == expectedProcess && related,
-                Description = "hwnd=" + window.ToInt64() + ", root=" + ancestor.ToInt64() + ", process=" + process + ", class=" + name + ", owned=" + related };
+            int style = GetWindowLong(window, -16), extendedStyle = GetWindowLong(window, -20);
+            UIntPtr hitResult = UIntPtr.Zero;
+            int packedPoint = unchecked((int)(((uint)(ushort)y << 16) | (ushort)x));
+            bool answered = window != IntPtr.Zero && SendMessageTimeout(window, 0x0084, UIntPtr.Zero,
+                new IntPtr(packedPoint), 3, 100, out hitResult) != IntPtr.Zero; // WM_NCHITTEST; BLOCK | ABORTIFHUNG
+            int hit = answered ? unchecked((int)hitResult.ToUInt64()) : Int32.MinValue;
+            // WindowFromPoint can expose a system composition surface which
+            // explicitly returns HTTRANSPARENT. Only that documented native
+            // result may bypass foreign HWND ownership; styles alone cannot.
+            return new PointTarget { Owned = process == expectedProcess && related, PassThrough = answered && hit == -1,
+                Description = "hwnd=" + window.ToInt64() + ", root=" + ancestor.ToInt64() + ", process=" + process + ", class=" + name +
+                    ", style=0x" + unchecked((uint)style).ToString("X8") + ", exStyle=0x" + unchecked((uint)extendedStyle).ToString("X8") +
+                    ", ncHit=" + (answered ? hit.ToString() : "unanswered") + ", owned=" + related };
         }
         public static uint ForegroundProcessId() {
             uint process; GetWindowThreadProcessId(GetForegroundWindow(), out process); return process;
@@ -1046,6 +1062,9 @@ namespace NotchlingUiSmoke {
     }
     $report.ConnectionDraftPreserved = $true
     Set-Toggle "Keep Notchling expanded" $false
+    # Route through the app's actual Settings action so WinUI activates its
+    # input site before an ARM desktop's system composition surface is probed.
+    Invoke-Button "Settings"
     Visit-Panel
     # The toggle can scroll the editor out of view. Reacquire its current visible
     # rectangle, click it like a user and wait for focus before injecting typing.

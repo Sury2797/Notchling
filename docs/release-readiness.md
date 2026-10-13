@@ -4,7 +4,7 @@ This checklist records **v0.3.4 public-testing release** acceptance and the rema
 
 Record the revision, build URL, OS build, GPU, monitor configuration and observed result for each subsequent validation. A Linux host can test portable logic and inspect source; full WinUI builds and native interaction require Windows.
 
-## v0.4.14 candidate acceptance
+## v0.4.15 candidate acceptance
 
 The current source adds vector icons/source logos, responsive reporting layouts, interruptible motion, scoped feedback, real local AI usage, explicit in-app update/restart and native x86/ARM64 delivery paths. **v0.3.4 remains the recommended public download until this candidate passes its own installed-app matrix and each public EXE is verified.** These checks do not inherit a pass from the previous release.
 
@@ -12,8 +12,9 @@ The current source adds vector icons/source logos, responsive reporting layouts,
 - [x] Preceding v0.4.3 source `ed50560` passed **432 local cases** and 432 hosted Linux cases — 141 Core, 76 Commerce, 85 Debug view-model, 35 Release view-model, 74 native/service doubles and 21 Python release cases. Native source/XAML projections compiled with zero warnings/errors. Windows Debug/native qualification did not pass.
 - [x] Preceding [v0.4.8 run](https://github.com/Sury2797/Notchling/actions/runs/38042522459), source `e07beac`, passed both 432-check regression jobs, full branded installer UI at 96 DPI and actual matching-architecture app launch/hover cycles on all four hosts. Settings bounds then failed before catalog/Shelf assertions; this partial result does not qualify a release.
 - [x] Preceding [v0.4.9 run](https://github.com/Sury2797/Notchling/actions/runs/38043358404), source `9265e29`, passed both 432-check regression jobs and all four installer/launch checks. Two hosts passed layouts, drafts, connections, updates, catalog/help and Awake before a Shelf-helper hashing failure; x64 Server pin persistence and ARM64 initial-state checks stopped the other jobs. No native Shelf transfer or complete release pass is claimed.
-- [x] Current v0.4.14 local regressions: **471 passed, zero failed** — 155 Core, 76 Commerce, 95 Debug view-model, 45 Release view-model, 79 native/service doubles (including 36 updater cases), and 21 Python release fixtures. Native source/XAML metadata compiled with zero errors and one offline `NU1801` package-index warning.
-- [ ] The committed v0.4.14 candidate reruns these checks on both hosted regression jobs after geometry/helper/path/translation repairs and new Shelf/help/installer changes.
+- [x] Preceding v0.4.14 local regressions: **471 passed, zero failed** — 155 Core, 76 Commerce, 95 Debug view-model, 45 Release view-model, 79 native/service doubles (including 36 updater cases), and 21 Python release fixtures. Native source/XAML metadata compiled with zero errors and one offline `NU1801` package-index warning.
+- [x] Preceding [v0.4.14 run](https://github.com/Sury2797/Notchling/actions/runs/38395108607), source `0831f5e`, passed both 471-check regression jobs and all four branded Setup/installation/native-launch checks. Three x64/x86 jobs passed real typing, 22 tools, AI refresh and update discovery before an unaccepted Shelf file drop; ARM64 stopped before typing on a native/UIA hit mismatch. The actual upgrade fixture did not execute, and no full release pass is claimed.
+- [ ] The committed v0.4.15 candidate reruns these checks on both hosted regression jobs after geometry/helper/path/translation repairs and new Shelf/help/installer changes.
 - [x] Native source/XAML metadata compiled with zero errors; the package-index lookup reported one offline `NU1801` warning. PowerShell and workflow YAML syntax parsed. These do not execute the Windows installer or WinUI renderer.
 - [ ] Actual x64 installed app and prerequisites pass on both hosted x64 Windows jobs.
 - [ ] Actual x86 app launches with its mixed app/native runtime-package plan on an x64 Windows host; consumer 32-bit Windows 10 remains a separate record.
@@ -34,7 +35,7 @@ All tools remain free for public testing and checkout stays paused throughout th
 
 The failed [v0.4.0 run](https://github.com/Sury2797/Notchling/actions/runs/37979741879) exposed shared WinUI geometry ownership and an x86 Setup compiler failure. [v0.4.1](https://github.com/Sury2797/Notchling/actions/runs/37980974718) then failed Windows PowerShell 5.1 parameter-path binding before prerequisite fixtures. The [v0.4.2 validation run](https://github.com/Sury2797/Notchling/actions/runs/37981575380) passed final Setup on all four Windows hosts but failed installed launch on an invalid native translation-animation target. These attempts remain unpublished, and the Setup pass does not fill an app-qualification checkbox. The [validation record](validation-notes.md#candidate-qualification-sequence--10-october-2026-utc) preserves exact revisions and stages.
 
-The [v0.4.3 run](https://github.com/Sury2797/Notchling/actions/runs/38029187998) passed native builds/publishes and prior prerequisite fixtures, then failed compiler installation before final Setup compilation. Windows regression also needed an operating-system-specific exception correction while preserving strict failure assertions. The [v0.4.4 run](https://github.com/Sury2797/Notchling/actions/runs/38029916759) passed both 432-check regression jobs; all four native jobs then rejected a no-argument compiler banner after hash/trusted-signature verification. The verified disposable compiler probe and repaired installer helpers later passed in v0.4.8, along with the initial installed-app assertions above. v0.4.14 requires a fresh complete run, including the remaining catalog, help, Shelf, reopening and uninstall gates.
+The [v0.4.3 run](https://github.com/Sury2797/Notchling/actions/runs/38029187998) passed native builds/publishes and prior prerequisite fixtures, then failed compiler installation before final Setup compilation. Windows regression also needed an operating-system-specific exception correction while preserving strict failure assertions. The [v0.4.4 run](https://github.com/Sury2797/Notchling/actions/runs/38029916759) passed both 432-check regression jobs; all four native jobs then rejected a no-argument compiler banner after hash/trusted-signature verification. The verified disposable compiler probe and repaired installer helpers later passed in v0.4.8, along with the initial installed-app assertions above. v0.4.15 requires a fresh complete run, including the remaining catalog, help, Shelf, reopening and uninstall gates.
 
 ## Build and deployment
 
@@ -72,7 +73,7 @@ The [v0.4.3 run](https://github.com/Sury2797/Notchling/actions/runs/38029187998)
 ## Modules and real services
 
 - [x] Hosted v0.3.4 qualification navigates all 21 unlocked panels, verifies eight unconfigured connection states, and exercises the selected local controls and disposable-data workflows without inventing provider data.
-- [ ] v0.4.14 Home and each of the 21 tool panels have a useful connected/local state and a correct empty or unavailable state.
+- [ ] v0.4.15 Home and each of the 21 tool panels have a useful connected/local state and a correct empty or unavailable state.
 - [ ] No configured accounts, disabled demo mode and no Internet produce truthful empty/error states.
 - [ ] Explicit demo mode labels illustrative figures and never implies a connection.
 - [ ] Media controls work with at least a browser player and one desktop player; unsupported seeking disables the control.

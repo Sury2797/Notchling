@@ -60,7 +60,7 @@ public sealed partial class MainWindow : Window
             if (!_quitting) _vm.CancelPendingUpdateInstallation();
         });
         RootGrid.AllowDrop = true;
-        RootGrid.DragOver += OnShelfDragOver;
+        RootGrid.AddHandler(UIElement.DragOverEvent, new DragEventHandler(OnShelfDragOver), true);
         RootGrid.DragLeave += OnShelfDragLeave;
         RootGrid.AddHandler(UIElement.DropEvent, new DragEventHandler(OnShelfDrop), true);
         Title = ProductIdentity.WindowTitle;

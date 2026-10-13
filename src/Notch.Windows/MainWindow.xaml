@@ -10,9 +10,9 @@
       <RowDefinition x:Name="ToolbarRow" Height="0" />
       <RowDefinition x:Name="TailRow" Height="0" />
     </Grid.RowDefinitions>
-    <Border x:Name="PanelSurface" HorizontalAlignment="Center" CornerRadius="0,0,26,26" Background="{ThemeResource NotchBackgroundBrush}">
+    <Border x:Name="PanelSurface" AllowDrop="True" HorizontalAlignment="Center" CornerRadius="0,0,26,26" Background="{ThemeResource NotchBackgroundBrush}">
       <Grid>
-        <Button x:Name="CompactButton" Style="{StaticResource NotchCompactButtonStyle}" Background="Transparent" BorderThickness="0" Padding="15,0"
+        <Button x:Name="CompactButton" AllowDrop="True" Style="{StaticResource NotchCompactButtonStyle}" Background="Transparent" BorderThickness="0" Padding="15,0"
           HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Click="OnOpenClick" UseSystemFocusVisuals="True" AutomationProperties.Name="Open Notchling">
           <Grid ColumnSpacing="10">
             <Grid.ColumnDefinitions><ColumnDefinition Width="22" /><ColumnDefinition Width="*" /><ColumnDefinition Width="28" /></Grid.ColumnDefinitions>
@@ -29,7 +29,7 @@
         </Button>
         <Grid x:Name="ExpandedContent" Visibility="Collapsed">
           <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-          <ContentControl x:Name="ToolContent" IsEnabled="False" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+          <ContentControl x:Name="ToolContent" AllowDrop="True" IsEnabled="False" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
           <Grid x:Name="DemoStrip" Grid.Row="1" Visibility="Collapsed" Margin="20,0,20,8" ColumnSpacing="10">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
             <TextBlock Text="Preview · sample data" Foreground="{ThemeResource NotchWarmBrush}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />

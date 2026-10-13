@@ -29,6 +29,7 @@ $report = [ordered]@{
     BitmapDrag = $null
     SourceFile = $null
     SavedBitmap = $null
+    AppShelfTrace = $null
     Actions = @()
     ElapsedSeconds = $null
     Error = $null
@@ -56,6 +57,18 @@ function Read-OwnedAtomicText([string]$Path) {
     } finally {
         if ($reader) { $reader.Dispose() } else { $stream.Dispose() }
     }
+}
+
+function Read-ShelfTrace {
+    $path = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "Notchling/Diagnostics/startup.log"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return "No app startup trace exists." }
+    try {
+        $text = Read-OwnedAtomicText $path
+        $entries = [regex]::Matches($text, '(?ms)^\[[^\r\n]+\] MainWindow\.Shelf\.[^\r\n]+\r?\n.*?(?=^\[|\z)')
+        $tail = (@($entries | Select-Object -Last 4 | ForEach-Object { $_.Value.Trim() }) -join ' | ')
+        if (-not $tail) { return "No MainWindow.Shelf handoff was observed in the bounded app trace." }
+        return $tail.Substring([Math]::Max(0, $tail.Length - 900))
+    } catch { return "App Shelf trace could not be observed: $($_.Exception.Message)" }
 }
 
 function Assert-Budget {
@@ -201,7 +214,13 @@ try {
     $process = Get-Process -Id $AppProcessId -ErrorAction Stop
     if ([IO.Path]::GetFileName($process.Path) -ne "Notchling.Windows.exe") { throw "The supplied process is not the expected app." }
     Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase, System.Drawing, System.Windows.Forms
-    Add-Type -ReferencedAssemblies System.dll, System.Core.dll, System.Drawing.dll, System.Windows.Forms.dll -TypeDefinition @'
+    # Framework UIA/WPF assemblies can live in a WPF subdirectory rather than
+    # csc's default search path. Reference the actual already loaded assemblies.
+    $oleReferences = @("System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.Forms.dll",
+        [System.Windows.Automation.AutomationElement].Assembly.Location,
+        [System.Windows.Automation.ControlType].Assembly.Location,
+        [System.Windows.Rect].Assembly.Location)
+    Add-Type -ReferencedAssemblies $oleReferences -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -209,6 +228,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Text;
 using System.Threading;
+using System.Windows.Automation;
 
 namespace NotchlingShelfOle {
     public sealed class DragDiagnostics {
@@ -226,10 +246,20 @@ namespace NotchlingShelfOle {
             }
         }
         public string Summary() {
+            string[] recorded = Events;
+            var selected = new List<string>();
+            if (recorded.Length <= 12) selected.AddRange(recorded);
+            else {
+                for (int i = 0; i < 6; i++) selected.Add(recorded[i]);
+                selected.Add("[middle events omitted; full bounded events remain in JSON]");
+                for (int i = recorded.Length - 6; i < recorded.Length; i++) selected.Add(recorded[i]);
+            }
+            string detail = String.Join(" | ", selected.ToArray());
+            if (detail.Length > 1100) detail = detail.Substring(0, 550) + " [truncated] " + detail.Substring(detail.Length - 550);
             return "phase=" + Phase + "; queries=" + QueryContinueCalls + "; keys=0x" + LastKeys.ToString("X") +
                 "; sourceRelease=" + SourceSawRelease + "; physicalDown=" + ButtonDownVerified + "; physicalUp=" + ButtonUpVerified + "; sourceMouseDown=" + SourceWindowMouseDown + "; sourceHwnd=" + SourceWindowHandle +
                 "; getData=" + GetDataCalls + "; dragReturned=" + DragReturned + "; pumpCompleted=" + TransferPumpCompleted +
-                "; events=[" + String.Join(" | ", Events) + "]";
+                "; events=[" + detail + "]";
         }
     }
     [ComImport, Guid("00000121-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -381,16 +411,45 @@ namespace NotchlingShelfOle {
             byte[] dib = Dib();
             using (var stream = File.Create(path)) using (var writer = new BinaryWriter(stream)) { writer.Write((short)0x4d42); writer.Write(dib.Length + 14); writer.Write(0); writer.Write(54); writer.Write(dib); }
         }
-        public static DragResult DropFile(string path, int originX, int originY, int targetX, int targetY) {
+        public static DragResult DropFile(string path, int originX, int originY, int targetX, int targetY, long targetWindow, int targetProcess) {
             byte[] names = Encoding.Unicode.GetBytes(Path.GetFullPath(path) + "\0\0");
             byte[] bytes = new byte[20 + names.Length];
             Buffer.BlockCopy(BitConverter.GetBytes(20), 0, bytes, 0, 4);
             Buffer.BlockCopy(BitConverter.GetBytes(1), 0, bytes, 16, 4); // DROPFILES.fWide
             Buffer.BlockCopy(names, 0, bytes, 20, names.Length);
-            return Perform(FileDropFormat, bytes, originX, originY, targetX, targetY);
+            return Perform(FileDropFormat, bytes, originX, originY, targetX, targetY, new IntPtr(targetWindow), targetProcess);
         }
-        public static DragResult DropBitmap(int originX, int originY, int targetX, int targetY) { return Perform(BitmapFormat, Dib(), originX, originY, targetX, targetY); }
-        private static DragResult Perform(short format, byte[] bytes, int originX, int originY, int targetX, int targetY) {
+        public static DragResult DropBitmap(int originX, int originY, int targetX, int targetY, long targetWindow, int targetProcess) { return Perform(BitmapFormat, Dib(), originX, originY, targetX, targetY, new IntPtr(targetWindow), targetProcess); }
+        private static Point ReachActualShelfTarget(IntPtr window, int expectedProcess, DragDiagnostics diagnostics) {
+            var root = AutomationElement.FromHandle(window);
+            if (root == null || root.Current.ProcessId != expectedProcess) throw new InvalidOperationException("The drag target HWND no longer belongs to Notchling.");
+            var id = new PropertyCondition(AutomationElement.AutomationIdProperty, "ShelfDropTarget");
+            var label = new AndCondition(new PropertyCondition(AutomationElement.NameProperty, "Drop files, folders or images"),
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text));
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(1500);
+            do {
+                var target = root.FindFirst(TreeScope.Descendants, id) ?? root.FindFirst(TreeScope.Descendants, label);
+                if (target != null) {
+                    var info = target.Current;
+                    var raw = target.GetCurrentPropertyValue(AutomationElement.BoundingRectangleProperty, true);
+                    if (!info.IsOffscreen && info.ProcessId == expectedProcess && raw is System.Windows.Rect) {
+                        var bounds = (System.Windows.Rect)raw;
+                        if (!bounds.IsEmpty && bounds.Width >= 4 && bounds.Height >= 4 &&
+                            !Double.IsNaN(bounds.X) && !Double.IsNaN(bounds.Y) && !Double.IsInfinity(bounds.Right) && !Double.IsInfinity(bounds.Bottom)) {
+                            Rect native = WindowBounds(window);
+                            bounds.Intersect(new System.Windows.Rect(native.Left, native.Top, native.Right - native.Left, native.Bottom - native.Top));
+                            if (!bounds.IsEmpty && bounds.Width >= 4 && bounds.Height >= 4) {
+                                diagnostics.Record("Observed real Shelf target after compact drag; id=" + info.AutomationId + " bounds=" + bounds);
+                                return new Point { X = (int)Math.Floor(bounds.Left + bounds.Width / 2), Y = (int)Math.Floor(bounds.Top + bounds.Height / 2) };
+                            }
+                        }
+                    }
+                }
+                Thread.Sleep(50);
+            } while (DateTime.UtcNow < deadline);
+            throw new InvalidOperationException("The real compact drag did not reveal an owned visible Shelf target before physical release. " + diagnostics.Summary());
+        }
+        private static DragResult Perform(short format, byte[] bytes, int originX, int originY, int targetX, int targetY, IntPtr targetWindow, int targetProcess) {
             DropData data = null; DropSource source = null;
             System.Windows.Forms.Form sourceWindow = null;
             var ready = new ManualResetEvent(false); var started = new ManualResetEvent(false); var finished = new ManualResetEvent(false);
@@ -469,9 +528,19 @@ namespace NotchlingShelfOle {
                 if (!started.WaitOne(1000)) throw new TimeoutException("The owned source HWND did not receive MouseDown. " + diagnostics.Summary());
                 Thread.Sleep(100);
                 MoveCursor(targetX, targetY);
-                // Genuine DragEnter/DragOver reaches the compact island and has
-                // enough time to reveal its final Shelf target before release.
-                Thread.Sleep(1000);
+                // The native resize can replace the compact drop peer. Keep the
+                // actual button pressed, observe the newly opened Shelf through
+                // read-only UIA, then move physically onto its current target.
+                Thread.Sleep(350);
+                Point shelf = ReachActualShelfTarget(targetWindow, targetProcess, diagnostics);
+                WaitLeftButton(true);
+                MoveCursor(shelf.X, shelf.Y);
+                Thread.Sleep(100);
+                MoveCursor(shelf.X + 1, shelf.Y);
+                Thread.Sleep(100);
+                MoveCursor(shelf.X, shelf.Y);
+                diagnostics.Record("Moved real held drag onto current Shelf target");
+                Thread.Sleep(350);
                 LeftButton(false); WaitLeftButton(false);
                 diagnostics.ButtonUpVerified = true; diagnostics.Record("Injected real left release verified");
                 if (!finished.WaitOne(5000)) throw new TimeoutException("OLE did not finish the owned drop within its bounded watchdog. " + diagnostics.Summary());
@@ -510,9 +579,9 @@ namespace NotchlingShelfOle {
     $report.Stage = "Real CF_HDROP file from compact island"
     $compact = Reach-Compact
     $fileDrag = [NotchlingShelfOle.Native]::DropFile($sourceFile, $outsideX, $outsideY,
-        [int]($compact.Left + $compact.Width / 2), [int]($compact.Top + $compact.Height / 2))
+        [int]($compact.Left + $compact.Width / 2), [int]($compact.Top + $compact.Height / 2), $WindowHandle, $AppProcessId)
     $report.FileDrag = $fileDrag
-    if ($fileDrag.HResult -ne 0x00040100 -or $fileDrag.Effect -ne 1) { throw "Windows rejected the real file Copy drop (HRESULT $($fileDrag.HResult), effect $($fileDrag.Effect))." }
+    if ($fileDrag.HResult -ne 0x00040100 -or $fileDrag.Effect -ne 1) { throw "Windows rejected the real file Copy drop (HRESULT $($fileDrag.HResult), effect $($fileDrag.Effect)). $($fileDrag.Diagnostics.Summary())" }
     if ($fileDrag.RequestedFormats -notcontains [NotchlingShelfOle.Native]::FileDropFormat) { throw "The drop target did not retrieve the offered native CF_HDROP data." }
     $report.FileDropCopy = $true; $report.FileFormatRetrieved = $true
     # Border is a visual drop surface rather than an interactive automation
@@ -528,9 +597,9 @@ namespace NotchlingShelfOle {
     $beforeBitmap = @(@(Read-Shelf) | ForEach-Object { [string]$_.Path })
     $compact = Reach-Compact
     $bitmapDrag = [NotchlingShelfOle.Native]::DropBitmap($outsideX, $outsideY,
-        [int]($compact.Left + $compact.Width / 2), [int]($compact.Top + $compact.Height / 2))
+        [int]($compact.Left + $compact.Width / 2), [int]($compact.Top + $compact.Height / 2), $WindowHandle, $AppProcessId)
     $report.BitmapDrag = $bitmapDrag
-    if ($bitmapDrag.HResult -ne 0x00040100 -or $bitmapDrag.Effect -ne 1) { throw "Windows rejected the real bitmap Copy drop (HRESULT $($bitmapDrag.HResult), effect $($bitmapDrag.Effect))." }
+    if ($bitmapDrag.HResult -ne 0x00040100 -or $bitmapDrag.Effect -ne 1) { throw "Windows rejected the real bitmap Copy drop (HRESULT $($bitmapDrag.HResult), effect $($bitmapDrag.Effect)). $($bitmapDrag.Diagnostics.Summary())" }
     if ($bitmapDrag.RequestedFormats -notcontains [NotchlingShelfOle.Native]::BitmapFormat) { throw "The drop target did not retrieve the offered native CF_DIB bytes." }
     $report.BitmapDropCopy = $true; $report.BitmapFormatRetrieved = $true
     # Border is a visual drop surface rather than an interactive automation
@@ -584,7 +653,8 @@ namespace NotchlingShelfOle {
         if ($report.Stage -eq "Real CF_HDROP file from compact island") { $report.FileDrag = [NotchlingShelfOle.Native]::LastDragResult }
         elseif ($report.Stage -eq "Real CF_DIB bitmap from compact island") { $report.BitmapDrag = [NotchlingShelfOle.Native]::LastDragResult }
     }
-    $report.Error = "Stage [$($report.Stage)]: $($_.Exception.Message). Script stack: $($_.ScriptStackTrace)"
+    $report.AppShelfTrace = Read-ShelfTrace
+    $report.Error = "Stage [$($report.Stage)]: $($_.Exception.Message). App Shelf trace: $($report.AppShelfTrace). Script stack: $($_.ScriptStackTrace)"
 } finally {
     if (Get-Variable -Name restoreCursor -ErrorAction SilentlyContinue) {
         if ($restoreCursor) { [NotchlingShelfOle.Native]::SetCursorPos($originalCursor.X, $originalCursor.Y) | Out-Null }
